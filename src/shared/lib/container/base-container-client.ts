@@ -1466,6 +1466,7 @@ export abstract class BaseContainerClient extends EventEmitter implements Contai
           effort: options.effort,
           speed: options.speed,
           ...(options.preloadToolsets?.length ? { preloadToolsets: options.preloadToolsets } : {}),
+          ...(options.fileRequests === false ? { fileRequests: false } : {}),
           capabilityPolicies,
           globalInstructions,
           prewarmDefaults: options.prewarmDefaults && warmRuntime ? {
