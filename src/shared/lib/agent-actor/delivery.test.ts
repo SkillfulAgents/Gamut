@@ -48,6 +48,8 @@ const denyAllForAgent = vi.fn()
 const service = { ...sessionService }
 
 const sessions = () => live.sessions(SLUG)
+/** A person in the app; what each send says about its sender is not under test here. */
+const FROM_APP = { sender: { type: 'human' as const } }
 const store = () => live.store(SLUG)
 const delivery = () =>
   createSessionDelivery(SLUG, store(), sessions(), () => runtime as never, {
@@ -81,11 +83,12 @@ describe('deliver', () => {
       return {}
     })
 
-    expect(await delivery().deliver({ sessionId: SESSION, content: 'hi', uuid: 'm1', echo: { content: 'hi' } }))
+    expect(await delivery().deliver({ context: FROM_APP, sessionId: SESSION, content: 'hi', uuid: 'm1', echo: { content: 'hi' } }))
       .toEqual({ status: 'sent', queued: false })
     expect(runtime.ensureRunning).toHaveBeenCalledOnce()
     expect(sessions().isSubscribed(SESSION)).toBe(true)
     expect(send()).toHaveBeenCalledExactlyOnceWith(SESSION, 'hi', 'm1', {
+      messageContext: { ...FROM_APP, session_trigger: 'user' },
       sessionMetadata: expect.objectContaining({ model: 'model-a', name: 'Session' }),
       metadataUpdates: {},
     })
@@ -98,7 +101,7 @@ describe('deliver', () => {
       return {}
     })
 
-    expect(await delivery().deliver({ sessionId: SESSION, content: 'hi', uuid: 'm1' }))
+    expect(await delivery().deliver({ context: FROM_APP, sessionId: SESSION, content: 'hi', uuid: 'm1' }))
       .toEqual({ status: 'sent', queued: false, provider: 'platform' })
   })
 
@@ -107,7 +110,7 @@ describe('deliver', () => {
     sessions().markActive(SESSION)
     const events = live.collect(SLUG, SESSION).events
 
-    expect(await delivery().deliver({
+    expect(await delivery().deliver({ context: FROM_APP,
       sessionId: SESSION,
       content: 'and then',
       uuid: 'm2',
@@ -125,12 +128,12 @@ describe('deliver', () => {
   it('appends to the transcript without a turn: nothing is cancelled or marked', async () => {
     const cancel = vi.spyOn(sessions(), 'cancelAwaitingInput')
 
-    expect(await delivery().deliver({
+    expect(await delivery().deliver({ context: FROM_APP,
       sessionId: SESSION, content: '[SYSTEM] note', uuid: 'm3', options: { shouldQuery: false, model: 'model-b' }, cancelAwaiting: true,
     })).toEqual({ status: 'sent', queued: false })
     expect(sessions().isActive(SESSION)).toBe(false)
     expect(cancel).not.toHaveBeenCalled()
-    expect(send()).toHaveBeenCalledExactlyOnceWith(SESSION, '[SYSTEM] note', 'm3', { shouldQuery: false, preserveRuntime: true })
+    expect(send()).toHaveBeenCalledExactlyOnceWith(SESSION, '[SYSTEM] note', 'm3', { shouldQuery: false, preserveRuntime: true, messageContext: { ...FROM_APP, session_trigger: 'user' } })
     expect(recordSessionActivity).toHaveBeenCalledWith(store(), SESSION)
   })
 
@@ -141,7 +144,7 @@ describe('deliver', () => {
       sessions().markInterrupted(SESSION)
     })
 
-    expect(await delivery().deliver({ sessionId: SESSION, content: 'new question', cancelAwaiting: true }))
+    expect(await delivery().deliver({ context: FROM_APP, sessionId: SESSION, content: 'new question', cancelAwaiting: true }))
       .toEqual({ status: 'sent', queued: false })
     expect(cancel).toHaveBeenCalledOnce()
   })
@@ -152,12 +155,12 @@ describe('deliver', () => {
     sessions().claimMidTurnForRecovery()
     const events = live.collect(SLUG, SESSION).events
 
-    expect(await delivery().deliver({ sessionId: SESSION, content: 'still there?', uuid: 'm4', coalesce: true, echo: { content: 'still there?' } }))
+    expect(await delivery().deliver({ context: FROM_APP, sessionId: SESSION, content: 'still there?', uuid: 'm4', coalesce: true, echo: { content: 'still there?' } }))
       .toEqual({ status: 'coalesced' })
     expect(send()).not.toHaveBeenCalled()
     expect(runtime.ensureRunning).not.toHaveBeenCalled()
     expect(events.find((event) => event.type === 'user_message')).toMatchObject({ uuid: 'm4', queued: true })
-    expect(sessions().takeCoalesced(SESSION)).toEqual([{ uuid: 'm4', text: 'still there?' }])
+    expect(sessions().takeCoalesced(SESSION)).toEqual([{ uuid: 'm4', text: 'still there?', messageContext: { ...FROM_APP, session_trigger: 'user' } }])
   })
 
   it('holds a recovering session\'s message only once it passed the provider check', async () => {
@@ -166,7 +169,7 @@ describe('deliver', () => {
     sessions().claimMidTurnForRecovery()
 
     const error = await delivery()
-      .deliver({ sessionId: SESSION, content: 'x', uuid: 'm5', coalesce: true, options: { llmProviderId: 'conn-b' }, requireStoredProvider: true })
+      .deliver({ context: FROM_APP, sessionId: SESSION, content: 'x', uuid: 'm5', coalesce: true, options: { llmProviderId: 'conn-b' }, requireStoredProvider: true })
       .catch((caught: unknown) => caught)
     expect(deliveryFailure(error)).toEqual({ code: 'provider-not-attached', accepted: false })
     expect(sessions().takeCoalesced(SESSION)).toEqual([])
@@ -185,9 +188,9 @@ describe('deliver', () => {
       return sessionService.getSessionMetadata(...args)
     })
 
-    const first = delivery().deliver({ sessionId: SESSION, content: 'one', uuid: 'a', coalesce: true })
+    const first = delivery().deliver({ context: FROM_APP, sessionId: SESSION, content: 'one', uuid: 'a', coalesce: true })
     await vi.waitFor(() => expect(read).toHaveBeenCalled())
-    const second = delivery().deliver({ sessionId: SESSION, content: 'two', uuid: 'b', coalesce: true })
+    const second = delivery().deliver({ context: FROM_APP, sessionId: SESSION, content: 'two', uuid: 'b', coalesce: true })
     release()
     await Promise.all([first, second])
 
@@ -211,7 +214,7 @@ describe('deliver', () => {
       await gate
       return sessionService.getSessionMetadata(...args)
     })
-    const delivering = delivery().deliver({ sessionId: SESSION, content: 'hi' })
+    const delivering = delivery().deliver({ context: FROM_APP, sessionId: SESSION, content: 'hi' })
     await vi.waitFor(() => expect(read).toHaveBeenCalled())
     // ... when another caller starts an attach (a socket's reattach, an integration's replay).
     const attaching = delivery().attach(SESSION)
@@ -227,26 +230,26 @@ describe('deliver', () => {
 
   it('refuses another member\'s connection once the session no longer holds it', async () => {
     const error = await delivery()
-      .deliver({ sessionId: SESSION, content: 'hi', options: { llmProviderId: 'conn-b' }, requireStoredProvider: true })
+      .deliver({ context: FROM_APP, sessionId: SESSION, content: 'hi', options: { llmProviderId: 'conn-b' }, requireStoredProvider: true })
       .catch((caught: unknown) => caught)
     expect(deliveryFailure(error)).toEqual({ code: 'provider-not-attached', accepted: false })
     expect(send()).not.toHaveBeenCalled()
     expect(sessions().isActive(SESSION)).toBe(false)
 
-    await delivery().deliver({ sessionId: SESSION, content: 'hi', options: { llmProviderId: 'conn-a' }, requireStoredProvider: true })
+    await delivery().deliver({ context: FROM_APP, sessionId: SESSION, content: 'hi', options: { llmProviderId: 'conn-a' }, requireStoredProvider: true })
     expect(send()).toHaveBeenCalledOnce()
   })
 
   it('appends to the transcript whatever connection the caller names: an append uses none', async () => {
-    await delivery().deliver({ sessionId: SESSION, content: 'note', options: { llmProviderId: 'conn-b', shouldQuery: false }, requireStoredProvider: true })
+    await delivery().deliver({ context: FROM_APP, sessionId: SESSION, content: 'note', options: { llmProviderId: 'conn-b', shouldQuery: false }, requireStoredProvider: true })
 
-    expect(send()).toHaveBeenCalledExactlyOnceWith(SESSION, 'note', undefined, { shouldQuery: false, preserveRuntime: true })
+    expect(send()).toHaveBeenCalledExactlyOnceWith(SESSION, 'note', undefined, { shouldQuery: false, preserveRuntime: true, messageContext: { ...FROM_APP, session_trigger: 'user' } })
   })
 
   it('rolls back its own mark when the container refuses the message, with the container\'s status', async () => {
     send().mockRejectedValueOnce(Object.assign(new MessageNotAcceptedError('rejected', 'Session is busy'), { status: 409 }))
 
-    const error = await delivery().deliver({ sessionId: SESSION, content: 'hi' }).catch((caught: unknown) => caught)
+    const error = await delivery().deliver({ context: FROM_APP, sessionId: SESSION, content: 'hi' }).catch((caught: unknown) => caught)
     expect(deliveryFailure(error)).toEqual({ code: 'rejected', accepted: false, status: 409 })
     expect(sessions().isActive(SESSION)).toBe(false)
   })
@@ -261,7 +264,7 @@ describe('deliver', () => {
     if (session instanceof Error) vi.mocked(client.getSession).mockRejectedValueOnce(session)
     else vi.mocked(client.getSession).mockResolvedValueOnce(session as never)
 
-    const error = await delivery().deliver({ sessionId: SESSION, content: 'hi' }).catch((caught: unknown) => caught)
+    const error = await delivery().deliver({ context: FROM_APP, sessionId: SESSION, content: 'hi' }).catch((caught: unknown) => caught)
     expect(deliveryFailure(error)).toEqual({ code: 'unknown', accepted: 'unknown' })
     expect((error as Error).message).toBe('socket hang up')
     expect(sessions().isActive(SESSION)).toBe(active)
@@ -270,7 +273,7 @@ describe('deliver', () => {
   it('reports an unreachable container as not sent, and marks nothing', async () => {
     runtime.ensureRunning.mockRejectedValueOnce(new Error('Docker is not running'))
 
-    const error = await delivery().deliver({ sessionId: SESSION, content: 'hi' }).catch((caught: unknown) => caught)
+    const error = await delivery().deliver({ context: FROM_APP, sessionId: SESSION, content: 'hi' }).catch((caught: unknown) => caught)
     expect(deliveryFailure(error)).toEqual({ code: 'unavailable', accepted: false })
     expect(sessions().isActive(SESSION)).toBe(false)
   })
@@ -280,7 +283,7 @@ describe('deliver', () => {
     const events = live.collect(SLUG, SESSION).events
     const write = vi.spyOn(service, 'updateSessionMetadata')
 
-    await delivery().deliver({ sessionId: SESSION, content: 'hi', options: { model: 'model-b', effort: 'high' }, metadataUpdates: { alertDeviceId: null } })
+    await delivery().deliver({ context: FROM_APP, sessionId: SESSION, content: 'hi', options: { model: 'model-b', effort: 'high' }, metadataUpdates: { alertDeviceId: null } })
     expect(write).toHaveBeenCalledOnce()
     expect(await metadata()).toMatchObject({ model: 'model-b', llmProviderId: 'conn-a', effort: 'high', alertDeviceId: null })
     expect(events).toContainEqual({ type: 'session_updated' })
@@ -291,7 +294,7 @@ describe('deliver', () => {
     send().mockResolvedValueOnce({ selection: { model: 'model-a', llmProviderId: 'conn-a' }, llmDefault: true })
     const write = vi.spyOn(service, 'updateSessionMetadata')
 
-    await delivery().deliver({ sessionId: SESSION, content: 'hi', options: { model: 'model-a', llmProviderId: 'conn-a' } })
+    await delivery().deliver({ context: FROM_APP, sessionId: SESSION, content: 'hi', options: { model: 'model-a', llmProviderId: 'conn-a' } })
     expect(write).not.toHaveBeenCalled()
     expect(live.host.sent('global').filter((event) => event.type === 'session_updated')).toEqual([])
   })
@@ -300,7 +303,7 @@ describe('deliver', () => {
     // The send prepared under an app default and resolved model-b.
     send().mockResolvedValueOnce({ selection: { model: 'model-b', llmProviderId: 'conn-a' }, llmDefault: true })
     settings.reads = 0
-    await delivery().deliver({ sessionId: SESSION, content: 'hi', options: { model: 'model-b' } })
+    await delivery().deliver({ context: FROM_APP, sessionId: SESSION, content: 'hi', options: { model: 'model-b' } })
     expect(settings.reads).toBe(0)
     expect(await metadata()).toMatchObject({ model: 'model-b', llmProviderId: 'conn-a' })
   })
@@ -308,7 +311,7 @@ describe('deliver', () => {
   it('stores what the request named when the send was prepared without an app default', async () => {
     send().mockResolvedValueOnce({ selection: { model: 'model-c', llmProviderId: 'conn-a' }, llmDefault: false })
     settings.reads = 0
-    await delivery().deliver({ sessionId: SESSION, content: 'hi', options: { model: 'model-d' } })
+    await delivery().deliver({ context: FROM_APP, sessionId: SESSION, content: 'hi', options: { model: 'model-d' } })
     expect(settings.reads).toBe(0)
     expect(await metadata()).toMatchObject({ model: 'model-d' })
   })
@@ -318,7 +321,7 @@ describe('deliver', () => {
     vi.spyOn(service, 'updateSessionMetadata').mockRejectedValueOnce(new Error('disk full'))
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
 
-    expect(await delivery().deliver({ sessionId: SESSION, content: 'hi', options: { effort: 'high' } }))
+    expect(await delivery().deliver({ context: FROM_APP, sessionId: SESSION, content: 'hi', options: { effort: 'high' } }))
       .toEqual({ status: 'sent', queued: false })
     consoleError.mockRestore()
   })
@@ -330,9 +333,9 @@ describe('deliver', () => {
       .mockResolvedValueOnce({})
     const read = vi.spyOn(service, 'getSessionMetadata')
 
-    const first = delivery().deliver({ sessionId: SESSION, content: 'first', options: { model: 'model-b' } })
+    const first = delivery().deliver({ context: FROM_APP, sessionId: SESSION, content: 'first', options: { model: 'model-b' } })
     await vi.waitFor(() => expect(send()).toHaveBeenCalledOnce())
-    const second = delivery().deliver({ sessionId: SESSION, content: 'second' })
+    const second = delivery().deliver({ context: FROM_APP, sessionId: SESSION, content: 'second' })
     await new Promise((resolve) => setTimeout(resolve, 0))
     const readsWhileFirstRuns = read.mock.calls.length
     releaseFirst()
@@ -350,13 +353,14 @@ describe('deliver', () => {
       return {}
     })
 
-    await delivery().deliver({ sessionId: SESSION, content: 'I am here', promote: true })
+    await delivery().deliver({ context: FROM_APP, sessionId: SESSION, content: 'I am here', promote: true })
     expect(send()).toHaveBeenCalledOnce()
   })
 })
 
 describe('start', () => {
   const request = {
+    context: FROM_APP,
     create: { initialMessage: 'go' },
     name: 'Scheduled run',
     metadata: { isScheduledExecution: true, automationStatus: 'running' as const },
@@ -410,7 +414,7 @@ describe('start', () => {
       locks: { acquire: key => locks.acquire(key), release: async (key, token) => locks.release(key, token) },
     })]).get(SLUG)
     const request = { userId: 'user', requestId: '40dc868c-9a98-47ac-8059-143cff8dea30' }
-    const run = () => startWithCreationSetup(actor, request, (initialMessageUuid, creationSetup) => delivery().start({
+    const run = () => startWithCreationSetup(actor, request, (initialMessageUuid, creationSetup) => delivery().start({ context: FROM_APP,
       create: { initialMessage: 'Prepare a briefing', initialMessageUuid }, name: 'First job', metadata: { creationSetup },
     }))
     vi.mocked(client.createSession).mockResolvedValueOnce({ id: 'revoked' } as never)
@@ -445,7 +449,7 @@ describe('start', () => {
   })
 
   it('stores a session a user starts without its own copy of the commands', async () => {
-    await delivery().start({ create: { initialMessage: 'go' }, name: 'Chat', metadata: { createdByUserId: 'user-a' } })
+    await delivery().start({ context: FROM_APP, create: { initialMessage: 'go' }, name: 'Chat', metadata: { createdByUserId: 'user-a' } })
 
     expect((await sessionService.getSessionMetadata(store(), 'new-session'))?.slashCommands).toBeUndefined()
     expect(await sessionService.readAgentSlashCommands(store())).toEqual([{ name: 'deploy', description: 'Ship it', argumentHint: '' }])
@@ -467,7 +471,7 @@ describe('start', () => {
 
     const before = await size()
     for (let i = 0; i < runs; i++) {
-      const { id } = await delivery().start({
+      const { id } = await delivery().start({ context: FROM_APP,
         create: { initialMessage: prompt, metadata: { isAutomated: true } },
         name: 'Slow orders check',
         metadata: {
@@ -827,7 +831,7 @@ describe('stop', () => {
       })
 
       it('queues a message behind it, keeping the runtime it runs on', async () => {
-        const sent = await delivery().deliver({
+        const sent = await delivery().deliver({ context: FROM_APP,
           sessionId: SESSION,
           content: 'Please also do this.',
           uuid: 'follow-up',
