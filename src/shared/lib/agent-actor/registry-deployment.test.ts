@@ -13,6 +13,7 @@ vi.mock('@shared/lib/container/container-host', () => ({
   containerHost: {
     attachAgentRuntimes: vi.fn(),
     clearRuntimes: vi.fn(),
+    useWebhookRelayStatus: vi.fn(),
     // A runtime that reads its container as running and does nothing else.
     createRuntime: () => ({ isStopping: () => false, syncAgentStatus: async () => ({ status: 'running', port: null }), getCachedInfo: () => ({ status: 'stopped', port: null }), noteSessionActivity: vi.fn(), dispose: vi.fn() }),
   },
@@ -50,6 +51,7 @@ const deploymentWith = (parts: { sessionStore: () => SessionStore; transport?: (
   host: createRecordingHostPort().port,
   removeWorkspace: vi.fn(async () => {}),
   idleTimer: () => ({ set: vi.fn(), clear: vi.fn() }),
+  webhookRelayAvailable: vi.fn(async () => true),
 })
 
 afterEach(async () => {
