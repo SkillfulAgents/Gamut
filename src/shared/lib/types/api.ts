@@ -262,6 +262,8 @@ export interface ApiMessage {
    * detection) must skip it.
    */
   queued?: boolean
+  /** The uuids of the sends the runtime saved as this one message (it can merge several). */
+  mergedSendUuids?: string[]
   /** Copied into this session by a fork. The thread draws the fork point after the last one. */
   forked?: boolean
   /**

@@ -3,6 +3,7 @@ import { addErrorBreadcrumb, captureException } from '@shared/lib/error-reportin
 import { background } from '@shared/lib/background'
 import type { ContainerClient } from './types'
 import type { CoalescedUserMessage, RuntimeFatalKind, UnexpectedDeathPlan } from './runtime-death'
+import { MessageNotAcceptedError } from './message-dispatch-error'
 
 // Session lifecycle here: active --(unexpected death)--> isRecovering --> either
 // markRecovered (resume prompt sent, turn continues) or settleRecoveringSessions
@@ -19,6 +20,7 @@ export type RuntimeRecoveryDeps = {
   settleRecoveringSessions: (sessionIds: string[]) => void
   markRecovered: (sessionIds: string[]) => void
   takeCoalescedUserMessages: (sessionId: string) => CoalescedUserMessage[]
+  discardMessage: (sessionId: string, uuid: string) => void
   isSessionRecovering: (sessionId: string) => boolean
   isSubscribed: (sessionId: string) => boolean
   subscribeToSession: (
@@ -283,6 +285,8 @@ async function deliverCoalescedMessages(
       // become a turn of its own now.
       await client.sendMessage(sessionId, message.text, message.uuid, { shouldQuery: message.shouldQuery ?? true })
     } catch (error) {
+      // Only a refusal says it never ran: any other failure may have delivered it.
+      if (error instanceof MessageNotAcceptedError) deps.discardMessage(sessionId, message.uuid)
       captureException(error, {
         tags: { area: 'container', op: 'runtime.recovery.deliverCoalesced' },
         extra: { agentId: deps.agentId, sessionId },

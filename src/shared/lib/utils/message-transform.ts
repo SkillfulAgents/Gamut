@@ -62,6 +62,8 @@ export interface TransformedMessage {
   errorPresentation?: ProviderErrorPresentation
   /** User message delivered mid-turn (queued/steering input) — does not end the turn it appears in */
   queued?: boolean
+  /** The server uuids of the sends the CLI saved as this one line */
+  mergedSendUuids?: string[]
   /** Copied into this session by a fork; the thread marks the fork point after the last one */
   forked?: boolean
   /**
@@ -214,6 +216,11 @@ export function isTaskNotificationMessage(entry: JsonlMessageEntry): boolean {
 export function monitorNotificationOf(entry: JsonlMessageEntry): MonitorNotification | null {
   if (!isTaskNotificationMessage(entry)) return null
   return parseMonitorNotification(entry.message.content)
+}
+
+function mergedSendUuids(entry: JsonlMessageEntry): string[] | undefined {
+  const value = entry.mergedSendUuids
+  return Array.isArray(value) && value.every((uuid): uuid is string => typeof uuid === 'string') ? value : undefined
 }
 
 /**
@@ -673,6 +680,7 @@ export function transformMessages(entries: (JsonlMessageEntry | JsonlSystemEntry
       }
     }
 
+    const sendUuids = mergedSendUuids(entry)
     result.push({
       id: entry.uuid,
       type: messageType,
@@ -681,6 +689,7 @@ export function transformMessages(entries: (JsonlMessageEntry | JsonlSystemEntry
       createdAt: new Date(entry.timestamp),
       ...(entry.error && { apiError: entry.error }),
       ...(entry.isQueuedCommand && { queued: true }),
+      ...(sendUuids && { mergedSendUuids: sendUuids }),
       ...(entry.forkedFrom && { forked: true }),
       ...(thinking && thinking.length > 0 && { thinking }),
       ...(entry.message.usage && {

@@ -24,6 +24,7 @@ export const NO_LIVE_SESSIONS: RuntimeSessions = {
   settleRecovering: () => {},
   markRecovered: () => {},
   takeCoalesced: () => [],
+  discarded: () => {},
   isRecovering: () => false,
   isSubscribed: () => false,
   subscribe: async () => {},

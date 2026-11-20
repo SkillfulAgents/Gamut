@@ -16,6 +16,7 @@ import { createUserMessage, createAssistantMessage, createToolCall, createCompac
 import type { ProviderErrorPresentation } from '@shared/lib/llm-provider/error-presentation'
 import type { ApiMessageOrBoundary } from '@shared/lib/types/api'
 import type { IntegrationMessageDisplay } from '@shared/lib/agent-integrations/message-display-schema'
+import type { PendingMessage } from './pending-message'
 
 // Mock useMessages
 const mockFetchOlder = vi.fn()
@@ -68,6 +69,7 @@ const mockStreamState = {
   typingUser: null as { id: string; name?: string } | null,
   peerUserMessages: [] as Array<{ uuid: string; receivedAt: number; content: string; sender?: { id: string; name?: string; email?: string }; queued?: boolean; integration?: IntegrationMessageDisplay }>,
   discardedCommandUuids: [] as string[],
+  sendReceipts: {} as Record<string, 'picked_up' | 'never_ran'> | null,
   thinkingBlocks: [] as Array<{ id: number; persistedId?: string; text: string; startedAt: number; endedAt: number | null }>,
   error: null as string | null,
   apiErrorCode: null as string | null,
@@ -180,6 +182,19 @@ vi.mock('@renderer/components/ui/tooltip', () => ({
   TooltipContent: ({ children }: { children: React.ReactNode }) => <span>{children}</span>,
 }))
 
+/** A message sent from the open list: the list mounts, then the send adds its pending copy. */
+function renderThenSend(text: string) {
+  const result = renderWithProviders(<MessageList sessionId="s-1" agentSlug="agent-1" />)
+  result.rerender(
+    <MessageList
+      sessionId="s-1"
+      agentSlug="agent-1"
+      pendingUserMessages={[{ localId: 'pm-1', uuid: 'pm-1', text, sentAt: Date.now() }]}
+    />
+  )
+  return result
+}
+
 describe('MessageList', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -203,6 +218,7 @@ describe('MessageList', () => {
       typingUser: null,
       peerUserMessages: [],
       discardedCommandUuids: [],
+      sendReceipts: {},
       thinkingBlocks: [],
       error: null,
       apiErrorCode: null,
@@ -1039,34 +1055,6 @@ describe('MessageList', () => {
     expect(screen.queryByTestId(queued ? 'queued-user-message' : 'pending-user-message')).not.toBeInTheDocument()
   })
 
-  // The second transcript is a shared agent's, where the agent received the sender prefix.
-  it.each(['My message', '\\[Ann]: My message'])('falls back to text+time matching when the uuid differs (queued/steering messages): %s', (transcriptText) => {
-    // The CLI re-ids messages sent mid-turn (queued_command attachments), so
-    // the persisted copy never carries the client uuid — text fallback must fire.
-    const onAppeared = vi.fn()
-    const sentAt = new Date('2025-01-01T00:00:00Z').getTime()
-
-    mockMessagesData.data = [
-      createUserMessage({
-        id: 'cli-generated-uuid',
-        content: { text: transcriptText },
-        createdAt: new Date('2025-01-01T00:00:01Z'),
-      }),
-    ]
-    mockStreamState.isActive = true
-
-    renderWithProviders(
-      <MessageList
-        sessionId="s-1"
-        agentSlug="agent-1"
-        pendingUserMessages={[{ localId: 'uuid-1', uuid: 'uuid-1', text: 'My message', sentAt, queued: true }]}
-        onPendingMessageAppeared={onAppeared}
-      />
-    )
-
-    expect(onAppeared).toHaveBeenCalledWith('uuid-1')
-  })
-
   it('does not restore /compact over a draft typed while manual compaction runs', async () => {
     vi.useFakeTimers()
     try {
@@ -1245,31 +1233,6 @@ describe('MessageList', () => {
     expect(screen.getByTestId('tool-call-Bash').getAttribute('data-running')).toBe('true')
   })
 
-  it('one persisted copy clears at most one of two identical queued ghosts', () => {
-    const onAppeared = vi.fn()
-    const sentAt = Date.now()
-
-    mockMessagesData.data = [
-      createUserMessage({ id: 'cli-uuid-1', content: { text: 'Do it' }, createdAt: new Date() }),
-    ]
-    mockStreamState.isActive = true
-
-    renderWithProviders(
-      <MessageList
-        sessionId="s-1"
-        agentSlug="agent-1"
-        pendingUserMessages={[
-          { localId: 'uuid-1', uuid: 'uuid-1', text: 'Do it', sentAt, queued: true },
-          { localId: 'uuid-2', uuid: 'uuid-2', text: 'Do it', sentAt, queued: true },
-        ]}
-        onPendingMessageAppeared={onAppeared}
-      />
-    )
-
-    expect(onAppeared).toHaveBeenCalledWith('uuid-1')
-    expect(onAppeared).not.toHaveBeenCalledWith('uuid-2')
-  })
-
   it('materializes only the matched message when several are queued', () => {
     const onAppeared = vi.fn()
     const sentAt = Date.now()
@@ -1317,7 +1280,7 @@ describe('MessageList', () => {
     expect(onAppeared).not.toHaveBeenCalled()
   })
 
-  it('text-fallback applies while the POST response (uuid) is still pending', () => {
+  it('a send whose response has not returned stays pending, whatever text is saved', () => {
     const onAppeared = vi.fn()
 
     mockMessagesData.data = [
@@ -1333,7 +1296,7 @@ describe('MessageList', () => {
       />
     )
 
-    expect(onAppeared).toHaveBeenCalledWith('l1')
+    expect(onAppeared).not.toHaveBeenCalled()
   })
 
   it('keeps a queued message pending at idle until the host says it never ran', async () => {
@@ -1378,6 +1341,39 @@ describe('MessageList', () => {
     }
   })
 
+  it('returns a message dropped while away even when its saved copy loads before the host receipts', async () => {
+    // A queued message is saved when it is queued; a Stop then dropped it while
+    // the reader was on another session. Back on this one, the transcript can
+    // load before the connection's snapshot: the copy must not settle it first.
+    const onAppeared = vi.fn()
+    mockMessagesData.data = [createUserMessage({ id: 'u-q', content: { text: 'dropped while away' } })]
+    mockStreamState.isActive = false
+    mockStreamState.sendReceipts = null
+    const ghost = { localId: 'l1', uuid: 'u-q', text: 'dropped while away', sentAt: Date.now() - 60_000, queued: true }
+
+    const DraftProbe = () => {
+      const [draft] = useDraftText('session:s-1')
+      return <div data-testid="draft-probe">{draft ?? ''}</div>
+    }
+    const view = (
+      <>
+        <MessageList sessionId="s-1" agentSlug="agent-1" pendingUserMessages={[ghost]} onPendingMessageAppeared={onAppeared} />
+        <DraftProbe />
+      </>
+    )
+
+    const { rerender } = renderWithProviders(view)
+    await act(async () => {})
+    expect(onAppeared).not.toHaveBeenCalled()
+
+    mockStreamState.sendReceipts = { 'u-q': 'never_ran' }
+    rerender(view)
+    await act(async () => {})
+
+    expect(onAppeared).toHaveBeenCalledWith('l1')
+    expect(screen.getByTestId('draft-probe')).toHaveTextContent('dropped while away')
+  })
+
   it('rescues a queued ghost immediately when the runtime reports its command discarded', async () => {
     // Deterministic path: a command_lifecycle discarded frame named
     // this uuid (e.g. killed by Stop). No idle, no grace timer — the session
@@ -1386,6 +1382,7 @@ describe('MessageList', () => {
     mockMessagesData.data = []
     mockStreamState.isActive = true
     mockStreamState.discardedCommandUuids = ['u-dead']
+    mockStreamState.sendReceipts = { 'u-dead': 'never_ran' }
 
     const DraftProbe = () => {
       const [draft] = useDraftText('session:s-1')
@@ -1832,13 +1829,7 @@ describe('MessageList', () => {
       }),
     ]
 
-    renderWithProviders(
-      <MessageList
-        sessionId="s-1"
-        agentSlug="agent-1"
-        pendingUserMessages={[{ localId: 'pm-1', uuid: 'pm-1', text: 'Follow up', sentAt: Date.now() }]}
-      />
-    )
+    renderThenSend('Follow up')
 
     // Even though isActive=true, the pending message closes the previous turn
     expect(screen.getByText('Worked for 60s')).toBeInTheDocument()
@@ -1869,13 +1860,7 @@ describe('MessageList', () => {
       }),
     ]
 
-    const { container } = renderWithProviders(
-      <MessageList
-        sessionId="s-1"
-        agentSlug="agent-1"
-        pendingUserMessages={[{ localId: 'pm-1', uuid: 'pm-1', text: 'Follow up', sentAt: Date.now() }]}
-      />
-    )
+    const { container } = renderThenSend('Follow up')
 
     // Elapsed + files should render inline (not deferred after streaming)
     expect(screen.getByText('Worked for 60s')).toBeInTheDocument()
@@ -1948,17 +1933,46 @@ describe('MessageList', () => {
       }),
     ]
 
-    renderWithProviders(
-      <MessageList
-        sessionId="s-1"
-        agentSlug="agent-1"
-        pendingUserMessages={[{ localId: 'pm-1', uuid: 'pm-1', text: 'New message', sentAt: Date.now() }]}
-      />
-    )
+    renderThenSend('New message')
 
     // The tool call renders, but since a turn-starting pending message exists,
     // canHaveRunningToolCalls is empty → tool is not considered running
-    expect(screen.getByTestId('tool-call-Bash')).toBeInTheDocument()
+    expect(screen.getByTestId('tool-call-Bash').getAttribute('data-running')).toBe('false')
+  })
+
+  it('keeps the previous turn\'s tools stopped while the sent message\'s copy has not loaded, picked up or not', () => {
+    mockStreamState.isActive = true
+    mockMessagesData.data = [
+      createAssistantMessage({ id: 'msg-1', content: { text: '' }, toolCalls: [createToolCall({ id: 'tc-1', name: 'Bash', result: undefined })] }),
+    ]
+    const { rerender } = renderThenSend('New message')
+    mockStreamState.sendReceipts = { 'pm-1': 'picked_up' }
+    rerender(
+      <MessageList sessionId="s-1" agentSlug="agent-1" pendingUserMessages={[{ localId: 'pm-1', uuid: 'pm-1', text: 'New message', sentAt: Date.now() }]} />
+    )
+    expect(screen.getByTestId('tool-call-Bash').getAttribute('data-running')).toBe('false')
+  })
+
+  it('a pending message from before the list mounted does not hide running tools', () => {
+    mockStreamState.isActive = true
+    mockMessagesData.data = [
+      createAssistantMessage({ id: 'msg-1', content: { text: '' }, toolCalls: [createToolCall({ id: 'tc-1', name: 'Bash', result: undefined })] }),
+    ]
+    renderWithProviders(
+      <MessageList sessionId="s-1" agentSlug="agent-1" pendingUserMessages={[{ localId: 'pm-1', uuid: 'pm-1', text: 'Start it', sentAt: Date.now() - 60_000 }]} />
+    )
+    expect(screen.getByTestId('tool-call-Bash').getAttribute('data-running')).toBe('true')
+  })
+
+  it('draws tools stopped when the host reports idle, with a pending message present', () => {
+    mockStreamState.isActive = false
+    mockMessagesData.data = [
+      createAssistantMessage({ id: 'msg-1', content: { text: '' }, toolCalls: [createToolCall({ id: 'tc-1', name: 'Bash', result: undefined })] }),
+    ]
+    renderWithProviders(
+      <MessageList sessionId="s-1" agentSlug="agent-1" pendingUserMessages={[{ localId: 'pm-1', uuid: 'pm-1', text: 'Start it', sentAt: Date.now() - 60_000 }]} />
+    )
+    expect(screen.getByTestId('tool-call-Bash').getAttribute('data-running')).toBe('false')
   })
 
   // ---- Deferred elapsed time ----
@@ -2215,13 +2229,7 @@ describe('MessageList', () => {
       }),
     ]
 
-    renderWithProviders(
-      <MessageList
-        sessionId="s-1"
-        agentSlug="agent-1"
-        pendingUserMessages={[{ localId: 'pm-1', uuid: 'pm-1', text: 'Now do X', sentAt: Date.now() }]}
-      />
-    )
+    renderThenSend('Now do X')
 
     // Even though isActive=true, the pending message keeps the previous turn closed
     expect(screen.getByText('report.pdf')).toBeInTheDocument()
@@ -3049,7 +3057,11 @@ describe('MessageList', () => {
   })
 
   describe('new-turn scroll anchoring', () => {
-    const pending = { localId: 'pending-turn', text: 'What changed?', sentAt: Date.now() }
+    // Fresh per test: a list marks the ghost it takes as a send.
+    let pending: PendingMessage
+    beforeEach(() => {
+      pending = { localId: 'pending-turn', text: 'What changed?', sentAt: Date.now() }
+    })
 
     // Live-edge following is convergence-driven: the scroll hook's
     // ResizeObserver on the content wrapper re-pins after every resize.
@@ -3178,6 +3190,52 @@ describe('MessageList', () => {
       expect(anchor.getBoundingClientRect().top).toBe(101)
       expect(geometry.scrollTop).toBe(1099)
       expect(screen.getByTestId('turn-anchor-spacer')).toHaveStyle({ height: '400px' })
+    })
+
+    // The same geometry the send case uses, in place before the list mounts.
+    function withMountGeometry(run: (spacer: () => number) => void, history = [createAssistantMessage({ content: { text: 'Previous response' } })]) {
+      mockMessagesData.data = history
+      const proto = HTMLElement.prototype
+      const saved = { rect: proto.getBoundingClientRect, ch: Object.getOwnPropertyDescriptor(proto, 'clientHeight'), sh: Object.getOwnPropertyDescriptor(proto, 'scrollHeight') }
+      const isList = (el: HTMLElement) => el.dataset?.testid === 'message-list'
+      const spacer = () => Number.parseFloat((document.querySelector('[data-testid="turn-anchor-spacer"]') as HTMLElement | null)?.style.height || '0') || 0
+      vi.spyOn(window, 'matchMedia').mockImplementation((query: string) => ({ matches: query === '(prefers-reduced-motion: reduce)', media: query, addEventListener: vi.fn(), removeEventListener: vi.fn() }) as unknown as MediaQueryList)
+      proto.getBoundingClientRect = function (this: HTMLElement) {
+        const top = this.dataset?.turnAnchorId ? 1200 - (document.querySelector('[data-testid="message-list"]')?.scrollTop ?? 0) : 0
+        return { top, bottom: top, height: 0, left: 0, right: 0, width: 0, x: 0, y: top, toJSON: () => ({}) } as DOMRect
+      }
+      Object.defineProperty(proto, 'clientHeight', { configurable: true, get(this: HTMLElement) { return isList(this) ? 600 : 0 } })
+      Object.defineProperty(proto, 'scrollHeight', { configurable: true, get(this: HTMLElement) { return isList(this) ? 1300 + spacer() : 0 } })
+      try {
+        run(spacer)
+      } finally {
+        proto.getBoundingClientRect = saved.rect
+        for (const [k, d] of [['clientHeight', saved.ch], ['scrollHeight', saved.sh]] as const) {
+          if (d) Object.defineProperty(proto, k, d); else delete (proto as unknown as Record<string, unknown>)[k]
+        }
+      }
+    }
+
+    it("anchors a new session's first message on the list's first mount", () => {
+      withMountGeometry((spacer) => {
+        renderWithProviders(<MessageList sessionId="s-1" agentSlug="agent-1" pendingUserMessages={[pending]} />)
+        const anchor = screen.getByText('What changed?').closest('[data-turn-anchor-id]') as HTMLElement
+        // Same reading line as a send into an open list: TURN_ANCHOR_TOP + the 1px live-edge allowance.
+        expect(anchor.getBoundingClientRect().top).toBe(101)
+        expect(spacer()).toBe(400)
+      }, [])
+    })
+
+    it('reserves no reading line for a message an earlier mount already anchored', () => {
+      withMountGeometry((spacer) => {
+        const first = renderWithProviders(<MessageList sessionId="s-1" agentSlug="agent-1" pendingUserMessages={[pending]} />)
+        expect(spacer()).toBeGreaterThan(0)
+        first.unmount()
+        // The reader comes back to the session: the store hands the new list a
+        // rebuilt entry (the POST assigned its uuid), carrying the mark.
+        renderWithProviders(<MessageList sessionId="s-1" agentSlug="agent-1" pendingUserMessages={[{ ...pending, uuid: 'srv-1' }]} />)
+        expect(spacer()).toBe(0)
+      })
     })
 
     it('holds the reading line when content mounts above the anchored turn', async () => {

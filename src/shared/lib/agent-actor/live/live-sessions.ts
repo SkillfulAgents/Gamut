@@ -45,6 +45,7 @@ import { LiveSession, type LiveSessionContext, type SessionRuntime } from './liv
 import type { SessionEvent, SessionListener, WireFrame } from './session-channel'
 import { SessionChannels, wireFrame } from './session-channels'
 import { repairLegacySlashCommands } from '@shared/lib/container/slash-commands'
+import type { SendReceipt } from '@shared/lib/container/command-lifecycle'
 import type { ActiveSubagentSnapshot } from './subagents'
 import type { Capability } from './tool-calls'
 import { WorkflowTailers } from './workflow-tailers'
@@ -167,6 +168,16 @@ export class LiveSessions {
 
   backgroundTasks(sessionId: string): ActiveBackgroundTaskSnapshot[] {
     return this.states.get(sessionId)?.backgroundTasks() ?? []
+  }
+
+  /** None for a session the host holds no state for: its outcomes are unknown, not empty. */
+  sendReceipts(sessionId: string): Record<string, SendReceipt> | undefined {
+    const state = this.states.get(sessionId)
+    return state && Object.fromEntries(state.sendReceipts)
+  }
+
+  discarded(sessionId: string, uuid: string): void {
+    this.states.get(sessionId)?.discarded(uuid)
   }
 
   activeSubagents(sessionId: string): ActiveSubagentSnapshot[] {
@@ -348,6 +359,8 @@ export class LiveSessions {
         // it was away.
         backgroundTasks: this.backgroundTasks(sessionId),
         activeSubagents: this.activeSubagents(sessionId),
+        // A viewer that was away missed the outcome frames.
+        sendReceipts: this.sendReceipts(sessionId),
       },
       lastId,
     )

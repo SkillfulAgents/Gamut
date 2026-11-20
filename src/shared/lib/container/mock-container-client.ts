@@ -3857,8 +3857,8 @@ export class MockContainerClient extends EventEmitter implements ContainerClient
 
     // Mid-turn send — mirror the real CLI's steering behavior: no user entry
     // is written; after a pickup delay the message lands in the JSONL as a
-    // queued_command attachment with a CLI-generated source_uuid (the sender
-    // uuid is NOT preserved there), followed by assistant output whose stream
+    // queued_command attachment whose source_uuid is the sender uuid, after a
+    // command_lifecycle 'started' for it, followed by assistant output whose stream
     // message triggers the refetch that materializes the ghost. Until pickup
     // the injection is cancellable by uuid (cancel_async_message semantics).
     if (this.busySessions.has(sessionId)) {
@@ -3870,6 +3870,10 @@ export class MockContainerClient extends EventEmitter implements ContainerClient
       const steeringUuid = uuid ?? randomUUID()
       const timer = setTimeout(() => {
         this.queuedSteeringTimers.get(sessionId)?.delete(steeringUuid)
+        this.emitStreamMessage(sessionId, {
+          type: 'command_lifecycle',
+          content: { type: 'command_lifecycle', command_uuid: steeringUuid, state: 'started' },
+        })
         // The drain signal: the real CLI emits status 'requesting' when it
         // picks queued messages up — the live session broadcasts a refetch
         // on it.
@@ -3883,7 +3887,7 @@ export class MockContainerClient extends EventEmitter implements ContainerClient
           attachment: {
             type: 'queued_command',
             prompt: [{ type: 'text', text: content }],
-            source_uuid: randomUUID(),
+            source_uuid: steeringUuid,
             commandMode: 'prompt',
           },
         })
@@ -3938,6 +3942,13 @@ export class MockContainerClient extends EventEmitter implements ContainerClient
     // publish — so emitting 'running' here mirrors the runtime.
     this.busySessions.add(sessionId)
     this.emitSessionState(sessionId, 'running')
+    // The CLI names the send it took, a turn-starting one too.
+    if (uuid) {
+      this.emitStreamMessage(sessionId, {
+        type: 'command_lifecycle',
+        content: { type: 'command_lifecycle', command_uuid: uuid, state: 'started' },
+      })
+    }
     scenario.execute(sessionId, this.scenarioView(sessionId), content)
     return result
   }

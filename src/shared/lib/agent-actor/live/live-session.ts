@@ -26,7 +26,7 @@ import type { AgentComputerUse } from '@shared/lib/computer-use/agent-permission
 import { classifyResult } from '@shared/lib/container/result-classification'
 import { inferOomSigkillFatal } from '@shared/lib/container/runtime-death'
 import { parseBackgroundTasksChanged } from '@shared/lib/container/background-tasks-changed'
-import { parseCommandLifecycle } from '@shared/lib/container/command-lifecycle'
+import { parseCommandLifecycle, type SendReceipt } from '@shared/lib/container/command-lifecycle'
 import { mergeCanonicalSlashCommands } from '@shared/lib/container/slash-commands'
 import { slashCommandListSchema } from '@shared/lib/services/session-metadata-schema'
 import { credentialSource } from '@shared/lib/llm-provider/connection-runtime'
@@ -216,6 +216,8 @@ export class LiveSession {
   isRecovering: boolean
   /** Messages sent while recovering, delivered with their uuids once it is done. */
   coalescedUserMessages: CoalescedUserMessage[] | undefined
+  /** Outcome per sent uuid, kept for the live session's lifetime: returning viewers settle from it. */
+  readonly sendReceipts: Map<string, SendReceipt>
   /**
    * The runtime publishes its session state (idle/running), so it decides
    * when the session settles: a result alone doesn't, since queued messages
@@ -302,6 +304,7 @@ export class LiveSession {
     this.isAwaitingInput = prior?.isAwaitingInput ?? false
     this.isRecovering = prior?.isRecovering ?? false
     this.coalescedUserMessages = prior?.coalescedUserMessages
+    this.sendReceipts = prior?.sendReceipts ?? new Map()
     this.stateEventsAuthority = prior?.stateEventsAuthority ?? false
     this.lastResultSubtype = prior?.lastResultSubtype ?? null
     this.lastResultCleanSuccess = prior?.lastResultCleanSuccess ?? false
@@ -619,7 +622,7 @@ export class LiveSession {
     this.isAwaitingInput = false
     this.lastResultCleanSuccess = false
     this.isRecovering = false
-    this.coalescedUserMessages = undefined
+    this.discardHeld()
     let backgroundTasks: ActiveBackgroundTaskSnapshot[] = []
     if (processKept) {
       this.subagents.dropForeground()
@@ -738,7 +741,7 @@ export class LiveSession {
         extra: { sessionId: this.ctx.sessionId, messageCount: dropped.length, messageLength },
       })
     }
-    this.coalescedUserMessages = undefined
+    this.discardHeld()
     if (this.isActive && !this.isInterrupted) this.markInactive()
   }
 
@@ -758,6 +761,28 @@ export class LiveSession {
     if (!messages?.length) return []
     this.coalescedUserMessages = undefined
     return messages
+  }
+
+  /** The messages the host held never reached the runtime: settled as the runtime's own discards are. */
+  private discardHeld(): void {
+    for (const message of this.coalescedUserMessages ?? []) this.discarded(message.uuid)
+    this.coalescedUserMessages = undefined
+  }
+
+  /** The message never ran: viewers return its text, and whoever it tagged is not told. */
+  discarded(uuid: string): void {
+    this.sendReceipts.set(uuid, 'never_ran')
+    this.ctx.emit({ type: 'command_lifecycle', commandUuid: uuid, state: 'discarded' })
+    this.ctx.host.send('notification', {
+      kind: 'message_discarded',
+      agentSlug: this.ctx.agentSlug,
+      sessionId: this.ctx.sessionId,
+      messageUuid: uuid,
+    })
+  }
+
+  private pickedUp(uuid: string): void {
+    if (this.sendReceipts.get(uuid) !== 'never_ran') this.sendReceipts.set(uuid, 'picked_up')
   }
 
   dropCoalesced(uuid: string): boolean {
@@ -1110,16 +1135,13 @@ export class LiveSession {
         // renderer joins terminal states back to its optimistic ghosts.
         const lifecycle = parseCommandLifecycle(content)
         if (!lifecycle) return
-        this.ctx.emit({ type: 'command_lifecycle', commandUuid: lifecycle.commandUuid, state: lifecycle.state })
-        // A discarded message never ran, so whoever it tagged is not told.
         if (lifecycle.state === 'discarded') {
-          this.ctx.host.send('notification', {
-            kind: 'message_discarded',
-            agentSlug: this.ctx.agentSlug,
-            sessionId: this.ctx.sessionId,
-            messageUuid: lifecycle.commandUuid,
-          })
+          this.discarded(lifecycle.commandUuid)
+          return
         }
+        this.ctx.emit({ type: 'command_lifecycle', commandUuid: lifecycle.commandUuid, state: lifecycle.state })
+        // Every send gets `started` when taken. `cancelled` is no answer: Stop cancels the running one too.
+        if (lifecycle.state === 'started' || lifecycle.state === 'completed') this.pickedUp(lifecycle.commandUuid)
         return
       }
       case 'result':
@@ -1491,6 +1513,7 @@ export class LiveSession {
     // can lag), or a follow-up turn's stream_start could blink it out.
     // The sends this turn answered, a batch taken in mid-turn included. A resume pauses inside the turn.
     const answered = content.subtype !== 'resume' && Array.isArray(content.user_message_uuids) ? content.user_message_uuids : undefined
+    for (const uuid of answered ?? []) if (typeof uuid === 'string') this.pickedUp(uuid)
     this.ctx.emit({ type: 'turn_output_complete', ...(answered && { answered }) })
     // A UI hint: background tasks outlive the turn's output.
     const stillOpen = this.background.openCount()

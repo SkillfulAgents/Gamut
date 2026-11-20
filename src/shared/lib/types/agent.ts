@@ -233,6 +233,8 @@ export interface JsonlMessageEntry {
   // Set on synthetic user entries derived from queued_command attachments
   // (messages delivered mid-turn) — see normalizeQueuedCommandEntry.
   isQueuedCommand?: boolean
+  // Server uuids of the sends the CLI saved as this line; read via mergedSendUuids().
+  mergedSendUuids?: unknown
   forkedFrom?: JsonlForkStamp
 }
 

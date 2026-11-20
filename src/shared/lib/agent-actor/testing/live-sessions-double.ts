@@ -71,6 +71,8 @@ const NOTHING_LIVE: { [K in keyof Methods]: (...args: Parameters<Methods[K]>) =>
   coalesceIfRecovering: () => false,
   takeCoalesced: () => [],
   dropCoalesced: () => false,
+  sendReceipts: () => ({}),
+  discarded: () => {},
   inDeliveryTurn: (_sessionId, work) => work(),
   markSending: () => ({ queued: false, rollback: () => {} }),
   waitForIdle: async () => 'idle',

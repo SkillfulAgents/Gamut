@@ -6,6 +6,7 @@ import { noteTurnStarted } from '@renderer/lib/session-turns'
 import { sessionTurnOutcomeSchema, type SessionTurnOutcome } from '@shared/lib/container/session-turn-outcome-schema'
 import type { SessionUsage } from '@shared/lib/types/agent'
 import type { SlashCommandInfo } from '@shared/lib/container/types'
+import { parseSendReceipts, type SendReceipt } from '@shared/lib/container/command-lifecycle'
 import type { ApiMessage, ApiMessageOrBoundary } from '@shared/lib/types/api'
 import type { WorkflowAgentNode } from '@shared/lib/workflows/workflow-schemas'
 import type { BackgroundTaskRef } from '@renderer/lib/background-task-label'
@@ -52,7 +53,7 @@ export interface PeerUserMessage {
   integration?: IntegrationMessageDisplay
   /** Sent while the agent was mid-turn — rendered as a queued ghost. */
   queued?: boolean
-  /** Local arrival time — bounds the text-fallback match so an old identical-text message can't claim this ghost. */
+  /** Local arrival time: where the ghost sorts among the pending copies. */
   receivedAt: number
 }
 
@@ -203,6 +204,17 @@ export interface WorkflowRunLive {
 }
 const EMPTY_WORKFLOWS: WorkflowRunLive[] = []
 const sessionWorkflows = new Map<string, WorkflowRunLive[]>()
+
+// Host record per sent uuid: a connected snapshot replaces it, live frames add to
+// it. No entry means unknown until this connection's snapshot arrives.
+const sessionSendReceipts = new Map<string, Readonly<Record<string, SendReceipt>>>()
+
+/** Never ran is final: a later frame for the same uuid does not undo it. */
+function recordSendReceipt(sessionId: string, uuid: string, receipt: SendReceipt): void {
+  const current = sessionSendReceipts.get(sessionId)
+  if (!current || current[uuid] === receipt || current[uuid] === 'never_ran') return
+  sessionSendReceipts.set(sessionId, { ...current, [uuid]: receipt })
+}
 
 // `done`/`failed` are terminal and sticky: a later `running`/`progress` snapshot must
 // never downgrade them (snapshots can momentarily lag or reorder).
@@ -483,7 +495,8 @@ function getOrCreateEventSource(
     return es
   }
 
-  // Create new EventSource
+  // Create new EventSource; its snapshot decides the receipts again.
+  if (sessionSendReceipts.delete(key)) streamListeners.get(key)?.forEach((listener) => listener())
   const baseUrl = getApiBaseUrl()
   es = new EventSource(`${baseUrl}/api/agents/${agentSlug}/sessions/${sessionId}/stream`)
   eventSources.set(key, es)
@@ -546,6 +559,8 @@ function getOrCreateEventSource(
         if (Array.isArray(data.slashCommands)) {
           sessionSlashCommands.set(sessionId, data.slashCommands)
         }
+        const sendReceipts = parseSendReceipts(data.sendReceipts)
+        if (sendReceipts) sessionSendReceipts.set(sessionId, sendReceipts)
         const connectedSubagents = Array.isArray(data.activeSubagents)
           ? data.activeSubagents as SubagentInfo[]
           : null
@@ -802,6 +817,8 @@ function getOrCreateEventSource(
         ) {
           startedCommandsAwaitingTranscript.delete(commandUuid)
         }
+        if (commandUuid && (data.state === 'started' || data.state === 'completed')) recordSendReceipt(sessionId, commandUuid, 'picked_up')
+        if (commandUuid && data.state === 'discarded') recordSendReceipt(sessionId, commandUuid, 'never_ran')
         // Stop also cancels the command that is running, so 'cancelled' is no answer.
         if (
           current &&
@@ -1128,6 +1145,9 @@ function getOrCreateEventSource(
         // session_idle handler's own reconcile coexists harmlessly.
         invalidateMessagesThrottled(queryClient, sessionId)
         void reconcileMessagesAfterIdle(sessionId, queryClient, current?.streamingMessage ?? null)
+        if (Array.isArray(data.answered)) {
+          for (const uuid of data.answered) if (typeof uuid === 'string') recordSendReceipt(sessionId, uuid, 'picked_up')
+        }
       }
       else if (data.type === 'tool_call' || data.type === 'tool_result') {
         // Message has been persisted - keep streamingMessage visible until refetch completes
@@ -1583,6 +1603,7 @@ function releaseEventSource(sessionId: string): void {
     refCounts.delete(key)
     clearTimeout(typingTimers.get(key))
     typingTimers.delete(key)
+    sessionSendReceipts.delete(key)
     const state = streamStates.get(key)
     if (state) streamStates.set(key, { ...state, typingUser: null })
     // Symmetric cleanup for the refetch throttle: cancel a pending trailing
@@ -1684,6 +1705,8 @@ export interface MessageStreamValue extends StreamState {
   autoApprovedScriptRunIds: ReadonlySet<string>
   autoApprovedComputerUseIds: ReadonlySet<string>
   workflows: WorkflowRunLive[]
+  /** null until this connection's snapshot says what the host recorded. */
+  sendReceipts: Readonly<Record<string, SendReceipt>> | null
   isThinking: boolean
   thinkingBlocks: ThinkingBlock[]
   /**
@@ -1704,6 +1727,7 @@ const EMPTY_MESSAGE_STREAM_VALUE: MessageStreamValue = {
   autoApprovedScriptRunIds: EMPTY_AUTO_APPROVED_SET,
   autoApprovedComputerUseIds: EMPTY_AUTO_APPROVED_SET,
   workflows: EMPTY_WORKFLOWS,
+  sendReceipts: null,
   isThinking: EMPTY_THINKING.isThinking,
   thinkingBlocks: EMPTY_THINKING.blocks,
   readyStreamingToolUses: EMPTY_READY_TOOL_USES,
@@ -1752,6 +1776,7 @@ function readMessageStream(sessionId: string, prev: MessageStreamValue): Message
     autoApprovedScriptRunIds: snapshotIdSet(prev.autoApprovedScriptRunIds, sessionAutoApprovedScriptRunIds.get(sessionId)),
     autoApprovedComputerUseIds: snapshotIdSet(prev.autoApprovedComputerUseIds, sessionAutoApprovedComputerUseIds.get(sessionId)),
     workflows: sessionWorkflows.get(sessionId) ?? EMPTY_WORKFLOWS,
+    sendReceipts: sessionSendReceipts.get(sessionId) ?? null,
     isThinking: thinking.isThinking,
     thinkingBlocks: thinking.blocks,
   }

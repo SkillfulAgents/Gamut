@@ -6,6 +6,7 @@ import {
   type RuntimeRecoveryDeps,
 } from './runtime-recovery'
 import type { ContainerClient } from './types'
+import { MessageNotAcceptedError } from './message-dispatch-error'
 import type { CoalescedUserMessage, UnexpectedDeathPlan } from './runtime-death'
 
 vi.mock('@shared/lib/error-reporting', () => ({
@@ -85,6 +86,7 @@ function createDeps(overrides: Partial<RuntimeRecoveryDeps> = {}): RuntimeRecove
       for (const id of ids) recovering.delete(id)
     },
     takeCoalescedUserMessages: () => [],
+    discardMessage: () => {},
     isSessionRecovering: (id) => recovering.has(id),
     isSubscribed: () => false,
     subscribeToSession,
@@ -418,6 +420,23 @@ describe('recoverFromUnexpectedDeath', () => {
       { shouldQuery: true },
     ])
     expect(deps.syncAgentStatus).not.toHaveBeenCalled()
+  })
+
+  it('reports a held message the runtime refused as never ran, and nothing for a failure that may have delivered it', async () => {
+    const discardMessage = vi.fn()
+    const deps = createDeps({
+      takeCoalescedUserMessages: () => [{ uuid: 'refused', text: 'a' }, { uuid: 'unknown', text: 'b' }],
+      discardMessage,
+    })
+    deps.observeUnexpectedDeath.mockResolvedValue(recoverPlan())
+    deps.sendMessage
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new MessageNotAcceptedError('rejected', 'refused'))
+      .mockRejectedValueOnce(new Error('socket hang up'))
+
+    await recoverFromUnexpectedDeath(deps)
+
+    expect(discardMessage.mock.calls).toEqual([['sess-1', 'refused']])
   })
 
   it('resumes a session and sends what it held in one delivery turn, ahead of later messages', async () => {

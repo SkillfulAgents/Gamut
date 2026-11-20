@@ -233,9 +233,8 @@ export function MessageInput({ sessionId, agentSlug, onSessionCreated, onMessage
         if (!result.queued && !silent) composerOptions.markSubmitted(runtimeOptions)
         // Reconcile against the server's authoritative decision: our local
         // `queued` guess is derived from SSE state that can be stale (reconnect,
-        // a peer's turn, background-task flag), and a mismatch otherwise strands
-        // the ghost — a server-queued message is re-id'd by the CLI, so it never
-        // matches our uuid and never materializes.
+        // a peer's turn, background-task flag), and the ghost's placement and
+        // label follow it.
         onMessageUuidAssigned?.(localId, result.uuid, result.queued)
         credentialSource = result.credentialSource
       } catch (error) {

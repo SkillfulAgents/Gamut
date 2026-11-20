@@ -16,6 +16,8 @@ export interface RuntimeSessions {
   markRecovered(sessionIds: string[]): void
   /** The user messages sent while the session was recovering, taken for redelivery. */
   takeCoalesced(sessionId: string): CoalescedUserMessage[]
+  /** A held message the runtime refused never ran. */
+  discarded(sessionId: string, uuid: string): void
   isRecovering(sessionId: string): boolean
   isSubscribed(sessionId: string): boolean
   subscribe(sessionId: string, client: ContainerClient, containerSessionId: string): Promise<void>

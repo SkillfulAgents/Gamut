@@ -840,7 +840,8 @@ export function useMessageListScroll<T>(options: MessageListScrollOptions<T>) {
   // Detect actual sends by id (rather than list length, since materialization
   // can remove one ghost as another arrives). A turn-starting send gets a
   // stable reading line 100px from the viewport top; queued mid-turn sends
-  // retain the regular live-edge behavior.
+  // retain the regular live-edge behavior. A ghost an earlier mount already took
+  // as a send (it outlives the list in the shell's store) is not one again.
   const seenPendingIdsRef = useRef(new Set<string>())
   useLayoutEffect(() => {
     const seen = seenPendingIdsRef.current
@@ -849,6 +850,8 @@ export function useMessageListScroll<T>(options: MessageListScrollOptions<T>) {
     for (const pending of pendingUserMessages ?? []) {
       if (!seen.has(pending.localId)) {
         seen.add(pending.localId)
+        if (pending.sendHandled) continue
+        pending.sendHandled = true
         hasNewSend = true
         if (!pending.queued) newestTurnStart = pending
       }

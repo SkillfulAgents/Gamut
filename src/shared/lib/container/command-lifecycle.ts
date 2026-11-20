@@ -22,3 +22,16 @@ export function parseCommandLifecycle(content: unknown): { commandUuid: string; 
   if (!parsed.success) return null
   return { commandUuid: parsed.data.command_uuid, state: parsed.data.state }
 }
+
+/** What became of a sent message: the runtime took it, or it never reached the runtime. Never ran is final. */
+export type SendReceipt = 'picked_up' | 'never_ran'
+
+/** The entries that name a known receipt, so one unknown value drops alone; null when not a record. */
+export function parseSendReceipts(value: unknown): Record<string, SendReceipt> | null {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return null
+  const receipts: Record<string, SendReceipt> = {}
+  for (const [uuid, receipt] of Object.entries(value)) {
+    if (receipt === 'picked_up' || receipt === 'never_ran') receipts[uuid] = receipt
+  }
+  return receipts
+}

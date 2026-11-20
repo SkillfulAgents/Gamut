@@ -196,6 +196,14 @@ describe('transformMessages', () => {
       })
     })
 
+    it('keeps the send uuids the CLI saved as one line, and drops a list that is not strings', () => {
+      const merged = { ...createUserMessage('line', 'one and two'), mergedSendUuids: ['s1', 's2'] }
+      const malformed = { ...createUserMessage('bad', 'three'), mergedSendUuids: { s3: true } }
+      const [first, second] = transformMessages([merged, malformed])
+      expect(first).toMatchObject({ mergedSendUuids: ['s1', 's2'] })
+      expect(second).not.toHaveProperty('mergedSendUuids')
+    })
+
     it('transforms a simple assistant message with text block', () => {
       const entries: JsonlMessageEntry[] = [
         createAssistantMessage('uuid-1', 'msg-1', [{ type: 'text', text: 'Hello!' }]),

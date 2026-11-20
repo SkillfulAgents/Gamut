@@ -105,6 +105,53 @@ describe('useMessageStream', () => {
     unmount()
   })
 
+  it('keeps the host send receipts: a snapshot replaces them, frames add to them, never ran is final', async () => {
+    const { useMessageStream } = await getHookModule()
+    const { result, unmount } = renderHook(() => useMessageStream('receipts', 'agent-1'), { wrapper: createWrapper() })
+    const send = (data: Record<string, unknown>) => act(() => MockEventSource.instances[0].simulateMessage(data))
+    expect(result.current.sendReceipts).toBeNull()
+    send({ type: 'connected', isActive: true, sendReceipts: { old: 'picked_up' } })
+    send({ type: 'command_lifecycle', commandUuid: 'fresh', state: 'started' })
+    send({ type: 'command_lifecycle', commandUuid: 'dead', state: 'discarded' })
+    send({ type: 'command_lifecycle', commandUuid: 'dead', state: 'completed' })
+    send({ type: 'command_lifecycle', commandUuid: 'stopped', state: 'cancelled' })
+    send({ type: 'turn_output_complete', answered: ['folded'] })
+    expect(result.current.sendReceipts).toEqual({ old: 'picked_up', fresh: 'picked_up', dead: 'never_ran', folded: 'picked_up' })
+    send({ type: 'connected', isActive: false, sendReceipts: { back: 'never_ran' } })
+    expect(result.current.sendReceipts).toEqual({ back: 'never_ran' })
+    // An entry the renderer does not know drops alone; the rest of the snapshot still replaces.
+    send({ type: 'connected', isActive: false, sendReceipts: { back: 'ran', other: 1, kept: 'picked_up' } })
+    expect(result.current.sendReceipts).toEqual({ kept: 'picked_up' })
+    unmount()
+  })
+
+  it('drops a session\'s receipts when its last viewer leaves: the next connection brings them', async () => {
+    const { useMessageStream } = await getHookModule()
+    const first = renderHook(() => useMessageStream('receipts-release', 'agent-1'), { wrapper: createWrapper() })
+    act(() => MockEventSource.instances[0].simulateMessage({ type: 'connected', isActive: false, sendReceipts: { a: 'picked_up' } }))
+    expect(first.result.current.sendReceipts).toEqual({ a: 'picked_up' })
+    first.unmount()
+    const second = renderHook(() => useMessageStream('receipts-release', 'agent-1'), { wrapper: createWrapper() })
+    // Unknown, not empty, until the new connection's snapshot arrives.
+    expect(second.result.current.sendReceipts).toBeNull()
+    second.unmount()
+  })
+
+  it('keeps receipts unknown until the connection\'s snapshot, even after a frame or a reopened connection', async () => {
+    const { useMessageStream } = await getHookModule()
+    const first = renderHook(() => useMessageStream('receipts-unknown', 'agent-1'), { wrapper: createWrapper() })
+    act(() => MockEventSource.instances[0].simulateMessage({ type: 'command_lifecycle', commandUuid: 'early', state: 'started' }))
+    expect(first.result.current.sendReceipts).toBeNull()
+    act(() => MockEventSource.instances[0].simulateMessage({ type: 'connected', isActive: false, sendReceipts: { a: 'picked_up' } }))
+    expect(first.result.current.sendReceipts).toEqual({ a: 'picked_up' })
+    // The connection closed while another holder kept the session: the next one starts unknown.
+    MockEventSource.instances[0].readyState = MockEventSource.CLOSED
+    const second = renderHook(() => useMessageStream('receipts-unknown', 'agent-1'), { wrapper: createWrapper() })
+    expect(second.result.current.sendReceipts).toBeNull()
+    second.unmount()
+    first.unmount()
+  })
+
   it('keeps background work visible after a cancelled foreground turn, including reconnect', async () => {
     const { useMessageStream } = await getHookModule()
     const { result, unmount } = renderHook(() => useMessageStream('cancel-background', 'agent-1'), { wrapper: createWrapper() })

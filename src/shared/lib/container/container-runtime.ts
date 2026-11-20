@@ -304,6 +304,7 @@ export class ContainerRuntime {
       settleRecoveringSessions: (ids) => this.sessions().settleRecovering(ids),
       markRecovered: (ids) => this.sessions().markRecovered(ids),
       takeCoalescedUserMessages: (id) => this.sessions().takeCoalesced(id),
+      discardMessage: (id, uuid) => this.sessions().discarded(id, uuid),
       isSessionRecovering: (id) => this.sessions().isRecovering(id),
       isSubscribed: (id) => this.sessions().isSubscribed(id),
       subscribeToSession: (sessionId, client, containerSessionId) =>

@@ -9,8 +9,9 @@ import {
   clearPeerUserMessages,
   consumeDiscardedCommand,
   consumeThinkingBlocks,
+  type PeerUserMessage,
 } from '@renderer/hooks/use-message-stream'
-import { isTurnStartingUserMessage, type PendingMessage } from './pending-message'
+import { isTurnStartingUserMessage, savedSendIds, settlePending, type PendingMessage } from './pending-message'
 import { classifyUserMessage, classifyUserText } from './user-message-kinds'
 import { MessageItem, readsSubagentState } from './message-item'
 import { currentRoutedProviderError } from '@renderer/components/provider-error/provider-error-placement'
@@ -50,7 +51,6 @@ import {
 import { formatElapsed } from '@renderer/hooks/use-elapsed-timer'
 import type { ApiMessage, ApiCompactBoundary, ApiMemoryRecall, ApiInformational, ApiMonitorEvent } from '@shared/lib/types/api'
 import { isBlockingUserInputToolName } from '@shared/lib/tools/user-input-tools'
-import { parseSenderPrefix } from '@shared/lib/utils/sender-prefix'
 import { useMessageListScroll } from './use-message-list-scroll'
 import {
   collectEmbeddedImageAliases,
@@ -152,12 +152,6 @@ function foldsIntoWork(item: { type: string }): boolean {
   return item.type === 'user' && !!classifyUserMessage(item as ApiMessage).foldsIntoWork
 }
 
-/** A transcript entry carries `sent` (trimmed) as typed, or behind the sender prefix a shared agent receives. */
-function isSentText(transcriptText: string | undefined, sent: string): boolean {
-  const text = transcriptText?.trim() ?? ''
-  return text === sent || parseSenderPrefix(text).cleanText.trim() === sent
-}
-
 interface MessageListProps {
   sessionId: string
   agentSlug: string
@@ -176,7 +170,8 @@ interface MessageListProps {
 
 export function MessageList({ sessionId, agentSlug, pendingUserMessages, pendingRequestCount = 0, onPendingMessageAppeared, readOnly, suppressScrollToBottom = false, bottomInset = 0, messageTarget }: MessageListProps) {
   useRenderTracker('MessageList')
-  const { data: messages, isLoading, error, fetchOlder, hasOlder, isFetchingOlder } = useMessages(sessionId, agentSlug)
+  const { data: messages, isLoading, error, fetchOlder, hasOlder, isFetchingOlder, dataUpdatedAt } = useMessages(sessionId, agentSlug)
+  const [mountedAt] = useState(() => Date.now())
   // useMutation returns a new object every render; only `mutate` is stable, and the
   // row handlers must stay stable for MessageItem's memo.
   const { mutate: deleteMessage } = useDeleteMessage()
@@ -254,7 +249,7 @@ export function MessageList({ sessionId, agentSlug, pendingUserMessages, pending
     errorPresentation,
     typingUser,
     peerUserMessages,
-    discardedCommandUuids,
+    sendReceipts,
     workflows,
     thinkingBlocks,
   } = useMessageStream(sessionId, agentSlug)
@@ -275,108 +270,62 @@ export function MessageList({ sessionId, agentSlug, pendingUserMessages, pending
   }, [workflows, openWorkflow])
 
   const hasPendingMessages = !!pendingUserMessages?.length
-  // Pending messages sent from idle start a NEW turn, so the previous turn is
-  // over (close elapsed times, no more running tools). Queued ghosts (sent
-  // mid-turn) don't end the current turn, and undelivered ghosts never start
-  // one — neither may flip turn-derived state.
-  const hasTurnStartingPendingMessage = !!pendingUserMessages?.some((p) => !p.queued)
+  // A message sent from idle in this view ends the previous turn until its copy
+  // loads. Queued ones don't, and one from before this view says nothing about it.
+  const hasTurnStartingPendingMessage = !!pendingUserMessages?.some((p) => !p.queued && p.sentAt >= mountedAt)
 
-  // Persisted message ids already consumed by a text-fallback match. Prevents
-  // one persisted copy from clearing two ghosts with identical text. Exact
-  // uuid matches don't need claiming (ids are 1:1). Reset on session switch
-  // (keyed remount).
+  // Boundary ids a /compact ghost already claimed: one boundary clears one ghost.
   const claimedMessageIdsRef = useRef(new Set<string>())
+  const savedIds = useMemo(() => (messages ? savedSendIds(messages) : null), [messages])
 
-  // Materialize optimistic copies. Primary signal: the server-assigned uuid
-  // (from the POST response) becomes the JSONL entry id, so a fetched message
-  // carrying that id is OUR copy — exact match. Fallback: messages sent
-  // mid-turn (queued/steering) are re-id'd by the CLI on enqueue (see
-  // normalizeQueuedCommandEntry in session-service), so those — and sends
-  // whose POST response hasn't arrived yet — match by trimmed text + arrival
-  // window, claiming each persisted id at most once. Manual /compact is the
-  // exception: the runtime persists its effect as a compact boundary rather
-  // than as a user message, so that boundary materializes the command ghost.
+  // Settle optimistic copies by server uuid only: the saved copy is loaded, or the
+  // host recorded the outcome. A never-ran message goes back to the composer.
+  // Manual /compact settles on its compact boundary instead.
   useEffect(() => {
+    const settle = <T extends { uuid?: string; sentAt: number }>(pending: readonly T[]) =>
+      settlePending({ pending, saved: savedIds, receipts: sendReceipts, mountedAt, loadedSinceMount: dataUpdatedAt >= mountedAt, pageTruncated: hasOlder })
+    const { appeared, neverRan } = settle(pendingUserMessages ?? [])
+    if (neverRan.length > 0) {
+      const restored = neverRan.map((p) => asDraft(p.text)).filter(Boolean)
+      appendToSessionDraft(draftsStore, sessionId, restored.join('\n\n'), { prepend: true })
+    }
+    for (const pending of neverRan) {
+      onPendingMessageAppeared?.(pending.localId)
+      consumeDiscardedCommand(sessionId, pending.uuid!)
+    }
+    for (const pending of appeared) onPendingMessageAppeared?.(pending.localId)
+    // The server echoes user_message to the sender too; our own echo is
+    // redundant with the local pending copy — drop it immediately so it can't
+    // linger in stream state (it would suppress the typing indicator). Other
+    // viewers' ghosts settle the same way, without the text.
+    const peers: (PeerUserMessage & { sentAt: number })[] = []
+    for (const peer of peerUserMessages) {
+      if (peer.sender && peer.sender.id === user?.id) removePeerUserMessage(sessionId, peer.uuid)
+      else peers.push({ ...peer, sentAt: peer.receivedAt })
+    }
+    const settledPeers = settle(peers)
+    for (const peer of [...settledPeers.appeared, ...settledPeers.neverRan]) removePeerUserMessage(sessionId, peer.uuid)
+    for (const peer of settledPeers.neverRan) consumeDiscardedCommand(sessionId, peer.uuid)
     if (!messages) return
     const claimed = claimedMessageIdsRef.current
-    const findTextMatch = (text: string, notBefore: number) => {
-      const trimmed = text.trim()
-      return messages.find(
-        (m) =>
-          m.type === 'user' &&
-          !claimed.has(m.id) &&
-          isSentText((m.content as { text?: string }).text, trimmed) &&
-          new Date(m.createdAt).getTime() >= notBefore
-      )
-    }
     for (const pending of pendingUserMessages ?? []) {
-      let match = pending.uuid ? messages.find((m) => m.id === pending.uuid) : undefined
-      // Text fallback only where the uuid can't work: queued messages (CLI
-      // re-ids them) and sends still awaiting their POST response.
-      if (!match && (pending.queued || !pending.uuid)) {
-        match = findTextMatch(pending.text, pending.sentAt - 5000)
-        if (match) claimed.add(match.id)
-      }
-      if (!match && classifyUserText(pending.text).kind === 'compact') {
-        match = messages.find(
-          (m) =>
-            m.type === 'compact_boundary' &&
-            !claimed.has(m.id) &&
-            new Date(m.createdAt).getTime() >= pending.sentAt - 5000
-        )
-        if (match) claimed.add(match.id)
-      }
+      if (classifyUserText(pending.text).kind !== 'compact') continue
+      const match = messages.find(
+        (m) =>
+          m.type === 'compact_boundary' &&
+          !claimed.has(m.id) &&
+          new Date(m.createdAt).getTime() >= pending.sentAt - 5000
+      )
       if (match) {
+        claimed.add(match.id)
         onPendingMessageAppeared?.(pending.localId)
       }
     }
-    for (const peer of peerUserMessages) {
-      // The server echoes user_message to the sender too; our own echo is
-      // redundant with the local pending copy — drop it immediately so it
-      // can't linger in stream state (it would suppress the typing indicator).
-      if (peer.sender && peer.sender.id === user?.id) {
-        removePeerUserMessage(sessionId, peer.uuid)
-        continue
-      }
-      let match = messages.find((m) => m.id === peer.uuid)
-      if (!match && peer.queued) {
-        match = findTextMatch(peer.content, peer.receivedAt - 5000)
-        if (match) claimed.add(match.id)
-      }
-      if (match) {
-        removePeerUserMessage(sessionId, peer.uuid)
-      }
-    }
-  }, [messages, pendingUserMessages, peerUserMessages, onPendingMessageAppeared, sessionId, user?.id])
+  }, [messages, savedIds, pendingUserMessages, peerUserMessages, sendReceipts, mountedAt, dataUpdatedAt, hasOlder, onPendingMessageAppeared, sessionId, user?.id, draftsStore, asDraft])
 
-  // Deterministic ghost rescue: the runtime reported these queued messages
-  // dead via command_lifecycle discarded (e.g. killed by Stop, or dropped by
-  // the interrupt-and-restart an MCP injection does). The runtime named the
-  // uuid, so restore the ghost's text to the composer right away. Peer ghosts
-  // just drop (their own client restores their text).
-  useEffect(() => {
-    if (discardedCommandUuids.length === 0) return
-    const dead = new Set(discardedCommandUuids)
-    const rescued = (pendingUserMessages ?? []).filter((p) => p.uuid && dead.has(p.uuid))
-    if (rescued.length > 0) {
-      const restored = rescued.map((p) => asDraft(p.text)).filter(Boolean)
-      appendToSessionDraft(draftsStore, sessionId, restored.join('\n\n'), { prepend: true })
-      for (const pending of rescued) {
-        onPendingMessageAppeared?.(pending.localId)
-        consumeDiscardedCommand(sessionId, pending.uuid!)
-      }
-    }
-    for (const peer of peerUserMessages) {
-      if (dead.has(peer.uuid)) {
-        removePeerUserMessage(sessionId, peer.uuid)
-        consumeDiscardedCommand(sessionId, peer.uuid)
-      }
-    }
-  }, [discardedCommandUuids, pendingUserMessages, peerUserMessages, sessionId, draftsStore, onPendingMessageAppeared, asDraft])
-
-  // A pending message resolves only on proof: the transcript shows its id
-  // (materialize effect above), or the host says it never ran (discarded
-  // rescue above, a failed send, a confirmed take-back). Idle plus a transcript
+  // A pending message resolves only on proof: the transcript shows its id, or
+  // the host recorded it picked up or never ran (settle effect above, a failed
+  // send, a confirmed take-back). Idle plus a transcript
   // copy without it is not proof - the client's view of both can lag the
   // host's - so it stays pending until one of those arrives.
   //
@@ -853,34 +802,19 @@ export function MessageList({ sessionId, agentSlug, pendingUserMessages, pending
   }, [messages, isActive, hasTurnStartingPendingMessage])
 
   // Peer messages still worth showing optimistically: not our own, and the
-  // persisted copy (by uuid, or — for queued/steering messages whose uuid the
-  // CLI replaces — recent identical text) hasn't been fetched yet.
+  // persisted copy (by its uuid) hasn't been fetched yet.
   const visiblePeerMessages = useMemo(
-    () =>
-      peerUserMessages.filter(
-        (p) =>
-          (!p.sender || p.sender.id !== user?.id) &&
-          !messages?.some(
-            (m) =>
-              m.type === 'user' &&
-              (m.id === p.uuid ||
-                (p.queued &&
-                  isSentText((m.content as { text?: string }).text, p.content.trim()) &&
-                  new Date(m.createdAt).getTime() >= p.receivedAt - 5000))
-          )
-      ),
-    [peerUserMessages, messages, user?.id]
+    () => peerUserMessages.filter((p) => (!p.sender || p.sender.id !== user?.id) && !savedIds?.has(p.uuid)),
+    [peerUserMessages, savedIds, user?.id]
   )
 
   // Our own ghosts, less any whose persisted copy (by its server uuid) is already
-  // in the transcript. The materialize effect drops that ghost too, but only after
+  // in the transcript. The settle effect drops that ghost too, but only after
   // the commit that first draws the copy, so for one frame the message showed twice.
-  // Text-fallback matches stay with the effect, which claims each persisted copy once.
   const visiblePendingMessages = useMemo(() => {
     if (!pendingUserMessages?.some((p) => p.uuid)) return pendingUserMessages
-    const ids = new Set(messages?.map((m) => m.id))
-    return pendingUserMessages.filter((p) => !p.uuid || !ids.has(p.uuid))
-  }, [pendingUserMessages, messages])
+    return pendingUserMessages.filter((p) => !p.uuid || !savedIds?.has(p.uuid))
+  }, [pendingUserMessages, savedIds])
 
 
   // Cancel a queued message before the agent picks it up. cancelled: false
