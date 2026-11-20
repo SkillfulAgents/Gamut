@@ -509,8 +509,14 @@ function createMessageOps(
       readTranscriptView(sessionService.streamSessionMessagesWithCompact(store, sessionId), opts),
     findDeliveredFile: (sessionId, deliveryId) =>
       findDeliveredFile(sessionService.streamSessionMessagesWithCompact(store, sessionId), deliveryId),
-    page: (sessionId, opts) => sessionService.getSessionMessagesPage(store, sessionId, opts),
-    delta: (sessionId, opts) => sessionService.getSessionMessagesDelta(store, sessionId, opts),
+    page: async (sessionId, { subagent, ...opts }) =>
+      subagent
+        ? sessionService.getTranscriptMessagesPage(store, await transcripts.subagentTranscriptFile(store, sessionId, subagent), opts)
+        : sessionService.getSessionMessagesPage(store, sessionId, opts),
+    delta: async (sessionId, { subagent, ...opts }) =>
+      subagent
+        ? sessionService.getTranscriptMessagesDelta(store, await transcripts.subagentTranscriptFile(store, sessionId, subagent), opts)
+        : sessionService.getSessionMessagesDelta(store, sessionId, opts),
     findLastEntry: (sessionId, query, options) =>
       sessionService.findLastSessionEntry(store, sessionId, matchesTranscriptQuery(query), options),
     remove: (sessionId, messageUuid) => sessionService.removeMessage(store, sessionId, messageUuid),

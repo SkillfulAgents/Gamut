@@ -64,6 +64,7 @@ export type {
   MemoryOps,
   OpenFile,
   SubagentRef,
+  SubagentTranscriptRef,
   OpenWebSocketInit,
   WebSocketTarget,
   ReviewOps,
