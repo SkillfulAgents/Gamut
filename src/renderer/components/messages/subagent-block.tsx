@@ -182,6 +182,7 @@ export function SubagentTranscript(props: SubAgentBlockProps & {
     fetchOlder,
     hasOlder,
     isFetchingOlder,
+    olderFailed,
   } = useSubagentMessages(sessionId, agentSlug, subagentId)
   const media = useMemo(
     () => (subagentId ? { agentSlug, sessionId, subagent: { subagentId } } : undefined),
@@ -193,9 +194,10 @@ export function SubagentTranscript(props: SubAgentBlockProps & {
   const [showAll, setShowAll] = useState(false)
 
   // "Show earlier messages" walks the older pages until the transcript's start.
+  // A failed page stops the walk, and the button comes back to retry it.
   useEffect(() => {
-    if (showAll && hasOlder && !isFetchingOlder) void fetchOlder()
-  }, [showAll, hasOlder, isFetchingOlder, fetchOlder])
+    if (showAll && hasOlder && !isFetchingOlder && !olderFailed) void fetchOlder()
+  }, [showAll, hasOlder, isFetchingOlder, olderFailed, fetchOlder])
 
   // The parent selects this block's original or resumed run. A SendMessage
   // run has a different tool id but still streams into the same transcript.
@@ -292,10 +294,10 @@ export function SubagentTranscript(props: SubAgentBlockProps & {
             </div>
           )}
 
-          {hasOlder && !showAll && (
+          {hasOlder && (!showAll || olderFailed) && (
             <button
               type="button"
-              onClick={() => setShowAll(true)}
+              onClick={() => (showAll ? void fetchOlder() : setShowAll(true))}
               className="text-xs text-foreground hover:text-foreground/70 font-medium transition-colors py-1"
               data-testid="subagent-show-earlier"
             >

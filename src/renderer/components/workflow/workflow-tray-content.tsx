@@ -491,6 +491,16 @@ function WorkflowAgentDetail({
           </div>
         )}
         {!agent && loading && <div className="text-xs text-muted-foreground italic">Loading agent…</div>}
+        {messages.hasOlder && (
+          <button
+            type="button"
+            onClick={() => void messages.fetchOlder()}
+            disabled={messages.isFetchingOlder}
+            className="text-xs text-foreground hover:text-foreground/70 font-medium transition-colors py-1 disabled:opacity-50"
+          >
+            Show earlier messages
+          </button>
+        )}
         <WorkflowAgentTranscript messages={messages.data} agentSlug={agentSlug} isRunning={isRunning} media={media} />
         {finished && agent?.result && (
           <div className="rounded-item bg-muted/50 px-3 py-2 text-xs" data-testid="workflow-agent-result">
