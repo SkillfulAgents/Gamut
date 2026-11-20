@@ -49,6 +49,7 @@ const deploymentWith = (parts: { sessionStore: () => SessionStore; transport?: (
   sessionStore: parts.sessionStore,
   host: createRecordingHostPort().port,
   removeWorkspace: vi.fn(async () => {}),
+  idleTimer: () => ({ set: vi.fn(), clear: vi.fn() }),
 })
 
 afterEach(async () => {

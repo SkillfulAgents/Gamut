@@ -145,6 +145,8 @@ export interface AgentDeployment {
   host: HostPort
   /** How a deleted agent's workspace is removed (see `setWorkspaceRemoval`). */
   removeWorkspace: WorkspaceRemoval
+  /** What each agent's idle alarm waits with (see `LocalActorDeps.idleTimer`). */
+  idleTimer: (slug: AgentSlug) => IdleTimer
 }
 
 let deployment: AgentDeployment | undefined
