@@ -221,7 +221,8 @@ function createIdleAlarmHooks(slug: AgentSlug, deps: LocalActorDeps, runtime: ()
  * ends once the runner confirms the container stopped (`isDefinitelyStopped`):
  * a read that failed reads as stopped too, so until then it is read again. The
  * actor's first read only reads: startup waits for every agent's first read,
- * so the next pass confirms a stop. A start turns the checks back on.
+ * so the next pass confirms a stop. A start turns the checks back on. A runner
+ * that hears its containers exit (`reportsExits`) is read once, and not polled.
  */
 function createContainerWatchHooks(slug: AgentSlug, self: () => AgentState): AgentStateHooks['watch'] {
   let firstRead = true
@@ -247,6 +248,17 @@ function createContainerWatchHooks(slug: AgentSlug, self: () => AgentState): Age
       })
       // Dropped during the read (the agent evicted): asking it for a client would make one and restart the watch.
       if (state.peekRuntime() !== runtime) return
+      // A runner that hears its containers exit tells the actor itself: the first read is all it needs.
+      let hearsExits = false
+      try {
+        hearsExits = (await runtime.getClient()).reportsExits === true
+      } catch {
+        // No client to ask: the next pass asks again.
+      }
+      if (hearsExits) {
+        state.containerWatch.stop()
+        return
+      }
       if (!info || info.status === 'running' || !confirmsStop) return
       const confirmed = await runtime.getClient().then((client) => client.isDefinitelyStopped()).catch(() => false)
       // Reading was an await: a start may have begun meanwhile, and it turns the checks back on.
