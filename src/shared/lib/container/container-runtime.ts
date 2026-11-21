@@ -194,7 +194,7 @@ export class ContainerRuntime {
         this.client = createContainerClient(this.clientConfig(), configuredRunner)
         this.clientRunner = configuredRunner
         this.clientDecidedBy = ++this.clientReads
-        this.agent.containerWatch.start()
+        this.watch()?.start()
       }
       return this.client
     }
@@ -211,7 +211,7 @@ export class ContainerRuntime {
     this.client = createContainerClient(this.clientConfig(), runner)
     this.clientRunner = runner
     this.clientDecidedBy = read
-    this.agent.containerWatch.start()
+    this.watch()?.start()
     return this.client
   }
 
@@ -380,7 +380,7 @@ export class ContainerRuntime {
       // Nothing runs on the drives a failed start read, so a mark made during it means nothing.
       if (this.starting === startPromise) this.stale = false
       // A start that failed can still leave its container running: read it again.
-      if (!this.disposed) this.agent.containerWatch.start()
+      if (!this.disposed) this.watch()?.start()
       throw error
     } finally {
       // A later start that replaced this one clears and arms for itself when it settles.
@@ -408,7 +408,7 @@ export class ContainerRuntime {
   updateCachedStatus(status: 'running' | 'stopped', port: number | null): void {
     this.cached = { status, port, lastSyncedAt: Date.now() }
     if (status === 'running') {
-      this.agent.containerWatch.startHealth()
+      this.watch()?.startHealth()
     } else {
       this.stale = false
       this.agent.containerWatch.stopHealth()
@@ -915,6 +915,11 @@ export class ContainerRuntime {
   sleepableSince(): number | undefined {
     if (this.starting || this.stopping || this.getCachedInfo().status !== 'running') return undefined
     return this.activity.lastActivityAt()
+  }
+
+  /** The agent's container watch; none when the client's runner hears the container exit itself. */
+  private watch(): ContainerWatch | undefined {
+    return this.client?.reportsExits ? undefined : this.agent.containerWatch
   }
 
   private isBusy(): boolean {
