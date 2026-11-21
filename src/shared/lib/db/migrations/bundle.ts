@@ -908,5 +908,15 @@ export const migrationBundle: readonly MigrationMeta[] = [
     "bps": true,
     "folderMillis": 1795470844856,
     "hash": "02692a940bfefc5984bde41b3ba5bf785a74621e622fbbbb6b492b4661ab140c"
+  },
+  {
+    "sql": [
+      "-- A database from the Teams preview already has these tables and their data.\nCREATE TABLE IF NOT EXISTS `teams_cards` (\n\t`token` text PRIMARY KEY NOT NULL,\n\t`integration_id` text NOT NULL,\n\t`external_id` text NOT NULL,\n\t`request_id` text,\n\t`respondent_id` text NOT NULL,\n\t`activity_id` text,\n\t`payload` text NOT NULL,\n\t`created_at` integer NOT NULL,\n\tFOREIGN KEY (`integration_id`) REFERENCES `chat_integrations`(`id`) ON UPDATE no action ON DELETE cascade\n);\n",
+      "\nCREATE INDEX IF NOT EXISTS `teams_cards_request_idx` ON `teams_cards` (`integration_id`,`request_id`);",
+      "\nCREATE TABLE IF NOT EXISTS `teams_conversation_references` (\n\t`integration_id` text NOT NULL,\n\t`external_id` text NOT NULL,\n\t`tenant_id` text NOT NULL,\n\t`app_id` text NOT NULL,\n\t`service_url` text NOT NULL,\n\t`conversation_id` text NOT NULL,\n\t`team_id` text,\n\t`scope_id` text NOT NULL,\n\t`scope_type` text NOT NULL,\n\t`thread_root` text,\n\t`originator_id` text NOT NULL,\n\tPRIMARY KEY(`integration_id`, `external_id`),\n\tFOREIGN KEY (`integration_id`) REFERENCES `chat_integrations`(`id`) ON UPDATE no action ON DELETE cascade\n);\n"
+    ],
+    "bps": true,
+    "folderMillis": 1795633431180,
+    "hash": "678b2eaec9f9de658b16759b803903cf83d7a1273307c809e716d97e77767ed6"
   }
 ]

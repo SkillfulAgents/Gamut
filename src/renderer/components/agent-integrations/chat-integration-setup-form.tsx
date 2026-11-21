@@ -55,7 +55,7 @@ function SlackNames({ names }: { names: string[] }) {
   </ul>
 }
 
-type ManualChatProvider = Exclude<ChatProvider, 'telegram'>
+type ManualChatProvider = Exclude<ChatProvider, 'telegram' | 'teams'>
 
 /** Under each setup's heading: what connecting gets you. */
 const CHAT_DESCRIPTIONS: Record<ManualChatProvider, string> = {
@@ -88,7 +88,7 @@ const PROVIDER_INFO: Record<ManualChatProvider, {
 /** A wizard step, plus the required fields it holds: an empty one brings the person back to it. */
 type ChatSetupStep = IntegrationSetupWizardStep & { fields?: string[] }
 
-export function ChatIntegrationSetupForm({ provider, ...props }: IntegrationSetupProps & { provider: ChatProvider }) {
+export function ChatIntegrationSetupForm({ provider, ...props }: IntegrationSetupProps & { provider: Exclude<ChatProvider, 'teams'> }) {
   if (provider === 'telegram') return <TelegramSetupForm {...props} />
   return <ManualChatSetupForm {...props} provider={provider} />
 }
