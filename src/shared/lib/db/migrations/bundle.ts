@@ -918,5 +918,18 @@ export const migrationBundle: readonly MigrationMeta[] = [
     "bps": true,
     "folderMillis": 1795633431180,
     "hash": "678b2eaec9f9de658b16759b803903cf83d7a1273307c809e716d97e77767ed6"
+  },
+  {
+    "sql": [
+      "-- The preview already added display_name on some installations. Rebuild once\n-- so either table shape can upgrade without losing its conversation references.\nCREATE TABLE `__new_teams_conversation_references` (\n\t`integration_id` text NOT NULL,\n\t`external_id` text NOT NULL,\n\t`tenant_id` text NOT NULL,\n\t`app_id` text NOT NULL,\n\t`service_url` text NOT NULL,\n\t`conversation_id` text NOT NULL,\n\t`team_id` text,\n\t`scope_id` text NOT NULL,\n\t`scope_type` text NOT NULL,\n\t`thread_root` text,\n\t`originator_id` text NOT NULL,\n\t`display_name` text,\n\tPRIMARY KEY(`integration_id`, `external_id`),\n\tFOREIGN KEY (`integration_id`) REFERENCES `chat_integrations`(`id`) ON UPDATE no action ON DELETE cascade\n);\n",
+      "\nINSERT INTO __new_teams_conversation_references (\n  integration_id, external_id, tenant_id, app_id, service_url, conversation_id,\n  team_id, scope_id, scope_type, thread_root, originator_id, display_name\n)\nSELECT integration_id, external_id, tenant_id, app_id, service_url, conversation_id,\n       team_id, scope_id, scope_type, thread_root, originator_id, display_name\nFROM teams_conversation_references\n-- A natural left join keeps the existing display_name if the column is present\n-- and supplies the NULL column from the right if it is missing.\nNATURAL LEFT JOIN (SELECT NULL AS display_name);\n",
+      "\nDROP TABLE teams_conversation_references;\n",
+      "\nALTER TABLE __new_teams_conversation_references RENAME TO teams_conversation_references;\n",
+      "\nUPDATE teams_conversation_references AS ref\nSET display_name = (\n  SELECT coalesce(access.title, CASE WHEN ref.scope_type = 'personal' THEN access.first_user_name END)\n  FROM chat_integration_access AS access\n  WHERE access.integration_id = ref.integration_id AND access.external_chat_id = ref.external_id\n)\nWHERE ref.thread_root IS NULL AND ref.display_name IS NULL;\n",
+      "\nDELETE FROM chat_integration_access\nWHERE integration_id IN (SELECT id FROM chat_integrations WHERE provider = 'teams');\n"
+    ],
+    "bps": true,
+    "folderMillis": 1795633500528,
+    "hash": "af832116009d627823c324cfb01cb41bbadba58439cb4084cd91a006aa9e379b"
   }
 ]
