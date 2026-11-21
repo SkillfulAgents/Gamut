@@ -1,10 +1,8 @@
 [TEST_PASS]
-[REASON] Opened the Gamut app, selected agent QA-20261121-022944-98r7, confirmed it was idle, sent "Hello! What is 2+2?", and verified the reply mentions 4.
-[STEP] Step 1, navigate to http://localhost:47891 — the Gamut home page loaded with the sidebar listing QA-20261121-022945-xyk7 and QA-20261121-022944-98r7, both idle.
-[STEP] Step 2, click the "QA-20261121-022944-98r7" agent in the sidebar — the agent page opened at /agents/qa-20261121-022944-98r7-lo1wxzm6y1 with its name in the header.
-[STEP] Step 3, verify status is "running" or "idle" — the status indicator on the agent page reads "idle". Screenshot taken.
-[STEP] Step 4, send "Hello! What is 2+2?" — typed into the message box and pressed Enter, which did not submit (the box still showed the text and the Send button became enabled). Clicked the Send button, and the chat opened in session "Basic Arithmetic Greeting Check" with the user message shown once.
-[STEP] Step 5, wait up to 3 minutes for a response — the reply appeared before any wait was needed; no explicit wait was performed.
-[STEP] Step 6, verify the response mentions "4" and take a screenshot — the assistant reply reads "2 + 2 = 4.", the activity indicator is idle, and the screenshot was taken.
-
-Note (not logged as a bug): plain Enter does not send from the first-message box. The placeholder says "Press cmd+enter to send", so this appears to be by design.
+[REASON] Opened agent QA-20261121-202406-m76p, confirmed it was idle, sent "Hello! What is 2+2?", and verified the reply contains "4".
+[STEP] Step 1: Navigated to http://localhost:47891 — the Gamut app loaded and the sidebar listed QA-20261121-202407-g43t and QA-20261121-202406-m76p, both idle.
+[STEP] Step 2: Clicked QA-20261121-202406-m76p in the sidebar — the agent page opened at /agents/qa-20261121-202406-m76p-2v4xi3b1yw with its name in the header.
+[STEP] Step 3: Checked the agent status — the header shows "idle" and the sidebar shows the agent as idle, so the "running or idle" requirement is met.
+[STEP] Step 4: Typed "Hello! What is 2+2?" into the message input and clicked the send button — the message was submitted and the view moved to a new session (New Session).
+[STEP] Step 5: Waited for a response — the reply "2 + 2 = 4." appeared in the message list almost immediately, so no wait beyond the first check was needed.
+[STEP] Step 6: Verified the response mentions "4" — it reads "2 + 2 = 4.", and the screenshot shows the user message followed by the assistant reply in the chat view.
