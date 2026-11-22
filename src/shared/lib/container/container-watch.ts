@@ -1,7 +1,7 @@
 /**
  * The checks on one agent's container, which the agent's actor owns, as it
- * owns the idle alarm: each waits on a timer of the watch's own (`IdleTimer`),
- * and nothing host-wide schedules them.
+ * owns the idle alarm: each waits on a timer of its own in this process, and
+ * nothing host-wide schedules them.
  *
  * - Every 300 s, whether the container runs. A container can exit without
  *   this process (a crash, a kill, a runtime that restarted), and a read that
@@ -47,12 +47,6 @@ export interface ContainerWatchDeps {
   checkHealth(): Promise<void>
   /** Ask the runtime whether the container still runs, and update what the app shows. */
   checkStatus(): Promise<void>
-  /**
-   * What each check waits with between passes, read once per check at its
-   * first start; this process's timer unless the deployment gives one (see
-   * `IdleTimer`).
-   */
-  timer?(): IdleTimer
 }
 
 /** One check that runs every `intervalMs` while it is on. */
@@ -65,7 +59,6 @@ class RecurringCheck {
     private readonly intervalMs: number,
     private readonly slots: ReturnType<typeof pLimit>,
     private readonly check: () => Promise<void>,
-    private readonly timer: () => IdleTimer,
   ) {}
 
   isOn(): boolean {
@@ -91,7 +84,7 @@ class RecurringCheck {
   }
 
   private arm(): void {
-    (this.waiting ??= this.timer()).set(this.intervalMs, () => background(this.pass(), { name: this.name }))
+    (this.waiting ??= processIdleTimer()).set(this.intervalMs, () => background(this.pass(), { name: this.name }))
   }
 
   private async pass(): Promise<void> {
@@ -111,9 +104,8 @@ export class ContainerWatch {
   private readonly health: RecurringCheck
 
   constructor(deps: ContainerWatchDeps) {
-    const timer = () => deps.timer?.() ?? processIdleTimer()
-    this.status = new RecurringCheck('container-watch.status', STATUS_CHECK_INTERVAL_MS, statusSlots, () => deps.checkStatus(), timer)
-    this.health = new RecurringCheck('container-watch.health', HEALTH_CHECK_INTERVAL_MS, healthSlots, () => deps.checkHealth(), timer)
+    this.status = new RecurringCheck('container-watch.status', STATUS_CHECK_INTERVAL_MS, statusSlots, () => deps.checkStatus())
+    this.health = new RecurringCheck('container-watch.health', HEALTH_CHECK_INTERVAL_MS, healthSlots, () => deps.checkHealth())
   }
 
   /** Start the status check; nothing when it runs already. */

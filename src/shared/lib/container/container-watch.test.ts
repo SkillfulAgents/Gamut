@@ -1,14 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ContainerWatch } from './container-watch'
-import type { IdleTimer } from './idle-alarm'
 
 const HEALTH_MS = 30_000
 const STATUS_MS = 300_000
 
-function watchOf(timer?: () => IdleTimer) {
+function watchOf() {
   const checkHealth = vi.fn(async () => {})
   const checkStatus = vi.fn(async () => {})
-  return { watch: new ContainerWatch({ checkHealth, checkStatus, timer }), checkHealth, checkStatus }
+  return { watch: new ContainerWatch({ checkHealth, checkStatus }), checkHealth, checkStatus }
 }
 
 describe('ContainerWatch', () => {
@@ -101,27 +100,5 @@ describe('ContainerWatch', () => {
 
     for (const { watch } of agents) watch.stop()
     releases.splice(0).forEach((release) => release())
-  })
-
-  it('waits on the timer the deployment gives, one per check', async () => {
-    const timers: Array<{ set: ReturnType<typeof vi.fn>; clear: ReturnType<typeof vi.fn> }> = []
-    const { watch, checkStatus } = watchOf(() => {
-      const timer = { set: vi.fn(), clear: vi.fn() }
-      timers.push(timer)
-      return timer
-    })
-    watch.startHealth()
-    expect(timers).toHaveLength(2)
-    expect(timers.map((timer) => timer.set.mock.calls[0][0])).toEqual([STATUS_MS, HEALTH_MS])
-
-    // The deployment's timer goes off: the check runs, and the next pass is set on the same timer.
-    timers[0].set.mock.calls[0][1]()
-    await vi.advanceTimersByTimeAsync(0)
-    expect(checkStatus).toHaveBeenCalledTimes(1)
-    expect(timers[0].set).toHaveBeenCalledTimes(2)
-
-    watch.stop()
-    expect(timers[0].clear).toHaveBeenCalled()
-    expect(timers[1].clear).toHaveBeenCalled()
   })
 })
