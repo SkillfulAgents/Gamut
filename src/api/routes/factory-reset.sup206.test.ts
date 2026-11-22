@@ -160,6 +160,16 @@ const BETTER_AUTH_TABLES = new Set<unknown>([
   schema.authSession,
   schema.authAccount,
   schema.verification,
+  // The MCP authorization server's: like sessions, a person's connected
+  // clients survive with the person (they are revoked in Settings → MCP Server).
+  schema.jwks,
+  schema.oauthClient,
+  schema.oauthResource,
+  schema.oauthClientResource,
+  schema.oauthRefreshToken,
+  schema.oauthAccessToken,
+  schema.oauthConsent,
+  schema.oauthClientAssertion,
 ])
 
 // The data-migration ledger survives too: it says which one-time moves this
