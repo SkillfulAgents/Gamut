@@ -1163,6 +1163,18 @@ html[data-keyboard-open] [data-composer-footer] {
   z-index: 30;
 }
 
+/* A floating drawer (drawer-shell.tsx) is see-through, so its card floats over the page. Where it covers the view
+   instead of standing beside it, the view would show through around the card: it takes the page's own off-white
+   back (--canvas, the page under Agent Home and a session), and over the view it keeps the side shadow that says it
+   is on top. */
+.tray-drawer-floating.file-preview-wide-overlay,
+.tray-drawer-floating.tray-drawer-fullscreen {
+  background-color: hsl(var(--background));
+}
+.tray-drawer-floating.file-preview-wide-overlay {
+  box-shadow: -4px 0 16px rgba(0, 0, 0, 0.08);
+}
+
 /* Full screen: the drawer covers its whole tray host (the session body or the
    agent home body, both `relative`), edge to edge. Width is forced over the
    persisted inline value the same way the compact overlay does it. */
@@ -1180,6 +1192,8 @@ html[data-keyboard-open] [data-composer-footer] {
 }
 
 @container (max-width: 767px) {
+  .tray-wide-only { display: none; }
+  .tray-drawer-floating.file-preview-responsive-overlay { background-color: hsl(var(--background)); }
   .file-preview-responsive-overlay {
     position: absolute;
     inset-block: 0;

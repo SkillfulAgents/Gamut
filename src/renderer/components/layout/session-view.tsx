@@ -199,7 +199,7 @@ export function SessionView({ agentSlug, sessionId, onSessionCreated: handleSess
         />
       )}
 
-      <FilePreviewProvider sessionAgentSlug={agentSlug} commentsEnabled={!isViewOnly}>
+      <FilePreviewProvider rememberTabs sessionAgentSlug={agentSlug} commentsEnabled={!isViewOnly}>
         <WorkflowProvider>
           <div className="flex-1 flex flex-col min-h-0">
             {sessionId && <SessionSearchBar search={search} />}

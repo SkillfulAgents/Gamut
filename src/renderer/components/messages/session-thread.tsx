@@ -120,7 +120,7 @@ export function SessionThread({
         </div>
       </div>
       {/* Side tray (browser, file preview) */}
-      {sessionId && <TrayManager agentSlug={agentSlug} sessionId={sessionId} browserActive={browserActive} />}
+      {sessionId && <TrayManager agentSlug={agentSlug} sessionId={sessionId} browserActive={browserActive} persistent />}
     </div>
   )
 }
