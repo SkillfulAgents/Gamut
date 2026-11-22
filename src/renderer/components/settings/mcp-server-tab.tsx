@@ -112,9 +112,9 @@ export function McpServerTab() {
     <div className="space-y-6" data-testid="mcp-server-tab">
       <p className="px-1 text-[11px] leading-relaxed text-muted-foreground" data-testid="mcp-server-intro">
         {local
-          ? 'Let other AI tools on this computer, like Claude Code, Codex and Cursor, read your Gamut drives, agents and sessions through MCP.'
-          : 'Let AI tools like Claude Code, Codex and Cursor read this workspace\'s drives, agents and sessions through MCP.'}{' '}
-        They connect with the token below and can read what you can read here. They cannot change anything.
+          ? 'Let other AI tools on this computer, like Claude Code, Codex and Cursor, work with your Gamut agents through MCP: read your drives and sessions, ask the Team Brain, and run agents, sending and receiving files.'
+          : 'Let AI tools like Claude Code, Codex and Cursor work with this workspace\'s agents through MCP: read its drives and sessions, ask the Team Brain, and run agents, sending and receiving files.'}{' '}
+        They connect with the token below and can do what you can do here. A tool that runs an agent makes it act with that agent&apos;s connected accounts.
       </p>
 
       <div className="space-y-2">
@@ -148,7 +148,7 @@ export function McpServerTab() {
             <div className="min-w-0 flex-1">
               <div className="text-xs font-medium">Token</div>
               <div className="mt-0.5 text-[11px] text-muted-foreground">
-                Anyone with it can read what you can in Gamut. Regenerating it disconnects every client until you update its setup.
+                Anyone with it can read and run what you can in Gamut. Regenerating it disconnects every client until you update its setup.
               </div>
             </div>
             {canManage && (

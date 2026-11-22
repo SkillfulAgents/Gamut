@@ -72,7 +72,7 @@ describe('McpServerTab', () => {
   it('says the server is the workspace\'s on a web deployment, promising nothing about this computer', async () => {
     where.local = false
     renderTab()
-    expect(await screen.findByTestId('mcp-server-intro')).toHaveTextContent('read this workspace\'s drives')
+    expect(await screen.findByTestId('mcp-server-intro')).toHaveTextContent('work with this workspace\'s agents')
     expect(screen.getByTestId('mcp-server-intro')).not.toHaveTextContent('this computer')
     expect(screen.getByTestId('mcp-server-reach')).toHaveTextContent('any computer that can reach it')
     expect(screen.getByTestId('mcp-server-reach')).not.toHaveTextContent('claude.ai')
