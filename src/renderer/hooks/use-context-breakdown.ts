@@ -14,7 +14,7 @@ export function useContextBreakdown(sessionId: string, agentSlug: string, enable
     // Let a started count finish in the query cache. A React remount then
     // shares that request instead of asking the runtime to count twice.
     queryFn: async () => {
-      const res = await apiFetch(`/api/agents/${agentSlug}/sessions/${sessionId}/context`)
+      const res = await apiFetch(`/api/agents/${encodeURIComponent(agentSlug)}/sessions/${encodeURIComponent(sessionId)}/context`)
       if (!res.ok) throw new Error('Failed to read context')
       return contextBreakdownResponseSchema.parse(await res.json()).breakdown
     },

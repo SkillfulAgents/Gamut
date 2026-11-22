@@ -37,6 +37,13 @@ describe('BaseContainerClient.forkSession', () => {
 })
 
 describe('BaseContainerClient.getContextBreakdown', () => {
+  it('passes the session id as one URL segment', async () => {
+    const client = new StubFetchClient(Response.json({ breakdown: null }))
+    const fetch = vi.spyOn(client, 'fetch')
+    await client.getContextBreakdown('notes #2')
+    expect(fetch).toHaveBeenCalledWith('/sessions/notes%20%232/context', { method: 'GET' })
+  })
+
   it('supports older agent images and non-resident sessions', async () => {
     const old = new StubFetchClient(new Response('404 Not Found', { status: 404 }))
     expect(await old.getContextBreakdown('s')).toBeNull()

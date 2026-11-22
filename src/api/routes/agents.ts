@@ -3358,6 +3358,8 @@ agents.post('/:id/sessions/:sessionId/interrupt', AgentUser(), async (c) => {
 // null while the session has no live runtime to ask: a stopped agent, or a
 // session the runtime has not loaded.
 agents.get('/:id/sessions/:sessionId/context', AgentUser(), async (c) => {
+  // A meeting page can read its transcript, but does not need a paid runtime count.
+  if (getMeetingParticipant(c)) return c.json({ error: 'Forbidden' }, 403)
   const agentSlug = getAgentId(c)
   const sessionId = c.req.param('sessionId')
   const actor = agentRegistry.get(agentSlug)

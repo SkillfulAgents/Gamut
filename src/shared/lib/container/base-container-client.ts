@@ -1797,7 +1797,7 @@ export abstract class BaseContainerClient extends EventEmitter implements Contai
   }
 
   async getContextBreakdown(sessionId: string): Promise<ContextBreakdown | null> {
-    const response = await this.fetch(`/sessions/${sessionId}/context`, { method: 'GET' })
+    const response = await this.fetch(`/sessions/${encodeURIComponent(sessionId)}/context`, { method: 'GET' })
     // A missing route on an older agent image and a non-resident session
     // both mean that detailed usage is unavailable.
     if (response.status === 404) return null
