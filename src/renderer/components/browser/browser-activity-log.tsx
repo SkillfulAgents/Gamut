@@ -219,7 +219,7 @@ const CompactToolCall = memo(function CompactToolCall({ toolCall }: { toolCall: 
           {renderer?.displayName ?? toolCall.name.replace(BROWSER_TOOL_PREFIX, '')}
         </span>
         {summary && (
-          <span className="text-muted-foreground truncate min-w-0">{summary}</span>
+          <span className="text-foreground/70 truncate min-w-0">{summary}</span>
         )}
         {hasDetail && (
           <span className="ml-auto shrink-0">
@@ -236,7 +236,7 @@ const CompactToolCall = memo(function CompactToolCall({ toolCall }: { toolCall: 
           'ml-5 mt-0.5 mb-1 text-2xs leading-snug whitespace-pre-wrap break-words rounded p-1.5 max-h-32 overflow-y-auto',
           isError
             ? 'bg-red-50/50 text-red-700 dark:bg-red-950/30 dark:text-red-300'
-            : 'bg-muted/30 text-muted-foreground'
+            : 'bg-muted/30 text-foreground/70'
         )}>
           {resultText}
         </pre>
@@ -263,7 +263,7 @@ function CompactStreamingTool({ name, partialInput }: { name: string; partialInp
         {renderer?.displayName ?? name.replace(BROWSER_TOOL_PREFIX, '')}
       </span>
       {summary && (
-        <span className="text-muted-foreground truncate min-w-0">{summary}</span>
+        <span className="text-foreground/70 truncate min-w-0">{summary}</span>
       )}
     </div>
   )
