@@ -1,25 +1,24 @@
 {
   "storyId": "agent-chat",
   "passed": true,
-  "reason": "Opened agent QA-20261121-203241-y43e, sent \"Hello! What is 2+2?\", and confirmed the reply contains 4.",
+  "reason": "Sent \"Hello! What is 2+2?\" to agent QA-20261122-182544-5pyq and verified the reply contains \"4\".",
   "steps": [
-    "Navigated to http://localhost:47891 — the Gamut home page loaded with the sidebar listing both agents.",
-    "Clicked the QA-20261121-203241-y43e agent in the sidebar — its agent page opened at /agents/qa-20261121-203241-y43e-kv19e0ho2h.",
-    "Verified agent status — the header status indicator reads \"idle\", which is an allowed status.",
-    "Typed \"Hello! What is 2+2?\" into the message box — the text appeared and the send button became enabled.",
-    "Clicked send — a new session \"Simple Arithmetic Question\" opened, the user message appeared, and the activity indicator showed \"Working...\".",
-    "Waited up to 3 minutes for the response — \"Working...\" cleared and the agent returned within that window (the status went back to idle).",
-    "Verified the response and took a screenshot (step5-response.png) — the final assistant message reads \"2 + 2 = 4.\", which contains \"4\"."
+    "Step 1: Navigated to http://localhost:47891 — the Gamut app loaded with the sidebar listing agents, including QA-20261122-182544-5pyq.",
+    "Step 2: Clicked QA-20261122-182544-5pyq in the sidebar — the agent page opened at /agents/qa-20261122-182544-5pyq-sj0w68esfo.",
+    "Step 3: Checked the agent status — the status indicator in the header reads \"idle\", which is an allowed state.",
+    "Step 4: Typed \"Hello! What is 2+2?\" into the message input and clicked Send — the browser moved to a new session at /sessions/45f7beae-6f1a-4bd9-8a94-e04c264114e6 and the message appeared in the chat.",
+    "Step 5: Waited for the response — \"2 + 2 = 4.\" appeared in the message list on the first check, so no wait was needed. The header status reads \"idle\" and no activity indicator is visible.",
+    "Step 6: Verified the response mentions \"4\" — it reads \"2 + 2 = 4.\" Screenshot taken as step6-response.png."
   ],
   "bugs": [],
-  "durationMs": 67320,
-  "sessionId": "488dc768-0a73-4270-b81e-5f19ebb1e2ee",
+  "durationMs": 31142,
+  "sessionId": "6d04eb74-c275-4047-a403-052e0ba81f87",
   "cost": {
-    "inputTokens": 7778,
-    "outputTokens": 6276,
-    "cacheCreationTokens": 78350,
-    "cacheReadTokens": 807292,
+    "inputTokens": 8299,
+    "outputTokens": 4829,
+    "cacheCreationTokens": 69879,
+    "cacheReadTokens": 650321,
     "model": "claude-haiku-5-5",
-    "totalCostUsd": 0.217825
+    "totalCostUsd": 0.184825
   }
 }

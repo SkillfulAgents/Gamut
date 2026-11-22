@@ -1,9 +1,10 @@
 [TEST_PASS]
-[REASON] Opened agent QA-20261121-203241-y43e, sent "Hello! What is 2+2?", and confirmed the reply contains 4.
-[STEP] Navigated to http://localhost:47891 — the Gamut home page loaded with the sidebar listing both agents.
-[STEP] Clicked the QA-20261121-203241-y43e agent in the sidebar — its agent page opened at /agents/qa-20261121-203241-y43e-kv19e0ho2h.
-[STEP] Verified agent status — the header status indicator reads "idle", which is an allowed status.
-[STEP] Typed "Hello! What is 2+2?" into the message box — the text appeared and the send button became enabled.
-[STEP] Clicked send — a new session "Simple Arithmetic Question" opened, the user message appeared, and the activity indicator showed "Working...".
-[STEP] Waited up to 3 minutes for the response — "Working..." cleared and the agent returned within that window (the status went back to idle).
-[STEP] Verified the response and took a screenshot (step5-response.png) — the final assistant message reads "2 + 2 = 4.", which contains "4".
+[REASON] Sent "Hello! What is 2+2?" to agent QA-20261122-182544-5pyq and verified the reply contains "4".
+[STEP] Step 1: Navigated to http://localhost:47891 — the Gamut app loaded with the sidebar listing agents, including QA-20261122-182544-5pyq.
+[STEP] Step 2: Clicked QA-20261122-182544-5pyq in the sidebar — the agent page opened at /agents/qa-20261122-182544-5pyq-sj0w68esfo.
+[STEP] Step 3: Checked the agent status — the status indicator in the header reads "idle", which is an allowed state.
+[STEP] Step 4: Typed "Hello! What is 2+2?" into the message input and clicked Send — the browser moved to a new session at /sessions/45f7beae-6f1a-4bd9-8a94-e04c264114e6 and the message appeared in the chat.
+[STEP] Step 5: Waited for the response — "2 + 2 = 4." appeared in the message list on the first check, so no wait was needed. The header status reads "idle" and no activity indicator is visible.
+[STEP] Step 6: Verified the response mentions "4" — it reads "2 + 2 = 4." Screenshot taken as step6-response.png.
+
+Bugs: none observed. The only console output was four WebGL GL Driver warnings, which I did not treat as a bug.
