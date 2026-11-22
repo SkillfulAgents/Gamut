@@ -2335,6 +2335,19 @@ describe('useMessageStream', () => {
     const browserStatusCalls = () =>
       vi.mocked(globalThis.fetch).mock.calls.filter(([url]) => String(url).endsWith('/browser/status')).length
 
+    it('retains a newer live browser update when its status request finishes later', async () => {
+      const { useMessageStream } = await getHookModule()
+      const { result } = renderHook(() => useMessageStream('session-1', 'agent-1'), { wrapper: createWrapper() })
+      const es = MockEventSource.instances[0]
+      browserStatus({ active: false })
+      await act(async () => {
+        es.simulateMessage({ type: 'connected', isActive: true })
+        es.simulateMessage({ type: 'browser_active', active: true })
+      })
+      expect(result.current.browserActive).toBe(true)
+      expect(result.current.browserStatusKnown).toBe(true)
+    })
+
     it('resumed with a replay (no snapshot) checks the browser again and keeps the streamed text', async () => {
       const { useMessageStream, clearBrowserActive } = await getHookModule()
       const { result } = renderHook(() => useMessageStream('session-1', 'agent-1'), { wrapper: createWrapper() })

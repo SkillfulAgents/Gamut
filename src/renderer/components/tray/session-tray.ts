@@ -1,7 +1,7 @@
 import type { BrowserTabInfo } from '@shared/lib/browser-stream-protocol'
 import type { FileComment, PreviewTab } from '@renderer/context/file-preview-context'
 import { getPreviewTabKey } from '@renderer/lib/preview-tab-key'
-import type { TrayUtilityTargets, UtilityId } from './tray-resident'
+import type { RegisteredResident, TrayUtilityTargets, UtilityId } from './tray-resident'
 
 type BrowserEntry = { kind: 'browser'; key: string; page?: BrowserTabInfo }
 export type TrayEntry =
@@ -34,7 +34,9 @@ function selectionAfterRemoval(before: TrayEntry[], after: TrayEntry[], selected
 export class SessionTray {
   private state: TrayState = { tabs: [], selected: null, hidden: false, comments: new Map() }
   private listeners = new Set<() => void>()
+  constructor(private readonly residents: readonly RegisteredResident[] = []) {}
   private seq = 0
+  private launcherKey: string | null = null
   private viewedBrowserPage: string | null = null
   snapshot = () => this.state
   subscribe = (listener: () => void) => {
@@ -46,15 +48,20 @@ export class SessionTray {
     this.listeners.forEach(listener => listener())
   }
   private open(tab: TrayEntry) {
-    const { tabs, selected } = this.state
+    const { tabs } = this.state
     const old = tabs.find(item => item.key === tab.key)
-    const launcher = tabs.find(item => item.key === selected && item.kind === 'new')
+    const launcher = tabs.find(item => item.key === this.launcherKey && item.kind === 'new')
     let next = tabs
     if (old) next = tabs.map(item => item === old ? tab : item)
     else if (launcher && tab.kind !== 'new') next = tabs.map(item => item === launcher ? tab : item)
     else next = [...tabs, tab]
     if (old && launcher && tab.kind !== 'new') next = next.filter(item => item !== launcher)
     this.update({ tabs: next, selected: tab.key, hidden: false })
+  }
+  /** A choice made inside a launcher consumes that launcher. Opening from chat leaves it in the strip. */
+  pickFromLauncher = (key: string, open: () => void) => {
+    this.launcherKey = key
+    try { open() } finally { this.launcherKey = null }
   }
   select = (key: string) => {
     if (this.state.tabs.some(tab => tab.key === key)) this.update({ selected: key, hidden: false })
@@ -69,7 +76,9 @@ export class SessionTray {
   show = () => this.state.tabs.length ? this.update({ hidden: false }) : this.openNew()
   openNew = () => this.open({ kind: 'new', key: `new:${++this.seq}` })
   openUtility = <K extends UtilityId>(id: K, target?: TrayUtilityTargets[K]) => {
-    const key = `utility:${id}`
+    const resident = this.residents.find(entry => entry.id === id)
+    const resourceKey = resident?.keyFor?.(target ?? null)
+    const key = resourceKey === undefined ? `utility:${id}` : `utility:${id}:${resourceKey}`
     const previous = this.state.tabs.find(tab => tab.key === key)
     this.open({ kind: 'utility', id, key, target: target === undefined && previous?.kind === 'utility' ? previous.target : target ?? null })
   }
@@ -108,7 +117,8 @@ export class SessionTray {
     const comments = transform(this.state.comments)
     if (comments !== this.state.comments) this.update({ comments })
   }
-  browserAvailable = (available: boolean) => {
+  browserAvailable = (available: boolean | null) => {
+    if (available === null) return
     if (!available) {
       this.viewedBrowserPage = null
       this.replaceBrowserPages([])

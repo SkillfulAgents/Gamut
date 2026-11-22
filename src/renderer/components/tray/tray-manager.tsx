@@ -21,7 +21,7 @@ const DRAWER_STORAGE_KEY = 'tray_drawer_width'
 export interface TrayManagerProps {
   agentSlug: string
   sessionId: string
-  browserActive: boolean
+  browserActive: boolean | null
   /**
    * A session's own drawer: Hide keeps the tabs behind a button, and the tabs
    * are there again when the session is reopened. Off for a home page's
@@ -275,7 +275,7 @@ export function TrayManager({
               runId={frontTab.runId} agentId={frontTab.agentId} fallbackName={frontTab.name} />
           )}
           {!hidden && frontTab?.kind === 'new' && (
-            <TrayEmptyState agentSlug={agentSlug} sessionId={sessionId}
+            <TrayEmptyState launcherKey={frontTab.key} agentSlug={agentSlug} sessionId={sessionId}
               onOpenFile={(path, description) => openFile(path, agentSlug, description)}
               onOpenWorkspace={() => openFolder('/workspace', agentSlug)} />
           )}

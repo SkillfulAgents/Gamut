@@ -17,7 +17,7 @@ interface SessionThreadProps {
    *  enough live-edge clearance to keep the newest content readable. */
   overlayFooter?: boolean
   /** Whether the browser tray tab is available (interactive session view only). */
-  browserActive?: boolean
+  browserActive?: boolean | null
   /** Read-only mirror (chat-integration replay): suppress message edit/delete actions. */
   readOnly?: boolean
   // MessageList passthrough — supplied by the interactive session view, omitted when read-only.
