@@ -1,8 +1,8 @@
 [TEST_PASS]
-[REASON] Opened the QA-20261121-193058-k0jn agent, confirmed it was idle, sent "Hello! What is 2+2?", and verified the reply contains 4.
-[STEP] Step 1: Navigated to http://localhost:47891 — the Gamut app loaded with "QA-20261121-193058-k0jn" listed under Your Agents in the sidebar.
-[STEP] Step 2: Clicked the "QA-20261121-193058-k0jn" agent in the sidebar — the agent home opened at /agents/qa-20261121-193058-k0jn-5nml20rq6v with the message box visible.
-[STEP] Step 3: Verified agent status — the header status shows "idle" (sidebar also reads "idle"), which is one of the accepted states.
-[STEP] Step 4: Typed "Hello! What is 2+2?" into the message box and clicked Send — the page navigated to a new session titled "Basic Arithmetic Question" and the message appeared in the chat.
-[STEP] Step 5: Waited for the response — the activity indicator read "Working..." briefly, then the agent replied and the status returned to "idle" (within well under 3 minutes).
-[STEP] Step 6: Verified the response — the assistant reply reads "2 + 2 = 4." and contains "4". Screenshot taken of the chat showing the question and answer.
+[REASON] Ran the agent-chat smoke test on QA-20261122-174111-fku3: open the agent, confirm it is idle, send "Hello! What is 2+2?", and check the reply contains "4".
+[STEP] Step 1: Navigated to http://localhost:47891 — the Gamut app loaded and the sidebar listed both QA-20261122-174112-giwb and QA-20261122-174111-fku3.
+[STEP] Step 2: Clicked QA-20261122-174111-fku3 in the sidebar — its agent page opened at /agents/qa-20261122-174111-fku3-m0hvwztjpx.
+[STEP] Step 3: Checked the agent status — it shows "idle" in the header and the sidebar. This satisfies the running-or-idle check. Screenshot saved as step3-agent-status.png.
+[STEP] Step 4: Typed "Hello! What is 2+2?" into the message box and clicked Send — the session "Basic Arithmetic Question Check" was created and the user message appeared in the chat.
+[STEP] Step 5: Waited for a response — the reply "2 + 2 = 4." was already present in the message list on the first check, so no further wait was needed. The header showed "idle" afterward.
+[STEP] Step 6: Verified the response contains "4" ("2 + 2 = 4.") and took a screenshot saved as step6-response.png.

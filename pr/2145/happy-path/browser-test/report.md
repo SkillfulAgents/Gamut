@@ -1,9 +1,7 @@
 [TEST_PASS]
-[REASON] Ran the browser-use flow: opened the QA-20261121-193059-1pnd agent, sent a request to open https://example.com and report its title, and confirmed the agent answered "Example Domain".
-[STEP] Step 1, navigate to http://localhost:47891 — the Gamut app loaded with the sidebar listing "QA-20261121-193059-1pnd" and "QA-20261121-193058-k0jn" under Your Agents.
-[STEP] Step 2, open the QA-20261121-193059-1pnd agent from the sidebar — its agent page loaded at /agents/qa-20261121-193059-1pnd-2kq7y8164l with status idle and an empty message composer. Screenshot taken.
-[STEP] Step 3, send "Open a browser and go to https://example.com. Tell me the page title." — pressing Enter did not submit (the text stayed in the composer), so I clicked the Send message button. The request was sent once, a new session "Check Example.com Page Title" was created, and the agent showed "working" with an "Open Browser → https://example.com" tool card. Screenshot taken.
-[STEP] Step 4, wait up to 3 minutes for a response — the "Example Domain" text appeared and the agent returned to idle. The turn took 7s with 3 tool calls.
-[STEP] Step 5, verify the response mentions "Example Domain" — the agent replied: 'The page title is "Example Domain". The page at https://example.com loaded normally, and I closed the browser afterwards.' Verified. Screenshot taken.
-
-No bugs were found. One UX observation, not counted as a bug: the Home/agent-landing composer ignores Enter as a send key, although its placeholder says "Press cmd+enter to send", while the in-session composer shows "↵ Send".
+[REASON] Sent the browser-use prompt to agent QA-20261122-174112-giwb and verified the reply reports the page title "Example Domain".
+[STEP] Step 1: Navigated to http://localhost:47891 — Gamut home loaded with the sidebar listing QA-20261122-174112-giwb. No errors.
+[STEP] Step 2: Clicked QA-20261122-174112-giwb in the sidebar — agent session page opened, header shows the agent name and status "idle", and the chat input is visible.
+[STEP] Step 3: Typed "Open a browser and go to https://example.com. Tell me the page title." and clicked Send — message appeared in the chat and the agent switched to "Working...".
+[STEP] Step 4: Waited up to 3 minutes for "Example Domain" — it appeared within the wait. The turn showed "Worked for 5s · 3 tool calls · 163,267 tokens", and the agent's status returned to idle.
+[STEP] Step 5: Verified the response and took a screenshot — the reply reads: 'The page title of https://example.com is "Example Domain". The browser is closed now.' The session title was updated to "Check Example.com Page Title".
