@@ -15,10 +15,26 @@ export const MODERN_REVISION = '2026-07-28'
 export interface ConnectedClient {
   label: string
   listTools(): Promise<{ tools: Array<{ name: string; title?: string; description?: string; annotations?: Record<string, unknown>; outputSchema?: unknown; inputSchema?: unknown }> }>
-  callTool(name: string, args?: Record<string, unknown>): Promise<{ content: Array<{ type: string; text?: string }>; structuredContent?: any; isError?: boolean }>
+  callTool(name: string, args?: Record<string, unknown>, options?: CallOptions): Promise<{ content: Array<{ type: string; text?: string }>; structuredContent?: any; isError?: boolean }>
   instructions(): string | undefined
   serverName(): string | undefined
   close(): Promise<void>
+}
+
+/** Per-call options: progress notifications (the SDK sends a progress token when given a callback) and a timeout. */
+export interface CallOptions {
+  onprogress?: (progress: { progress: number; total?: number; message?: string }) => void
+  timeoutMs?: number
+  signal?: AbortSignal
+}
+
+function requestOptions(options: CallOptions | undefined) {
+  if (!options) return undefined
+  return {
+    ...(options.onprogress ? { onprogress: options.onprogress } : {}),
+    ...(options.timeoutMs ? { timeout: options.timeoutMs } : {}),
+    ...(options.signal ? { signal: options.signal } : {}),
+  }
 }
 
 function authHeaders(token: string | null): Record<string, string> {
@@ -38,7 +54,7 @@ export async function connectV2(url: string, token: string | null, era: 'legacy'
   return {
     label: `v2 SDK (${era})`,
     listTools: () => client.listTools() as never,
-    callTool: (name, args = {}) => client.callTool({ name, arguments: args }) as never,
+    callTool: (name, args = {}, options) => client.callTool({ name, arguments: args }, requestOptions(options) as never) as never,
     instructions: () => client.getInstructions(),
     serverName: () => client.getServerVersion()?.name,
     close: () => client.close(),
@@ -53,7 +69,7 @@ export async function connectV1(url: string, token: string | null): Promise<Conn
   return {
     label: 'v1 SDK',
     listTools: () => client.listTools() as never,
-    callTool: (name, args = {}) => client.callTool({ name, arguments: args }) as never,
+    callTool: (name, args = {}, options) => client.callTool({ name, arguments: args }, undefined, requestOptions(options)) as never,
     instructions: () => client.getInstructions(),
     serverName: () => client.getServerVersion()?.name,
     close: () => client.close(),

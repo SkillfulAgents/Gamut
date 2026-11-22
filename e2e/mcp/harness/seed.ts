@@ -28,14 +28,14 @@ export const NOTES_MD = Array.from({ length: 1_500 }, (_, i) => `Customer note $
 /** A PNG header and a few bytes: not text, so it is handed out as a download URL. */
 export const BINARY = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0xde, 0xad, 0xbe, 0xef])
 
-interface ApiAgent { slug: string; displaySlug: string; name: string }
+export interface ApiAgent { slug: string; displaySlug: string; name: string }
 
-async function findOrCreateAgent(name: string): Promise<ApiAgent> {
+export async function findOrCreateAgent(name: string): Promise<ApiAgent> {
   const existing = (await api<ApiAgent[]>('/api/agents')).find((agent) => agent.name === name)
   return existing ?? api<ApiAgent>('/api/agents', { method: 'POST', body: JSON.stringify({ name }) })
 }
 
-async function waitFor<T>(what: string, read: () => Promise<T | null | undefined | false>, timeoutMs = 30_000): Promise<T> {
+export async function waitFor<T>(what: string, read: () => Promise<T | null | undefined | false>, timeoutMs = 30_000): Promise<T> {
   const deadline = Date.now() + timeoutMs
   for (;;) {
     const value = await read().catch(() => null)
