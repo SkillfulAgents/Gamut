@@ -22,6 +22,16 @@ function fileTab(page: import('@playwright/test').Page, fileName: string) {
   return page.getByTestId('file-tab').filter({ hasText: fileName })
 }
 
+async function selectFileTab(page: import('@playwright/test').Page, name: string) {
+  const direct = fileTab(page, name).getByTestId('file-tab-select')
+  if (await direct.isVisible()) {
+    await direct.click()
+    return
+  }
+  await page.getByRole('button', { name: /All tabs/ }).click()
+  await page.getByTestId('tray-tab-all-item').filter({ hasText: name }).click()
+}
+
 async function rightEdge(locator: import('@playwright/test').Locator): Promise<number> {
   const box = (await locator.boundingBox())!
   return Math.round(box.x + box.width)
@@ -186,8 +196,7 @@ test.describe('File Preview', () => {
     await july.click()
     await expect(markdown(page).getByRole('heading', { name: 'July Report' })).toBeVisible({ timeout: 10000 })
 
-    await page.getByRole('button', { name: /All tabs/ }).click()
-    await page.getByTestId('tray-tab-all-item').filter({ hasText: 'reports' }).click()
+    await selectFileTab(page, 'reports')
     await expect(year).toHaveAttribute('aria-expanded', 'true')
     await expect(july).toBeVisible()
 
@@ -217,8 +226,7 @@ test.describe('File Preview', () => {
     await summary.click()
     await expect(markdown(page).getByRole('heading', { name: 'Reports Overview' })).toBeVisible({ timeout: 10000 })
 
-    await page.getByRole('button', { name: /All tabs/ }).click()
-    await page.getByTestId('tray-tab-all-item').filter({ hasText: 'reports' }).click()
+    await selectFileTab(page, 'reports')
     await summary.click({ button: 'right' })
     await page.getByRole('menuitem', { name: 'Delete' }).click()
     const deleteDialog = page.getByRole('alertdialog')

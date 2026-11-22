@@ -1,6 +1,6 @@
 import { useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { X } from 'lucide-react'
-import { DrawerTabStrip, drawerTabClassName } from './drawer-tab-strip'
+import { DrawerTabStrip, drawerTabClassName, fittedTabMinWidth } from './drawer-tab-strip'
 import { cn } from '@shared/lib/utils/cn'
 import {
   ContextMenu,
@@ -105,6 +105,7 @@ export function TrayTabs({ tabs, frontKey, panelId, onLeadingTabFlush, trailing,
         <DropdownMenuItem
           key={tab.key}
           onSelect={tab.onSelect}
+          title={tab.title ?? tab.label}
           className={cn('group/item gap-2 pr-1.5', index === frontIndex && 'bg-muted/60')}
           data-testid="tray-tab-all-item"
           aria-current={index === frontIndex || undefined}
@@ -154,6 +155,7 @@ export function TrayTabs({ tabs, frontKey, panelId, onLeadingTabFlush, trailing,
                   data-tab-first={index === 0 || undefined}
                   {...tab.data}
                   className={drawerTabClassName(index, shownFront, true)}
+                  style={{ minWidth: isFront ? fittedTabMinWidth.active : fittedTabMinWidth.inactive }}
                 >
                   <button
                     type="button"

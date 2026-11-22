@@ -37,10 +37,8 @@ interface DrawerTabStripProps {
 const TAB_GAP_PX = 1
 /** Sub-pixel slack: a scroller's scrollLeft rarely lands exactly on its maximum. */
 const EDGE_EPSILON_PX = 1
-/** With an all-tabs list, no tab is drawn narrower than this: the ones that would be go to the list instead. */
-const CROWDED_TAB_PX = 120
-/** The front tab's floor (min-w-[9.5rem]), which it keeps however crowded the strip. */
-const ACTIVE_TAB_FLOOR_PX = 152
+// The overflow calculation and the rendered tabs use the same minimum widths.
+export const fittedTabMinWidth = { active: 120, inactive: 84 } as const
 /** Room the + (or the all-tabs count and chevron in its place) takes while it follows the last tab. */
 const AFTER_TABS_PX = 44
 
@@ -60,10 +58,11 @@ export function DrawerTabStrip({
 }: DrawerTabStripProps) {
   const groupRef = useRef<HTMLDivElement>(null)
   const trackRef = useRef<HTMLDivElement>(null)
+  const overflowRef = useRef<HTMLDivElement>(null)
   const [scrollLeft, setScrollLeft] = useState(0)
   const [maxScroll, setMaxScroll] = useState(0)
   const fitTabs = !!overflowMenu
-  /** How many tabs fit at a readable width: the front one at its floor, every other at CROWDED_TAB_PX. */
+  /** How many tabs fit at their minimum widths. */
   const [capacity, setCapacity] = useState(Number.POSITIVE_INFINITY)
 
   /**
@@ -76,9 +75,10 @@ export function DrawerTabStrip({
     setMaxScroll(Math.max(0, group.scrollWidth - group.clientWidth))
     setScrollLeft(group.scrollLeft)
     if (!fitTabs || group.clientWidth === 0) return
-    // The + or, once tabs are hidden, the chevron follows the tabs: room for one of them either way.
-    const room = group.clientWidth - AFTER_TABS_PX - ACTIVE_TAB_FLOOR_PX
-    setCapacity(1 + Math.max(0, Math.floor(room / (CROWDED_TAB_PX + TAB_GAP_PX))))
+    // Reserve space for the + or overflow button. Counts with more digits can widen that button.
+    const overflowWidth = Math.ceil(overflowRef.current?.getBoundingClientRect().width ?? 0) + TAB_GAP_PX
+    const room = group.clientWidth - Math.max(AFTER_TABS_PX, overflowWidth) - fittedTabMinWidth.active
+    setCapacity(1 + Math.max(0, Math.floor(room / (fittedTabMinWidth.inactive + TAB_GAP_PX))))
   }, [fitTabs])
   const crowded = fitTabs && tabCount > capacity
   const hiddenCount = crowded ? tabCount - capacity : 0
@@ -90,7 +90,7 @@ export function DrawerTabStrip({
   // width as well as adding or removing a tab does.
   useLayoutEffect(() => {
     measure()
-  }, [measure, tabCount, activeIndex])
+  }, [measure, tabCount, activeIndex, hiddenCount])
 
   useEffect(() => {
     const group = groupRef.current
@@ -145,14 +145,14 @@ export function DrawerTabStrip({
   }
 
   const allTabs = crowded && (
-    <div className="flex h-8 shrink-0 items-center pl-1 text-muted-foreground">
+    <div ref={overflowRef} className="flex h-8 shrink-0 items-center pl-0.5 text-muted-foreground">
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <button
             type="button"
             aria-label={`All tabs, ${hiddenCount} more`}
             title="All tabs"
-            className="inline-flex items-center gap-0.5 rounded-icon py-1 pl-1.5 pr-1 transition-colors hover:bg-muted hover:text-foreground data-[state=open]:bg-muted data-[state=open]:text-foreground"
+            className="inline-flex items-center gap-0.5 rounded-icon px-1 py-1 transition-colors hover:bg-muted hover:text-foreground data-[state=open]:bg-muted data-[state=open]:text-foreground"
             data-testid={`${testId}-all`}
           >
             {/* How many tabs are only in the list. */}

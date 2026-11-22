@@ -5,9 +5,7 @@ import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { TrayTabs, shownTabs, type TrayTab } from './tray-tabs'
 
-/** The strip's width: 600px holds four tabs (the front at 152px, the rest at 120px), 200px only the front one. */
-function fakeOverflow(crowded: boolean) {
-  const width = crowded ? 200 : 600
+function setStripWidth(width: number) {
   vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function (this: HTMLElement) {
     return this.dataset.testid === 'tray-tab-group' ? width : 0
   })
@@ -29,14 +27,22 @@ describe('TrayTabs overflow', () => {
   afterEach(() => vi.restoreAllMocks())
 
   it('shows neither arrows nor the tab list while every tab fits', () => {
-    fakeOverflow(false)
+    setStripWidth(600)
     render(<TrayTabs tabs={[tab('a', 'Alpha'), tab('b', 'Beta')]} frontKey="a" />)
     expect(screen.queryByTestId('tray-tab-all')).toBeNull()
     expect(screen.queryByTestId('tray-tab-arrows')).toBeNull()
   })
 
+  it.each([[248, 1], [249, 2], [333, 2], [334, 3], [419, 4]])('fits the selected tab and its peers in a %ipx strip', (width, count) => {
+    setStripWidth(width)
+    const names = ['Alpha', 'Beta', 'Gamma', 'Delta', 'Epsilon']
+    render(<TrayTabs tabs={names.map(name => tab(name, name))} frontKey="Epsilon" />)
+    expect(screen.getAllByTestId('file-tab').map(t => t.textContent)).toEqual([...names.slice(0, count - 1), 'Epsilon'])
+    expect(screen.getByTestId('tray-tab-hidden-count')).toHaveTextContent(String(names.length - count))
+  })
+
   it('announces the selected tab and moves keyboard focus to peers in overflow', async () => {
-    fakeOverflow(true)
+    setStripWidth(200)
     function Navigation() {
       const [front, select] = useState('Alpha')
       return <TrayTabs tabs={['Alpha', 'Beta', 'Gamma'].map(label => tab(label, label, () => select(label)))} frontKey={front} />
@@ -56,7 +62,7 @@ describe('TrayTabs overflow', () => {
   })
 
   it('swaps the scroll arrows for a chevron that lists every tab and picks one', async () => {
-    fakeOverflow(true)
+    setStripWidth(200)
     const pickGamma = vi.fn()
     const user = userEvent.setup()
     render(<TrayTabs tabs={[tab('a', 'Alpha'), tab('b', 'Beta'), tab('c', 'Gamma', pickGamma)]} frontKey="b" />)
@@ -73,7 +79,7 @@ describe('TrayTabs overflow', () => {
   })
 
   it('closes a tab from the list without selecting it, and keeps the list open', async () => {
-    fakeOverflow(true)
+    setStripWidth(200)
     const pickAlpha = vi.fn()
     const closeAlpha = vi.fn()
     const user = userEvent.setup()
