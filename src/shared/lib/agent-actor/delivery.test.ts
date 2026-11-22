@@ -50,8 +50,7 @@ const service = { ...sessionService }
 const sessions = () => live.sessions(SLUG)
 const store = () => live.store(SLUG)
 const delivery = () =>
-  createSessionDelivery(SLUG, store(), sessions(), {
-    containerHost: { runtime: () => runtime } as never,
+  createSessionDelivery(SLUG, store(), sessions(), () => runtime as never, {
     sessionService: service,
     recordSessionActivity,
     reviewManager: { denyAllForAgent } as never,

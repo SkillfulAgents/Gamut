@@ -65,14 +65,13 @@ describe('hostFromManagerMock', () => {
       onBeforeContainerStop: null as null | ((slug: string) => Promise<void>),
     }
     const host = hostFromManagerMock(manager) as {
-      runtime(slug: string): { ensureRunning(): Promise<string>; getCachedInfo(): unknown; dispose(): void; slug: string }
-      dropRuntime(slug: string): void
+      createRuntime(slug: string): { ensureRunning(): Promise<string>; getCachedInfo(): unknown; dispose(): void; slug: string }
       clearRuntimes(): void
       getRunningAgentIds(): string[]
       onBeforeContainerStop: ((slug: string) => Promise<void>) | null
     }
 
-    const runtime = host.runtime('a')
+    const runtime = host.createRuntime('a')
     expect(runtime.slug).toBe('a')
     await expect(runtime.ensureRunning()).resolves.toBe('client')
     expect(manager.ensureRunning).toHaveBeenCalledWith('a')
@@ -81,8 +80,6 @@ describe('hostFromManagerMock', () => {
     runtime.dispose()
     expect(manager.removeClient).toHaveBeenCalledWith('a')
 
-    host.dropRuntime('b')
-    expect(manager.removeClient).toHaveBeenCalledWith('b')
     host.clearRuntimes()
     expect(manager.clearClients).toHaveBeenCalledTimes(1)
     expect(host.getRunningAgentIds()).toEqual(['a'])
@@ -90,6 +87,6 @@ describe('hostFromManagerMock', () => {
     const hook = async () => {}
     host.onBeforeContainerStop = hook
     expect(manager.onBeforeContainerStop).toBe(hook)
-    expect(host.runtime('a')).toBe(runtime)
+    expect(host.createRuntime('a')).toBe(runtime)
   })
 })

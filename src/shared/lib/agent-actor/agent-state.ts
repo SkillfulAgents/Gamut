@@ -1,7 +1,8 @@
 /**
  * The in-memory state one agent owns: its live sessions, its pending
  * user-input requests, the reviews and re-auth waits parked on them, its
- * computer-use grants, the alarm that puts its idle container to sleep, and
+ * computer-use grants, its container runtime, the alarm that puts its idle
+ * container to sleep and the watch on its container, and
  * what the host's per-agent work keeps between requests (locks, widget
  * refreshes, the MCP proxy's sessions, volume uploads, sessions waiting for a
  * human to name them).
@@ -26,6 +27,7 @@ import { AgentMcpSessions } from '@shared/lib/mcp/agent-mcp-sessions'
 import { VolumeUploadGuard } from '@shared/lib/volumes/volume-upload-guard'
 import { IdleAlarm, type IdleAlarmDeps } from '@shared/lib/container/idle-alarm'
 import { ContainerWatch, type ContainerWatchDeps } from '@shared/lib/container/container-watch'
+import type { ContainerRuntime, RuntimeAgent } from '@shared/lib/container/container-runtime'
 import { AgentLocks } from './agent-locks'
 import { LiveSessions, type LiveSessionsDeps } from './live/live-sessions'
 import type { SessionEvent } from './live/session-channel'
@@ -62,10 +64,20 @@ export interface AgentState {
    */
   readonly idleAlarm: IdleAlarm
   /**
-   * Checks the agent's container: whether it runs, from the time the
-   * container runtime has a client, and its health while it is seen running.
+   * Checks the agent's container: whether it runs, until a read confirms it
+   * stopped, and its health while it is seen running.
    */
   readonly containerWatch: ContainerWatch
+  /**
+   * The agent's container on this machine, made on first use: its client,
+   * cached status, start and stop. It goes with the state, so a handle that
+   * adopts the state (a dev-server reload) keeps the container it knew.
+   */
+  runtime(): ContainerRuntime
+  /** The runtime, when one was made. */
+  peekRuntime(): ContainerRuntime | undefined
+  /** Forget the runtime (its client and cached facts): the next `runtime()` makes a new one. Does not stop the container. */
+  dropRuntime(): void
 }
 
 export interface AgentStateHooks {
@@ -75,6 +87,8 @@ export interface AgentStateHooks {
   idle: Omit<IdleAlarmDeps, 'isBusy'>
   /** The checks the agent's container watch runs. */
   watch: ContainerWatchDeps
+  /** Makes the agent's container runtime, from what the agent hands it. */
+  runtime(agent: RuntimeAgent): ContainerRuntime
 }
 
 export function createAgentState(slug: AgentSlug, hooks: AgentStateHooks): AgentState {
@@ -118,6 +132,15 @@ export function createAgentState(slug: AgentSlug, hooks: AgentStateHooks): Agent
   // is agent-wide.
   const cardSession = (callerSessionId: string | undefined) =>
     callerSessionId && live.has(callerSessionId) ? callerSessionId : undefined
+  const idleAlarm = new IdleAlarm({ ...hooks.idle, isBusy: () => live.hasActive() || live.hasAwaitingInput() })
+  const containerWatch = new ContainerWatch(hooks.watch)
+  const agent: RuntimeAgent = {
+    sessions: live,
+    idleAlarm,
+    containerWatch,
+    instructions: () => hooks.sessions.store.config.get('instructions'),
+  }
+  let runtime: ContainerRuntime | undefined
   return {
     store: hooks.sessions.store,
     sessions: live,
@@ -132,8 +155,14 @@ export function createAgentState(slug: AgentSlug, hooks: AgentStateHooks): Agent
     mcpSessions: new AgentMcpSessions(),
     volumeUploads: new VolumeUploadGuard(),
     deferredNaming: new Set(),
-    idleAlarm: new IdleAlarm({ ...hooks.idle, isBusy: () => live.hasActive() || live.hasAwaitingInput() }),
-    containerWatch: new ContainerWatch(hooks.watch),
+    idleAlarm,
+    containerWatch,
+    runtime: () => (runtime ??= hooks.runtime(agent)),
+    peekRuntime: () => runtime,
+    dropRuntime: () => {
+      runtime?.dispose()
+      runtime = undefined
+    },
   }
 }
 
@@ -161,9 +190,10 @@ export function settleStoppedSession(state: AgentState, sessionId: string): void
  * every open request so its listeners hear the end of it, then drop the
  * sessions' streams and timers. The requests go first, so their resolved
  * events still reach the sessions' listeners. Waiters on a lock are turned
- * away, joiners of a widget refresh hear it will not end here, and the idle
- * alarm and the container watch stop (the container is not stopped); the rest of the host's
- * per-agent memory is dropped with the state. The persisted
+ * away, joiners of a widget refresh hear it will not end here, the idle
+ * alarm and the container watch stop, and the runtime is dropped last (the
+ * container is not stopped); the rest of the host's per-agent memory is
+ * dropped with the state. The persisted
  * computer-use grants are left where they are; they belong to the agent's
  * settings entry, not to the process.
  */
@@ -181,4 +211,5 @@ export function releaseAgentState(state: AgentState): void {
   state.deferredNaming.clear()
   state.idleAlarm.cancel()
   state.containerWatch.stop()
+  state.dropRuntime()
 }

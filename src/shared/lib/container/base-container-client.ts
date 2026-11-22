@@ -651,7 +651,7 @@ export abstract class BaseContainerClient extends EventEmitter implements Contai
 
   /**
    * Query the container runtime for the current container state.
-   * This spawns a CLI process - prefer the runtime's cached status (containerHost.runtime(slug).getCachedInfo()) instead.
+   * This spawns a CLI process - prefer the cached status the agent's runtime holds (`actor.container.status()`) instead.
    */
   async getInfoFromRuntime(): Promise<ContainerInfo> {
     const containerName = this.getContainerName()
@@ -697,7 +697,7 @@ export abstract class BaseContainerClient extends EventEmitter implements Contai
 
   /**
    * Alias for getInfoFromRuntime().
-   * @deprecated Use the runtime's cached status (containerHost.runtime(slug).getCachedInfo()) instead.
+   * @deprecated Use the cached status the agent's runtime holds (`actor.container.status()`) instead.
    */
   async getInfo(): Promise<ContainerInfo> {
     return this.getInfoFromRuntime()

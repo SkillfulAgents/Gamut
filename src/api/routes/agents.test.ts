@@ -224,7 +224,7 @@ vi.mock('../middleware/auth', () => ({
 const mockMeetingParticipant = vi.hoisted(() => ({ value: null as unknown }))
 
 // Container host — a manager-shaped mock (slug as first argument) adapted into
-// the per-agent runtime shape the actor reads through containerHost.runtime(slug).
+// the per-agent runtime shape the actor gets from containerHost.createRuntime(slug).
 const mockContainerFetch = vi.fn()
 const mockSendMessage = vi.fn(async (..._args: unknown[]): Promise<unknown> => ({}))
 const mockCancelQueuedMessage = vi.fn()

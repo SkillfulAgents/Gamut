@@ -71,7 +71,11 @@ const evictIdle = () => {
 const deps = () =>
   ({
     containerHost: {
-      runtime: () => ({
+      createRuntime: () => ({
+        isStopping: () => false,
+        // The actor's first read: nothing to change here.
+        syncAgentStatus: async () => ({ status: 'running', port: 4321 }),
+        dispose: () => {},
         getClient: () => client,
         getCachedInfo: () => ({ status, port: 4321 }),
         noteSessionActivity: vi.fn(),

@@ -28,29 +28,3 @@ export interface RuntimeSessions {
   hasActive(): boolean
   hasAwaitingInput(): boolean
 }
-
-/**
- * The way from the container layer to the agents' live sessions. Attached to
- * the container host by the agent registry when it is created, like
- * `AgentWorkspaceAccess`.
- */
-export interface AgentSessionsAccess {
-  /** The agent's live sessions, when its actor is held. An agent with none has nothing live. */
-  peek(slug: string): RuntimeSessions | undefined
-}
-
-/** The sessions of an agent that has none live. */
-export const NO_LIVE_SESSIONS: RuntimeSessions = {
-  claimMidTurnForRecovery: () => [],
-  settleRecovering: () => {},
-  markRecovered: () => {},
-  takeCoalesced: () => [],
-  isRecovering: () => false,
-  isSubscribed: () => false,
-  subscribe: async () => {},
-  inDeliveryTurn: (_sessionId, work) => work(),
-  markAllStopped: () => {},
-  markAllInactive: () => {},
-  hasActive: () => false,
-  hasAwaitingInput: () => false,
-}

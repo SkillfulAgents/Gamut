@@ -106,6 +106,9 @@ vi.mock('@shared/lib/services/mount-service', () => ({
 }))
 
 import { containerHost } from './container-host'
+import { attachTestRuntimes } from './testing/test-runtimes'
+
+const agents = attachTestRuntimes(containerHost)
 import type { ContainerWatch } from './container-watch'
 
 // ============================================================================
@@ -123,11 +126,11 @@ describe('ContainerRuntime after dropRuntime', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     lastConfig = undefined
-    containerHost.dropRuntime('agent-x')
+    agents.drop('agent-x')
   })
 
   it("a live runtime's client callback triggers recovery (control)", async () => {
-    const runtime = containerHost.runtime('agent-x')
+    const runtime = agents.runtime('agent-x')
     await runtime.getClient()
     const recover = vi.spyOn(runtime, 'handleUnexpectedDeath').mockImplementation(() => {})
 
@@ -137,12 +140,12 @@ describe('ContainerRuntime after dropRuntime', () => {
   })
 
   it("a dropped runtime ignores its old client's connection error and restart", async () => {
-    const runtime = containerHost.runtime('agent-x')
+    const runtime = agents.runtime('agent-x')
     await runtime.getClient()
     const recover = vi.spyOn(runtime, 'handleUnexpectedDeath')
     const oldConfig = lastConfig!
 
-    containerHost.dropRuntime('agent-x')
+    agents.drop('agent-x')
 
     oldConfig.onConnectionError!()
     await oldConfig.restartAgent!()
@@ -153,11 +156,11 @@ describe('ContainerRuntime after dropRuntime', () => {
   })
 
   it('the host hands out a fresh runtime whose own callbacks still work', async () => {
-    const dropped = containerHost.runtime('agent-x')
+    const dropped = agents.runtime('agent-x')
     await dropped.getClient()
-    containerHost.dropRuntime('agent-x')
+    agents.drop('agent-x')
 
-    const fresh = containerHost.runtime('agent-x')
+    const fresh = agents.runtime('agent-x')
     expect(fresh).not.toBe(dropped)
     await fresh.getClient()
     const recover = vi.spyOn(fresh, 'handleUnexpectedDeath').mockImplementation(() => {})
@@ -171,30 +174,27 @@ describe('ContainerRuntime after dropRuntime', () => {
 describe('ContainerRuntime status read across dropRuntime', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    containerHost.dropRuntime('agent-x')
+    agents.drop('agent-x')
   })
 
-  it('a "running" read that lands after the drop makes no container watch', async () => {
+  it('a "running" read that lands after the drop does not start the health check', async () => {
     const watch = { start: vi.fn(), startHealth: vi.fn(), stopHealth: vi.fn(), stop: vi.fn() }
-    const get = vi.fn(() => watch as unknown as ContainerWatch)
-    containerHost.attachAgentContainerWatches({ get, peek: () => undefined })
+    const previous = agents.use(() => ({ containerWatch: watch as unknown as ContainerWatch }))
     try {
-      const runtime = containerHost.runtime('agent-x')
+      const runtime = agents.runtime('agent-x')
       await runtime.getClient()
-      get.mockClear()
       let answer!: (info: { status: 'running'; port: number }) => void
       mockGetInfoFromRuntime.mockImplementationOnce(() => new Promise((resolve) => { answer = resolve }))
 
       const read = runtime.syncAgentStatus()
       await vi.waitFor(() => expect(mockGetInfoFromRuntime).toHaveBeenCalledTimes(1))
-      containerHost.dropRuntime('agent-x')
+      agents.drop('agent-x')
       answer({ status: 'running', port: 4001 })
       await read
 
-      expect(get).not.toHaveBeenCalled()
       expect(watch.startHealth).not.toHaveBeenCalled()
     } finally {
-      containerHost.attachAgentContainerWatches(null)
+      agents.use(previous)
     }
   })
 })

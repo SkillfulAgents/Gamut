@@ -5,9 +5,9 @@
  *
  * - Every 300 s, whether the container runs. A container can exit without
  *   this process (a crash, a kill, a runtime that restarted), and a read that
- *   failed shows a running container as stopped. So this runs from the time
- *   the container runtime has a client until the runtime is dropped, whatever
- *   the container last read as.
+ *   failed shows a running container as stopped. So this runs from the
+ *   actor's first read (or the runtime's next client) until the runner
+ *   confirms the container stopped, and a start turns it back on.
  * - Every 30 s, the container's health (the memory and CPU warnings the app
  *   shows), while the runtime sees the container running.
  *
@@ -55,18 +55,6 @@ export interface ContainerWatchDeps {
   timer?(): IdleTimer
 }
 
-/**
- * The way from the container layer to the agents' watches, which their actors
- * own. Attached to the container host by the agent registry, like
- * `AgentIdleAlarms`.
- */
-export interface AgentContainerWatches {
-  /** The agent's watch, from an actor made if none is held: a running container always has one. */
-  get(slug: string): ContainerWatch
-  /** The agent's watch when its actor is held. A stop or a drop never makes an actor. */
-  peek(slug: string): ContainerWatch | undefined
-}
-
 /** One check that runs every `intervalMs` while it is on. */
 class RecurringCheck {
   private on = false
@@ -93,6 +81,13 @@ class RecurringCheck {
   stop(): void {
     this.on = false
     this.waiting?.clear()
+  }
+
+  /** Turn on, and run a pass now instead of after the interval. */
+  async runNow(): Promise<void> {
+    this.on = true
+    this.waiting?.clear()
+    await this.pass()
   }
 
   private arm(): void {
@@ -124,6 +119,16 @@ export class ContainerWatch {
   /** Start the status check; nothing when it runs already. */
   start(): void {
     this.status.start()
+  }
+
+  /**
+   * Read whether the container runs now, then go on as `start` does: the
+   * actor's first read of its container. A failed read is logged.
+   */
+  readNow(): Promise<void> {
+    return this.status.runNow().catch((error: unknown) => {
+      console.error('[ContainerWatch] The first status read failed:', error)
+    })
   }
 
   /** The container is seen running: start the health check too. */

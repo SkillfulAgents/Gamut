@@ -113,7 +113,7 @@ A service needs no `stop()` just to clear a timer, since the manager owns those.
 | Service | Scheduled work | Starts |
 | -- | -- | -- |
 | `webhook-relay` | Tick (30 s while online), each consumer's retry, the ack retry | eager, critical |
-| `container-host` | None: reads which containers still run from before this launch, and watches the relay | eager, critical |
+| `container-host` | None: wakes every agent's actor, which reads its container, and watches the relay | eager, critical |
 | `platform-notifications` | JWT refresh or reconnect (50 min) | background, startup slot |
 | `agent-integrations` | Health check (5 min), a chat's stream restore (30 s after a failure), the delivery pump's wakeups | background, startup slot |
 | `container-image` | None: pulls or checks the image | background, startup slot |
@@ -136,7 +136,7 @@ A local agent's session index stores its recorded activity on a `session-index.s
 
 **A pass that must not count as running.** The integration health check starts its work and returns, rather than being awaited. A connect that hangs holds up only its own integration (`reconcilingIds`); if the manager saw a pass as running, it would skip all the later ones. Reach for this only when later passes are safe to run alongside a stuck one.
 
-**Left where they are.** Browser profile maintenance is going away and is not migrated. An agent's auto-sleep is its `IdleAlarm`, and its container checks are its `ContainerWatch` (`src/shared/lib/container/container-watch.ts`): the agent's actor owns both, and each waits on a timer of its own (`IdleTimer`), so a deployment can keep it where the actor lives. The watch reads whether the container runs every 300 s, from the time the container runtime has a client until the runtime is dropped, and its health every 30 s while it is seen running; each kind runs at most 4 checks at once across the process's agents. Transport heartbeats, request-local timeouts, typing indicators and renderer timers are not background jobs. Neither is the wait between the follow-up passes of a reconnect after system resume (`reconnectAll`), which is one pass in progress.
+**Left where they are.** Browser profile maintenance is going away and is not migrated. An agent's auto-sleep is its `IdleAlarm`, and its container checks are its `ContainerWatch` (`src/shared/lib/container/container-watch.ts`): the agent's actor owns both, and each waits on a timer of its own (`IdleTimer`), so a deployment can keep it where the actor lives. The watch reads whether the container runs when the actor is made and then every 300 s, until the runner confirms the container stopped (a start turns it back on), and its health every 30 s while it is seen running; each kind runs at most 4 checks at once across the process's agents. Transport heartbeats, request-local timeouts, typing indicators and renderer timers are not background jobs. Neither is the wait between the follow-up passes of a reconnect after system resume (`reconnectAll`), which is one pass in progress.
 
 ## Scheduled tasks
 

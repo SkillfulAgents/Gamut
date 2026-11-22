@@ -9,6 +9,7 @@
  * session store, all inside the actor.
  */
 import { background } from '@shared/lib/background'
+import type { ContainerRuntime } from '@shared/lib/container/container-runtime'
 import { MessageNotAcceptedError } from '@shared/lib/container/message-dispatch-error'
 import type { ContainerClient, ContainerSession, SendMessageOptions, SendMessageResult } from '@shared/lib/container/types'
 import { sessionMetadataHolds } from '@shared/lib/services/session-metadata-holds'
@@ -41,9 +42,9 @@ export function createSessionDelivery(
   slug: AgentSlug,
   store: SessionStore,
   live: LiveSessions,
-  deps: Pick<LocalActorDeps, 'containerHost' | 'sessionService' | 'recordSessionActivity' | 'reviewManager' | 'host'>,
+  runtime: () => ContainerRuntime,
+  deps: Pick<LocalActorDeps, 'sessionService' | 'recordSessionActivity' | 'reviewManager' | 'host'>,
 ): SessionDelivery {
-  const runtime = () => deps.containerHost.runtime(slug)
   // The client running the container, or, while it is not running, the one
   // for the runner configured now (getClient reads it then).
   const client = async (): Promise<ContainerClient> => runtime().getClient()

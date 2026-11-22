@@ -108,9 +108,10 @@ import type { LocalActorDeps, LocalAgentActor } from '@shared/lib/agent-actor/lo
 // The routers over the actors' stores take no part here.
 const routers = { userInputRequestManager: {}, reviewManager: {}, accountReauthManager: {}, mcpReauthManager: {}, computerUsePermissionManager: {} }
 const registry = createAgentRegistry({ containerHost, ...routers } as unknown as LocalActorDeps)
-// A start reads no display name here.
-containerHost.attachAgentWorkspaces(null)
-const alarmOf = (slug: string) => (registry.get(slug) as LocalAgentActor).state.idleAlarm
+// Each agent's actor holds its runtime.
+const actorOf = (slug: string) => registry.get(slug) as LocalAgentActor
+const agents = { runtime: (slug: string) => actorOf(slug).state.runtime(), drop: (slug: string) => actorOf(slug).state.dropRuntime() }
+const alarmOf = (slug: string) => actorOf(slug).state.idleAlarm
 
 const MINUTE = 60_000
 const TIMEOUT = 30 * MINUTE
@@ -152,7 +153,7 @@ describe('ContainerRuntime idle alarm', () => {
   const settle = () => vi.advanceTimersByTimeAsync(0)
 
   async function startRuntime() {
-    const runtime = containerHost.runtime(SLUG)
+    const runtime = agents.runtime(SLUG)
     await runtime.ensureRunning()
     expect(runtime.getCachedInfo().status).toBe('running')
     await settle()
@@ -225,7 +226,7 @@ describe('ContainerRuntime idle alarm', () => {
 
   it('re-arms every running agent from one read of the timeout', async () => {
     const slugs = ['alarm-a', 'alarm-b', 'alarm-c', 'alarm-d']
-    for (const slug of slugs) await containerHost.runtime(slug).ensureRunning()
+    for (const slug of slugs) await agents.runtime(slug).ensureRunning()
     await settle()
     await vi.advanceTimersByTimeAsync(10 * MINUTE)
     settings.app.autoSleepTimeoutMinutes = 15
@@ -309,7 +310,10 @@ describe('ContainerRuntime idle alarm', () => {
   })
 
   it('a session write to a stopped agent marks the clock but arms nothing, and the next start is unaffected', async () => {
-    const runtime = containerHost.runtime(SLUG)
+    // The actor's first read finds the container stopped.
+    mockGetInfoFromRuntime.mockResolvedValue({ status: 'stopped', port: null })
+    const runtime = agents.runtime(SLUG)
+    await actorOf(SLUG).firstRead
     // Deleting a message or appending to a transcript offline records activity.
     runtime.noteSessionActivity()
     expect(alarmOf(SLUG).isArmed()).toBe(false)
@@ -317,6 +321,7 @@ describe('ContainerRuntime idle alarm', () => {
     await vi.advanceTimersByTimeAsync(2 * TIMEOUT)
     expect(mockStop).not.toHaveBeenCalled()
 
+    mockGetInfoFromRuntime.mockResolvedValue({ status: 'running', port: 4001 })
     await runtime.ensureRunning()
     await settle()
     expect(alarmOf(SLUG).isArmed()).toBe(true)
@@ -327,7 +332,7 @@ describe('ContainerRuntime idle alarm', () => {
   it('a stale mark during an in-flight start neither arms nor fires against the start', async () => {
     let finishStart!: (info: { status: 'running'; port: number }) => void
     mockStart.mockImplementationOnce(() => new Promise((resolve) => { finishStart = resolve }))
-    const runtime = containerHost.runtime(SLUG)
+    const runtime = agents.runtime(SLUG)
     const starting = runtime.ensureRunning()
     await vi.advanceTimersByTimeAsync(0)
     expect(runtime.isStarting()).toBe(true)
@@ -389,7 +394,7 @@ describe('ContainerRuntime idle alarm', () => {
 
   it('a container a sync finds running gets an alarm, though no actor was held for it', async () => {
     // As after a restart: the runtime exists, nothing has asked for the agent's actor yet.
-    await containerHost.runtime(SLUG).syncAgentStatus()
+    await agents.runtime(SLUG).syncAgentStatus()
     await settle()
     expect(alarmOf(SLUG).isArmed()).toBe(true)
     await vi.advanceTimersByTimeAsync(TIMEOUT + 1)
@@ -408,7 +413,7 @@ describe('ContainerRuntime idle alarm', () => {
 
   it('dropping the runtime disarms the alarm, and so does evicting the actor', async () => {
     await startRuntime()
-    containerHost.dropRuntime(SLUG)
+    agents.drop(SLUG)
     expect(alarmOf(SLUG).isArmed()).toBe(false)
     await startRuntime()
     const alarm = alarmOf(SLUG)

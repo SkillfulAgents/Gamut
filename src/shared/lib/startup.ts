@@ -55,8 +55,9 @@ class ReleasedAtShutdown implements Service {
 }
 
 /**
- * Reads, once boot knows the agents, which of their containers still run from
- * before this launch. From then on each agent's actor watches its own.
+ * Wakes every agent's actor once boot knows the agents, so each reads its
+ * container and sees one still running from before this launch. From then on
+ * each actor watches its own.
  */
 class ContainerHostService implements Service {
   readonly id = 'container-host'

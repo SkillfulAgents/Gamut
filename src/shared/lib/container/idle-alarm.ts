@@ -10,7 +10,7 @@
  *
  * Each agent's actor owns its alarm, in every deployment; only what the alarm
  * waits with differs (`IdleTimer`). The container runtime reports the marks
- * and the container's starts and stops to it (`AgentIdleAlarms`), and nothing
+ * and the container's starts and stops to it, and nothing
  * central has to poll. The timeout is a setting, read fresh for every arm and
  * again at every fire, so a change made anywhere applies no later than the
  * next fire, a change made here applies when the registry re-arms the held
@@ -72,18 +72,6 @@ export interface IdleAlarmDeps {
 export interface IdleTimer {
   set(ms: number, fire: () => void): void
   clear(): void
-}
-
-/**
- * The way from the container layer to the agents' idle alarms, which their
- * actors own. Attached to the container host by the agent registry, like
- * `AgentSessionsAccess`.
- */
-export interface AgentIdleAlarms {
-  /** The agent's alarm, from an actor made if none is held: a running container always has one. */
-  get(slug: string): IdleAlarm
-  /** The agent's alarm when its actor is held. A stop or a drop never makes an actor. */
-  peek(slug: string): IdleAlarm | undefined
 }
 
 /** How long a sleep that did not complete waits before the alarm tries again. */

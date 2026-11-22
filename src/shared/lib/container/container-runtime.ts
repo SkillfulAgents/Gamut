@@ -2,17 +2,18 @@
  * One agent's container on this machine: its client, cached status, start and
  * stop, health warnings, and recovery from an unexpected death.
  *
- * The container host owns one of these per agent and the agent actor reaches
- * it through the host. Nothing else imports this module. A runtime knows only
- * its own agent; what needs the whole fleet (readiness, image pulls, the sync
- * and health loops, force-stop fallout) is the host's, reached through
- * `RuntimeHost`.
+ * The agent's actor holds its runtime in its state, and the container host
+ * makes it (`ContainerHost.createRuntime`). Nothing else imports this module.
+ * A runtime knows only its own agent: what it needs of the agent (live
+ * sessions, idle alarm, container watch, instructions) its actor hands it as
+ * `RuntimeAgent`, and what spans every agent on the machine (the hook before a
+ * stop, force-stop fallout) is the host's, reached through `RuntimeHost`.
  */
 import { z } from 'zod'
 import { createContainerClient } from './client-factory'
 import { ActivityClock } from './activity-clock'
-import type { AgentIdleAlarms, IdleAlarm } from './idle-alarm'
-import type { AgentContainerWatches, ContainerWatch } from './container-watch'
+import type { IdleAlarm } from './idle-alarm'
+import type { ContainerWatch } from './container-watch'
 import type {
   ContainerClient,
   ContainerConfig,
@@ -29,8 +30,7 @@ import { getOrCreateProxyToken } from '@shared/lib/proxy/token-store'
 import { getOrCreateHostToken } from '@shared/lib/container/host-token-store'
 import { getSettings, type AppSettings } from '@shared/lib/config/settings'
 import { displayNameFromInstructions } from '@shared/lib/utils/agent-display-name'
-import type { AgentWorkspaceAccess } from './agent-workspace-access'
-import { NO_LIVE_SESSIONS, type AgentSessionsAccess, type RuntimeSessions } from './agent-sessions-access'
+import type { RuntimeSessions } from './agent-sessions-access'
 import type { RuntimeFatalKind } from './runtime-death'
 import { globalFeed } from '@shared/lib/notifications/global-feed'
 import { endComputerUseSessions } from '@shared/lib/computer-use/executor'
@@ -71,16 +71,8 @@ interface CachedContainerStatus {
   lastSyncedAt: number
 }
 
-/** What a runtime needs from the host it belongs to. */
+/** What a runtime needs from the host: what spans every agent on the machine. */
 export interface RuntimeHost {
-  /**
-   * The agents' workspaces, for what a start needs from them: the display
-   * name. Null only before the agent registry attached it, which in the app
-   * is never.
-   */
-  readonly agentWorkspaces: AgentWorkspaceAccess | null
-  /** The agents' live sessions. Null only before the agent registry attached it. */
-  readonly agentSessions: AgentSessionsAccess | null
   /** Runs before a container is stopped (e.g. to close the host browser). */
   readonly onBeforeContainerStop: ((slug: string) => Promise<void>) | null
   /**
@@ -89,10 +81,18 @@ export interface RuntimeHost {
    * readiness so the VM restarts.
    */
   afterForceStop(slug: string): void
-  /** The agents' idle alarms, on their actors. Null only before the agent registry attached it. */
-  readonly agentIdleAlarms: AgentIdleAlarms | null
-  /** The agents' container watches, on their actors. Null only before the agent registry attached it. */
-  readonly agentContainerWatches: AgentContainerWatches | null
+}
+
+/** What a runtime needs from its agent, which the agent's actor holds. */
+export interface RuntimeAgent {
+  /** The agent's live sessions, as the runtime marks and recovers them. */
+  readonly sessions: RuntimeSessions
+  /** Puts the container to sleep once it is idle. */
+  readonly idleAlarm: IdleAlarm
+  /** Checks whether the container runs, and its health while it does. */
+  readonly containerWatch: ContainerWatch
+  /** The agent's instructions document (`AGENTS.md`), for the display name a start gives the container; null when it has none. */
+  instructions(): Promise<string | null>
 }
 
 /** The auto-sleep timeout in `settings`, in ms; zero or less disables. */
@@ -175,6 +175,7 @@ export class ContainerRuntime {
   constructor(
     readonly slug: string,
     private readonly host: RuntimeHost,
+    private readonly agent: RuntimeAgent,
   ) {}
 
   /**
@@ -200,7 +201,7 @@ export class ContainerRuntime {
         this.client = createContainerClient(this.clientConfig(), configuredRunner)
         this.clientRunner = configuredRunner
         this.clientDecidedBy = ++this.clientReads
-        this.containerWatch()?.start()
+        this.agent.containerWatch.start()
       }
       return this.client
     }
@@ -217,7 +218,7 @@ export class ContainerRuntime {
     this.client = createContainerClient(this.clientConfig(), runner)
     this.clientRunner = runner
     this.clientDecidedBy = read
-    this.containerWatch()?.start()
+    this.agent.containerWatch.start()
     return this.client
   }
 
@@ -269,7 +270,7 @@ export class ContainerRuntime {
 
   /** This agent's live sessions, as the runtime marks and recovers them. */
   sessions(): RuntimeSessions {
-    return this.host.agentSessions?.peek(this.slug) ?? NO_LIVE_SESSIONS
+    return this.agent.sessions
   }
 
   /**
@@ -389,7 +390,7 @@ export class ContainerRuntime {
     } finally {
       // A later start that replaced this one clears and arms for itself when it settles.
       if (this.starting === startPromise) this.starting = null
-      if (this.starting === null) this.idleAlarm()?.schedule()
+      if (this.starting === null) this.agent.idleAlarm.schedule()
     }
   }
 
@@ -412,11 +413,11 @@ export class ContainerRuntime {
   updateCachedStatus(status: 'running' | 'stopped', port: number | null): void {
     this.cached = { status, port, lastSyncedAt: Date.now() }
     if (status === 'running') {
-      this.containerWatch()?.startHealth()
+      this.agent.containerWatch.startHealth()
     } else {
       this.stale = false
       this.webhookRelayAtStart = null
-      this.heldContainerWatch()?.stopHealth()
+      this.agent.containerWatch.stopHealth()
     }
   }
 
@@ -450,7 +451,7 @@ export class ContainerRuntime {
   markAsStopped(): void {
     this.updateCachedStatus('stopped', null)
     this.activity.reset()
-    this.heldIdleAlarm()?.cancel()
+    this.agent.idleAlarm.cancel()
   }
 
   /**
@@ -550,11 +551,9 @@ export class ContainerRuntime {
    *
    * Asks the client this runtime holds, without reading the runner: the
    * container it knows was started through that client. Only a runtime with
-   * no client yet builds one for the runner configured now. `sweep` carries
-   * what the host read once for a sweep over every runtime: the auto-sleep
-   * timeout an alarm found disarmed is armed with.
+   * no client yet builds one for the runner configured now.
    */
-  async syncAgentStatus(sweep?: { idleTimeoutMs?: number }): Promise<ContainerInfo> {
+  async syncAgentStatus(): Promise<ContainerInfo> {
     const slug = this.slug
     const client = this.client ?? await this.getClient()
     const previousStatus = this.cached?.status
@@ -578,12 +577,12 @@ export class ContainerRuntime {
       // and the marks it would have re-armed from are still on the clock.
       // An alarm still armed is left as it is: every mark re-armed it, and
       // its fire reads the timeout again.
-      this.idleAlarm()?.ensureArmed(sweep?.idleTimeoutMs)
+      this.agent.idleAlarm.ensureArmed()
     } else {
       // Nothing to sleep while the container is not observed running. The
       // marks stay: if the report was a transient failure, the next running
       // sync arms from them again rather than from a fresh floor.
-      this.heldIdleAlarm()?.cancel()
+      this.agent.idleAlarm.cancel()
     }
 
     // Broadcast if status changed (e.g., container was stopped externally)
@@ -757,14 +756,11 @@ export class ContainerRuntime {
     // agent's actor, never a host path: the workspace is wherever the actor
     // says it is.
     let agentName: string | undefined
-    const workspaces = this.host.agentWorkspaces
-    if (workspaces) {
-      // The display name is attribution only; a start without it is still a start.
-      try {
-        agentName = displayNameFromInstructions(await workspaces.instructions(slug))
-      } catch (error) {
-        console.warn(`[ContainerRuntime] Could not read the display name for ${slug}; starting without it:`, error)
-      }
+    // The display name is attribution only; a start without it is still a start.
+    try {
+      agentName = displayNameFromInstructions(await this.agent.instructions())
+    } catch (error) {
+      console.warn(`[ContainerRuntime] Could not read the display name for ${slug}; starting without it:`, error)
     }
 
     // Set container timezone to the agent owner's timezone
@@ -900,7 +896,7 @@ export class ContainerRuntime {
   // Record a keep-alive ping (e.g. from an open dashboard) to prevent auto-sleep
   keepAlive(): void {
     this.activity.keepAlive()
-    this.idleAlarm()?.schedule()
+    this.agent.idleAlarm.schedule()
   }
 
   /**
@@ -910,7 +906,7 @@ export class ContainerRuntime {
    */
   noteSessionActivity(at: number = Date.now()): void {
     this.activity.sessionActivity(at)
-    this.idleAlarm()?.schedule()
+    this.agent.idleAlarm.schedule()
   }
 
   /**
@@ -945,26 +941,6 @@ export class ContainerRuntime {
     return this.activity.lastActivityAt()
   }
 
-  /** The agent's idle alarm, made with its actor if none is held: arming it needs one. */
-  private idleAlarm(): IdleAlarm | undefined {
-    return this.host.agentIdleAlarms?.get(this.slug)
-  }
-
-  /** The agent's idle alarm when its actor is held: a cancel never makes one. */
-  private heldIdleAlarm(): IdleAlarm | undefined {
-    return this.host.agentIdleAlarms?.peek(this.slug)
-  }
-
-  /** The agent's container watch, made with its actor if none is held: a runtime with a client always has one. */
-  private containerWatch(): ContainerWatch | undefined {
-    return this.host.agentContainerWatches?.get(this.slug)
-  }
-
-  /** The agent's container watch when its actor is held: a stop never makes one. */
-  private heldContainerWatch(): ContainerWatch | undefined {
-    return this.host.agentContainerWatches?.peek(this.slug)
-  }
-
   private isBusy(): boolean {
     return (
       this.sessions().hasActive() ||
@@ -997,8 +973,8 @@ export class ContainerRuntime {
     this.clientRunner = null
     this.cached = null
     this.activity.reset()
-    this.heldIdleAlarm()?.cancel()
-    this.heldContainerWatch()?.stop()
+    this.agent.idleAlarm.cancel()
+    this.agent.containerWatch.stop()
     this.healthWarnings = []
     this.stopping = false
     this.starting = null

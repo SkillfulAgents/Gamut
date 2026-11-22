@@ -5,8 +5,8 @@ import { ReviewManager } from '@shared/lib/proxy/review-manager'
 import { AccountReauthManager } from '@shared/lib/proxy/account-reauth-manager'
 import { McpReauthManager } from '@shared/lib/proxy/mcp-reauth-manager'
 import { ComputerUsePermissionManager } from '@shared/lib/computer-use/permission-manager'
-import type { AgentSessionsAccess } from '@shared/lib/container/agent-sessions-access'
-import type { AgentContainerWatches } from '@shared/lib/container/container-watch'
+import type { AgentRuntimes } from '@shared/lib/container/container-host'
+import type { RuntimeAgent } from '@shared/lib/container/container-runtime'
 import { createAgentRegistry } from './registry'
 import { LiveSessions } from './live/live-sessions'
 import type { AgentState } from './agent-state'
@@ -23,7 +23,7 @@ import { createRecordingHostPort } from './testing/recording-host-port'
 // import side-effect free. The per-agent stores (input requests, reviews,
 // re-auth waits, computer-use grants) and the routers over them are real:
 // they are the actor's own and are what the tests below exercise.
-vi.mock('@shared/lib/container/container-host', () => ({ containerHost: { attachAgentWorkspaces: () => {}, attachAgentSessions: () => {}, attachAgentIdleAlarms: () => {}, attachAgentContainerWatches: () => {} } }))
+vi.mock('@shared/lib/container/container-host', () => ({ containerHost: { attachAgentRuntimes: () => {} } }))
 vi.mock('@shared/lib/config/settings', () => ({ getSettings: () => ({}), mutateSettings: vi.fn() }))
 vi.mock('@shared/lib/services/session-service', () => ({
   getSessionMetadata: vi.fn(async () => null),
@@ -101,8 +101,9 @@ function fakeDeps() {
     getWebSocketBaseUrl: vi.fn().mockReturnValue('ws://127.0.0.1:4321'),
     releaseSession: vi.fn(async (_sessionId: string) => true),
     deleteSession: vi.fn(async (_sessionId: string) => true),
+    isDefinitelyStopped: vi.fn(async () => false),
   }
-  // One fake runtime per slug, created the way the real host creates them: on first use.
+  // One fake runtime per slug, made when the agent's actor first asks for it.
   const fakeRuntime = (slug: string) => ({
     slug,
     getClient: vi.fn().mockResolvedValue(client),
@@ -122,6 +123,10 @@ function fakeDeps() {
     isStopping: vi.fn().mockReturnValue(false),
     hasClient: vi.fn().mockReturnValue(true),
     markAsStopped: vi.fn(),
+    // Dropped: the actor's next use makes a new one.
+    dispose: vi.fn(() => {
+      runtimes.delete(slug)
+    }),
   })
   const runtimes = new Map<string, ReturnType<typeof fakeRuntime>>()
   const containerHost = {
@@ -133,13 +138,10 @@ function fakeDeps() {
       }
       return runtime
     }),
+    createRuntime: vi.fn((slug: string, _agent: RuntimeAgent) => containerHost.runtime(slug)),
     getRunningAgentIds: vi.fn().mockReturnValue([]),
-    dropRuntime: vi.fn(),
     clearRuntimes: vi.fn(),
-    attachAgentWorkspaces: vi.fn(),
-    attachAgentSessions: vi.fn(),
-    attachAgentIdleAlarms: vi.fn(),
-    attachAgentContainerWatches: vi.fn(),
+    attachAgentRuntimes: vi.fn(),
   }
   const { inputManager, transitions, reviewManager, accountReauthManager, mcpReauthManager, computerUsePermissionManager } =
     routers()
@@ -213,8 +215,8 @@ describe('createAgentRegistry', () => {
     expect(a.slug).toBe('a')
     expect(registry.get('a')).toBe(a)
     expect(registry.get('b')).not.toBe(a)
-    // A handle does not touch the container host until an op runs.
-    expect(fake.containerHost.runtime).not.toHaveBeenCalled()
+    // A handle reads its container, and starts it only when an op asks.
+    for (const runtime of fake.runtimes.values()) expect(runtime.ensureRunning).not.toHaveBeenCalled()
   })
 
 
@@ -234,77 +236,104 @@ describe('createAgentRegistry', () => {
     expect(resolveB).toHaveBeenCalledTimes(1)
     expect(a.memories).toBe(registry.get('a').memories)
     expect(a.memories).not.toBe(b.memories)
-    expect(fake.containerHost.runtime).not.toHaveBeenCalled()
+    for (const runtime of fake.runtimes.values()) expect(runtime.ensureRunning).not.toHaveBeenCalled()
   })
-  it('gives the container host a way into each agent workspace through the actors', async () => {
+  it('hands its runtime the agent\'s own live sessions, idle alarm, watch and instructions', async () => {
     const registry = createAgentRegistry(fake.deps)
-    expect(fake.containerHost.attachAgentWorkspaces).toHaveBeenCalledTimes(1)
-    const access = fake.containerHost.attachAgentWorkspaces.mock.calls[0][0] as {
-      instructions: (slug: string) => Promise<string | null>
-    }
+    const actor = registry.get('a') as LocalAgentActor
+    actor.state.runtime()
+    expect(fake.containerHost.createRuntime).toHaveBeenCalledTimes(1)
+    const [slug, agent] = fake.containerHost.createRuntime.mock.calls[0]
+    expect(slug).toBe('a')
+    expect(agent.sessions).toBe(actor.state.sessions)
+    expect(agent.idleAlarm).toBe(actor.state.idleAlarm)
+    expect(agent.containerWatch).toBe(actor.state.containerWatch)
     // Instructions are the actor's config document.
-    const getDoc = vi.spyOn(registry.get('a').config, 'get').mockResolvedValue('---\nname: A\n---\n')
-    expect(await access.instructions('a')).toBe('---\nname: A\n---\n')
+    const getDoc = vi.spyOn(actor.config, 'get').mockResolvedValue('---\nname: A\n---\n')
+    expect(await agent.instructions()).toBe('---\nname: A\n---\n')
     expect(getDoc).toHaveBeenCalledWith('instructions')
   })
 
-  describe('the container host reaches the held agents\' live sessions', () => {
+  describe('the container host reaches the actors\' runtimes', () => {
     const attached = () => {
-      expect(fake.containerHost.attachAgentSessions).toHaveBeenCalledTimes(1)
-      return fake.containerHost.attachAgentSessions.mock.calls[0][0] as AgentSessionsAccess
+      expect(fake.containerHost.attachAgentRuntimes).toHaveBeenCalledTimes(1)
+      return fake.containerHost.attachAgentRuntimes.mock.calls[0][0] as AgentRuntimes
     }
 
-    it('peeking never creates a handle', () => {
-      createAgentRegistry(fake.deps)
-      expect(attached().peek('a')).toBeUndefined()
-      expect(attached().peek('a')).toBeUndefined()
+    it('lists the runtimes the held actors made, and never makes a handle to list them', async () => {
+      const registry = createAgentRegistry(fake.deps)
+      expect(attached().held()).toEqual([])
+      const a = registry.get('a') as LocalAgentActor
+      await a.firstRead
+      expect(attached().held()).toEqual([a.state.runtime()])
+      await registry.evict('a')
+      expect(attached().held()).toEqual([])
     })
 
-    it('peeking a held agent answers its actor\'s live sessions', () => {
+    it('wakes an agent by making its actor, and settles once the actor has read its container', async () => {
+      createAgentRegistry(fake.deps)
+      await attached().wake('a')
+      expect(fake.runtimes.get('a')?.syncAgentStatus).toHaveBeenCalledTimes(1)
+    })
+
+    it('drops a held runtime: the actor makes a new one on its next use', () => {
       const registry = createAgentRegistry(fake.deps)
       const a = registry.get('a') as LocalAgentActor
-      const b = registry.get('b') as LocalAgentActor
-      expect(attached().peek('a')).toBe(a.state.sessions)
-      expect(attached().peek('b')).toBe(b.state.sessions)
-    })
-
-    it('an evicted agent has no live sessions to peek', async () => {
-      const registry = createAgentRegistry(fake.deps)
-      registry.get('a')
-      await registry.evict('a')
-      expect(attached().peek('a')).toBeUndefined()
+      const first = a.state.runtime()
+      attached().drop('a')
+      expect(first.dispose).toHaveBeenCalledTimes(1)
+      expect(a.state.runtime()).not.toBe(first)
     })
   })
 
-  describe('the container host reaches each agent\'s container watch', () => {
-    const attached = () => {
-      expect(fake.containerHost.attachAgentContainerWatches).toHaveBeenCalledTimes(1)
-      return fake.containerHost.attachAgentContainerWatches.mock.calls[0][0] as AgentContainerWatches
+  describe('the actor checks its own container', () => {
+    const watchOf = (registry: ReturnType<typeof createAgentRegistry>) => (registry.get('a') as LocalAgentActor).state.containerWatch
+    const firstRead = (registry: ReturnType<typeof createAgentRegistry>) => (registry.get('a') as LocalAgentActor).firstRead
+    const seenStopped = () => {
+      const runtime = fake.containerHost.runtime('a')
+      runtime.syncAgentStatus.mockResolvedValue({ status: 'stopped', port: null })
+      runtime.getCachedInfo.mockReturnValue({ status: 'stopped', port: null })
+      return runtime
     }
 
-    it('a running container gets its actor\'s watch, and peeking never creates a handle', () => {
+    it('reads its container once when it is made, and keeps reading one that runs', async () => {
       const registry = createAgentRegistry(fake.deps)
-      expect(attached().peek('a')).toBeUndefined()
-      const watch = attached().get('a')
-      expect(watch).toBe((registry.get('a') as LocalAgentActor).state.containerWatch)
-      expect(attached().peek('a')).toBe(watch)
+      await firstRead(registry)
+      expect(fake.runtimes.get('a')?.syncAgentStatus).toHaveBeenCalledTimes(1)
+      expect(watchOf(registry).isWatching()).toBe(true)
     })
 
-    it('checks the agent\'s runtime, and marks it stopped when the status cannot be read', async () => {
+    it('stops reading once the runner confirms the container stopped', async () => {
+      seenStopped().getClient.mockResolvedValue({ isDefinitelyStopped: vi.fn(async () => true) })
+      const registry = createAgentRegistry(fake.deps)
+      await firstRead(registry)
+      expect(watchOf(registry).isWatching()).toBe(false)
+    })
+
+    it('keeps reading a container read as stopped that the runner does not confirm stopped', async () => {
+      seenStopped()
+      const registry = createAgentRegistry(fake.deps)
+      await firstRead(registry)
+      expect(watchOf(registry).isWatching()).toBe(true)
+    })
+
+    it('marks the container stopped, and keeps reading, when the status cannot be read', async () => {
+      const runtime = fake.containerHost.runtime('a')
+      runtime.syncAgentStatus.mockRejectedValue(new Error('runtime gone'))
+      vi.spyOn(console, 'error').mockImplementation(() => {})
+      const registry = createAgentRegistry(fake.deps)
+      await firstRead(registry)
+      expect(runtime.markAsStopped).toHaveBeenCalledTimes(1)
+      expect(watchOf(registry).isWatching()).toBe(true)
+    })
+
+    it('checks the health of its running container every 30 s', async () => {
       vi.useFakeTimers()
       try {
-        createAgentRegistry(fake.deps)
-        attached().get('a').startHealth()
-        const runtime = fake.containerHost.runtime('a')
+        const registry = createAgentRegistry(fake.deps)
+        watchOf(registry).startHealth()
         await vi.advanceTimersByTimeAsync(30_000)
-        expect(runtime.runHealthCheck).toHaveBeenCalledTimes(1)
-        expect(runtime.syncAgentStatus).not.toHaveBeenCalled()
-
-        vi.mocked(runtime.syncAgentStatus).mockRejectedValueOnce(new Error('runtime gone'))
-        vi.spyOn(console, 'error').mockImplementation(() => {})
-        await vi.advanceTimersByTimeAsync(270_000)
-        expect(runtime.syncAgentStatus).toHaveBeenCalledTimes(1)
-        expect(runtime.markAsStopped).toHaveBeenCalledTimes(1)
+        expect(fake.runtimes.get('a')?.runHealthCheck).toHaveBeenCalledTimes(1)
       } finally {
         vi.useRealTimers()
       }
@@ -312,8 +341,8 @@ describe('createAgentRegistry', () => {
 
     it('an evicted agent\'s watch stops', async () => {
       const registry = createAgentRegistry(fake.deps)
-      const watch = attached().get('a')
-      watch.start()
+      const watch = watchOf(registry)
+      await firstRead(registry)
       expect(watch.isWatching()).toBe(true)
       await registry.evict('a')
       expect(watch.isWatching()).toBe(false)
@@ -324,10 +353,13 @@ describe('createAgentRegistry', () => {
     const registry = createAgentRegistry(fake.deps)
     const a = registry.get('a')
     const b = registry.get('b')
+    ;(a as LocalAgentActor).state.runtime()
+    ;(b as LocalAgentActor).state.runtime()
 
     await registry.evict('a')
 
-    expect(fake.containerHost.dropRuntime).toHaveBeenCalledWith('a')
+    expect((a as LocalAgentActor).state.peekRuntime()).toBeUndefined()
+    expect((b as LocalAgentActor).state.peekRuntime()).toBeDefined()
     expect(registry.get('b')).toBe(b)
     expect(registry.get('a')).not.toBe(a)
   })
@@ -337,9 +369,13 @@ describe('createAgentRegistry', () => {
     const a = registry.get('a')
     const b = registry.get('b')
 
+    ;(a as LocalAgentActor).state.runtime()
+    ;(b as LocalAgentActor).state.runtime()
+
     await registry.evictAll()
 
-    expect(fake.containerHost.clearRuntimes).toHaveBeenCalledTimes(1)
+    expect((a as LocalAgentActor).state.peekRuntime()).toBeUndefined()
+    expect((b as LocalAgentActor).state.peekRuntime()).toBeUndefined()
     expect(registry.get('a')).not.toBe(a)
     expect(registry.get('b')).not.toBe(b)
   })
@@ -393,7 +429,6 @@ describe('createAgentRegistry', () => {
 
     await expect(registry.evictAll()).resolves.toBeUndefined()
 
-    expect(fake.containerHost.clearRuntimes).toHaveBeenCalledTimes(1)
     expect(registry.get('a')).not.toBe(a)
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('recorded session activity of a'), expect.any(Error))
   })
@@ -402,7 +437,7 @@ describe('createAgentRegistry', () => {
     it('container.start resolves to nothing even though ensureRunning returns the client', async () => {
       const actor = createAgentRegistry(fake.deps).get('a')
       await expect(actor.container.start()).resolves.toBeUndefined()
-      expect(fake.containerHost.runtime).toHaveBeenCalledWith('a')
+      expect(fake.containerHost.createRuntime).toHaveBeenCalledWith('a', expect.anything())
       expect(fake.runtimes.get('a')?.ensureRunning).toHaveBeenCalledTimes(1)
     })
 
@@ -424,7 +459,6 @@ describe('createAgentRegistry', () => {
 
     it('container.webSocketTarget targets this agent\'s container and adds its auth headers last', async () => {
       const actor = createAgentRegistry(fake.deps).get('a')
-      expect(fake.containerHost.runtime).not.toHaveBeenCalled()
 
       expect(await actor.container.webSocketTarget('/browser/stream', {
         search: '?since=1',
@@ -725,7 +759,7 @@ describe('createAgentRegistry', () => {
       expect(syncAwaiting).toHaveBeenCalled()
       // The live sessions are released with it: their streams and timers go.
       expect(dispose).toHaveBeenCalledTimes(1)
-      expect(fake.containerHost.dropRuntime).toHaveBeenCalledWith('a')
+      expect(actor.state.peekRuntime()).toBeUndefined()
 
       // Nothing survives into the next handle for the slug.
       const fresh = registry.get('a') as LocalAgentActor
@@ -755,9 +789,9 @@ describe('createAgentRegistry', () => {
 
       await expect(reviewA).resolves.toBe('timeout')
       await expect(reviewB).resolves.toBe('timeout')
-      // The host forgets the runtimes its own way (a starting one is kept).
-      expect(fake.containerHost.dropRuntime).not.toHaveBeenCalled()
-      expect(fake.containerHost.clearRuntimes).toHaveBeenCalledTimes(1)
+      // Each actor drops its runtime with its state.
+      expect((a as LocalAgentActor).state.peekRuntime()).toBeUndefined()
+      expect((b as LocalAgentActor).state.peekRuntime()).toBeUndefined()
       expect(registry.get('a')).not.toBe(a)
       expect(registry.get('b')).not.toBe(b)
     })

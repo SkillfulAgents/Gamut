@@ -118,6 +118,9 @@ vi.mock('@shared/lib/services/mount-service', () => ({
 }))
 
 import { containerHost } from './container-host'
+import { attachTestRuntimes } from './testing/test-runtimes'
+
+const agents = attachTestRuntimes(containerHost)
 
 // ============================================================================
 // Concurrent ensureRunning — race conditions
@@ -128,8 +131,8 @@ describe('ContainerRuntime.ensureRunning — concurrent call safety', () => {
     vi.clearAllMocks()
     startResolvers = []
     startDelay = 0
-    containerHost.dropRuntime('test-agent')
-    containerHost.runtime('test-agent').updateCachedStatus('stopped', null)
+    agents.drop('test-agent')
+    agents.runtime('test-agent').updateCachedStatus('stopped', null)
     mockGetInfoFromRuntime.mockResolvedValue({ status: 'running', port: 4001 })
   })
 
@@ -139,9 +142,9 @@ describe('ContainerRuntime.ensureRunning — concurrent call safety', () => {
       startResolvers.push(resolve)
     }))
 
-    const p1 = containerHost.runtime('test-agent').ensureRunning()
-    const p2 = containerHost.runtime('test-agent').ensureRunning()
-    const p3 = containerHost.runtime('test-agent').ensureRunning()
+    const p1 = agents.runtime('test-agent').ensureRunning()
+    const p2 = agents.runtime('test-agent').ensureRunning()
+    const p3 = agents.runtime('test-agent').ensureRunning()
 
     // Resolve the single start call
     await vi.waitFor(() => expect(startResolvers).toHaveLength(1))
@@ -158,8 +161,8 @@ describe('ContainerRuntime.ensureRunning — concurrent call safety', () => {
       startResolvers.push(resolve)
     }))
 
-    const p1 = containerHost.runtime('test-agent').ensureRunning()
-    const p2 = containerHost.runtime('test-agent').ensureRunning()
+    const p1 = agents.runtime('test-agent').ensureRunning()
+    const p2 = agents.runtime('test-agent').ensureRunning()
 
     await vi.waitFor(() => expect(startResolvers).toHaveLength(1))
     startResolvers[0]()
@@ -173,8 +176,8 @@ describe('ContainerRuntime.ensureRunning — concurrent call safety', () => {
     const startError = new Error('Docker daemon not running')
     mockStart.mockRejectedValue(startError)
 
-    const p1 = containerHost.runtime('test-agent').ensureRunning()
-    const p2 = containerHost.runtime('test-agent').ensureRunning()
+    const p1 = agents.runtime('test-agent').ensureRunning()
+    const p2 = agents.runtime('test-agent').ensureRunning()
 
     await expect(p1).rejects.toThrow('Docker daemon not running')
     await expect(p2).rejects.toThrow('Docker daemon not running')
@@ -186,29 +189,29 @@ describe('ContainerRuntime.ensureRunning — concurrent call safety', () => {
     // First attempt fails
     mockStart.mockRejectedValueOnce(new Error('Docker daemon not running'))
 
-    await expect(containerHost.runtime('test-agent').ensureRunning()).rejects.toThrow()
+    await expect(agents.runtime('test-agent').ensureRunning()).rejects.toThrow()
 
     // Second attempt should try again (not re-use the failed promise)
     mockStart.mockResolvedValueOnce(undefined)
-    const client = await containerHost.runtime('test-agent').ensureRunning()
+    const client = await agents.runtime('test-agent').ensureRunning()
 
     expect(client).toBeDefined()
     expect(mockStart).toHaveBeenCalledTimes(2)
   })
 
   it('different agents can start concurrently without interference', async () => {
-    containerHost.dropRuntime('agent-a')
-    containerHost.dropRuntime('agent-b')
-    containerHost.runtime('agent-a').updateCachedStatus('stopped', null)
-    containerHost.runtime('agent-b').updateCachedStatus('stopped', null)
+    agents.drop('agent-a')
+    agents.drop('agent-b')
+    agents.runtime('agent-a').updateCachedStatus('stopped', null)
+    agents.runtime('agent-b').updateCachedStatus('stopped', null)
 
     const resolvers: Record<string, () => void> = {}
     mockStart.mockImplementation(() => new Promise<void>((resolve) => {
       resolvers[mockStart.mock.calls.length === 1 ? 'a' : 'b'] = resolve
     }))
 
-    const pA = containerHost.runtime('agent-a').ensureRunning()
-    const pB = containerHost.runtime('agent-b').ensureRunning()
+    const pA = agents.runtime('agent-a').ensureRunning()
+    const pB = agents.runtime('agent-b').ensureRunning()
 
     await vi.waitFor(() => expect(mockStart).toHaveBeenCalledTimes(2))
 
@@ -229,8 +232,8 @@ describe('ContainerRuntime.ensureRunning — pre-warm cache race', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     startResolvers = []
-    containerHost.dropRuntime('test-agent')
-    containerHost.runtime('test-agent').updateCachedStatus('stopped', null)
+    agents.drop('test-agent')
+    agents.runtime('test-agent').updateCachedStatus('stopped', null)
     mockGetInfoFromRuntime.mockResolvedValue({ status: 'running', port: 4001 })
   })
 
@@ -241,17 +244,17 @@ describe('ContainerRuntime.ensureRunning — pre-warm cache race', () => {
     }))
 
     // First call (pre-warm) begins starting
-    const p1 = containerHost.runtime('test-agent').ensureRunning()
+    const p1 = agents.runtime('test-agent').ensureRunning()
     await vi.waitFor(() => expect(mockStart).toHaveBeenCalledTimes(1))
 
     // Simulate onConnectionError -> syncAgentStatus updating cache to 'running'
     // This is what happens in the real race: Docker reports the container process
     // as running before the HTTP server inside is ready
-    containerHost.runtime('test-agent').updateCachedStatus('running', 4001)
+    agents.runtime('test-agent').updateCachedStatus('running', 4001)
 
     // Second call (message handler) should NOT return immediately
     // despite cached status being 'running' — it should wait for the start to complete
-    const p2 = containerHost.runtime('test-agent').ensureRunning()
+    const p2 = agents.runtime('test-agent').ensureRunning()
 
     // At this point, start hasn't finished yet. Verify the second promise is still pending.
     let p2Resolved = false
@@ -273,7 +276,7 @@ describe('ContainerRuntime.ensureRunning — pre-warm cache race', () => {
     }))
 
     // Begin starting
-    containerHost.runtime('test-agent').ensureRunning()
+    agents.runtime('test-agent').ensureRunning()
     await vi.waitFor(() => expect(mockStart).toHaveBeenCalledTimes(1))
 
     // Simulate what onConnectionError does: calls syncAgentStatus which
@@ -281,10 +284,10 @@ describe('ContainerRuntime.ensureRunning — pre-warm cache race', () => {
     // The fix should prevent this from updating cache during startup.
     // We directly call syncAgentStatus here to simulate the race.
     mockGetInfoFromRuntime.mockResolvedValue({ status: 'running', port: 4001 })
-    await containerHost.runtime('test-agent').syncAgentStatus()
+    await agents.runtime('test-agent').syncAgentStatus()
 
     // After the sync, the cache should NOT say 'running' because start is still in-flight
-    const info = containerHost.runtime('test-agent').getCachedInfo()
+    const info = agents.runtime('test-agent').getCachedInfo()
     expect(info.status).toBe('stopped')
 
     // Cleanup: resolve start
@@ -294,13 +297,13 @@ describe('ContainerRuntime.ensureRunning — pre-warm cache race', () => {
   it('after start completes, syncAgentStatus updates cache normally', async () => {
     mockStart.mockResolvedValue(undefined)
 
-    await containerHost.runtime('test-agent').ensureRunning()
+    await agents.runtime('test-agent').ensureRunning()
 
     // Now syncAgentStatus should work normally
     mockGetInfoFromRuntime.mockResolvedValue({ status: 'running', port: 4002 })
-    await containerHost.runtime('test-agent').syncAgentStatus()
+    await agents.runtime('test-agent').syncAgentStatus()
 
-    const info = containerHost.runtime('test-agent').getCachedInfo()
+    const info = agents.runtime('test-agent').getCachedInfo()
     expect(info.status).toBe('running')
     expect(info.port).toBe(4002)
   })
@@ -310,17 +313,17 @@ describe('ContainerRuntime.ensureRunning — pre-warm cache race', () => {
       startResolvers.push(resolve)
     }))
 
-    containerHost.runtime('test-agent').updateCachedStatus('stopped', null)
+    agents.runtime('test-agent').updateCachedStatus('stopped', null)
 
     // First call starts the container
-    const p1 = containerHost.runtime('test-agent').ensureRunning()
+    const p1 = agents.runtime('test-agent').ensureRunning()
     await vi.waitFor(() => expect(mockStart).toHaveBeenCalledTimes(1))
 
     // Simulate onConnectionError updating cache to 'running' mid-start
-    containerHost.runtime('test-agent').updateCachedStatus('running', 4001)
+    agents.runtime('test-agent').updateCachedStatus('running', 4001)
 
     // Second call should either join inflight OR not trigger a new start
-    const p2 = containerHost.runtime('test-agent').ensureRunning()
+    const p2 = agents.runtime('test-agent').ensureRunning()
 
     // Resolve start
     startResolvers[0]()
@@ -339,23 +342,23 @@ describe('ContainerRuntime.ensureRunning — already running', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     startResolvers = []
-    containerHost.dropRuntime('test-agent')
+    agents.drop('test-agent')
   })
 
   it('does not call start when cached status is running and no inflight start', async () => {
-    containerHost.runtime('test-agent').updateCachedStatus('running', 4001)
+    agents.runtime('test-agent').updateCachedStatus('running', 4001)
 
-    const client = await containerHost.runtime('test-agent').ensureRunning()
+    const client = await agents.runtime('test-agent').ensureRunning()
 
     expect(client).toBeDefined()
     expect(mockStart).not.toHaveBeenCalled()
   })
 
   it('returns quickly when already running (no blocking)', async () => {
-    containerHost.runtime('test-agent').updateCachedStatus('running', 4001)
+    agents.runtime('test-agent').updateCachedStatus('running', 4001)
 
     const start = Date.now()
-    await containerHost.runtime('test-agent').ensureRunning()
+    await agents.runtime('test-agent').ensureRunning()
     const elapsed = Date.now() - start
 
     expect(elapsed).toBeLessThan(50)
@@ -370,20 +373,20 @@ describe('ContainerRuntime.ensureRunning — sequential restarts', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     startResolvers = []
-    containerHost.dropRuntime('test-agent')
-    containerHost.runtime('test-agent').updateCachedStatus('stopped', null)
+    agents.drop('test-agent')
+    agents.runtime('test-agent').updateCachedStatus('stopped', null)
     mockGetInfoFromRuntime.mockResolvedValue({ status: 'running', port: 4001 })
     mockStart.mockResolvedValue(undefined)
   })
 
   it('allows a new start after previous ensureRunning completed', async () => {
-    await containerHost.runtime('test-agent').ensureRunning()
+    await agents.runtime('test-agent').ensureRunning()
     expect(mockStart).toHaveBeenCalledTimes(1)
 
     // Simulate container stopped
-    containerHost.runtime('test-agent').updateCachedStatus('stopped', null)
+    agents.runtime('test-agent').updateCachedStatus('stopped', null)
 
-    await containerHost.runtime('test-agent').ensureRunning()
+    await agents.runtime('test-agent').ensureRunning()
     expect(mockStart).toHaveBeenCalledTimes(2)
   })
 
@@ -392,19 +395,19 @@ describe('ContainerRuntime.ensureRunning — sequential restarts', () => {
       startResolvers.push(resolve)
     }))
 
-    const p1 = containerHost.runtime('test-agent').ensureRunning()
+    const p1 = agents.runtime('test-agent').ensureRunning()
     await vi.waitFor(() => expect(startResolvers).toHaveLength(1))
     startResolvers[0]()
     await p1
 
     // The inflight promise should be gone — a new call with 'stopped' status should start fresh
-    containerHost.runtime('test-agent').updateCachedStatus('stopped', null)
+    agents.runtime('test-agent').updateCachedStatus('stopped', null)
     startResolvers = []
     mockStart.mockImplementation(() => new Promise<void>((resolve) => {
       startResolvers.push(resolve)
     }))
 
-    const p2 = containerHost.runtime('test-agent').ensureRunning()
+    const p2 = agents.runtime('test-agent').ensureRunning()
     await vi.waitFor(() => expect(startResolvers).toHaveLength(1))
     startResolvers[0]()
     await p2
@@ -415,11 +418,11 @@ describe('ContainerRuntime.ensureRunning — sequential restarts', () => {
   it('inflight promise is cleaned up after failed start', async () => {
     mockStart.mockRejectedValueOnce(new Error('fail'))
 
-    await expect(containerHost.runtime('test-agent').ensureRunning()).rejects.toThrow('fail')
+    await expect(agents.runtime('test-agent').ensureRunning()).rejects.toThrow('fail')
 
     // Should be able to retry
     mockStart.mockResolvedValueOnce(undefined)
-    await containerHost.runtime('test-agent').ensureRunning()
+    await agents.runtime('test-agent').ensureRunning()
     expect(mockStart).toHaveBeenCalledTimes(2)
   })
 })
@@ -432,8 +435,8 @@ describe('ContainerRuntime — stopContainer during in-flight start', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     startResolvers = []
-    containerHost.dropRuntime('test-agent')
-    containerHost.runtime('test-agent').updateCachedStatus('stopped', null)
+    agents.drop('test-agent')
+    agents.runtime('test-agent').updateCachedStatus('stopped', null)
     mockGetInfoFromRuntime.mockResolvedValue({ status: 'running', port: 4001 })
     mockStop.mockResolvedValue({ forceStopUsed: false })
   })
@@ -444,10 +447,10 @@ describe('ContainerRuntime — stopContainer during in-flight start', () => {
       releaseStop = resolve
     }))
 
-    const stopPromise = containerHost.runtime('test-agent').stopContainer()
+    const stopPromise = agents.runtime('test-agent').stopContainer()
     await vi.waitFor(() => expect(mockStop).toHaveBeenCalled())
 
-    await expect(containerHost.runtime('test-agent').ensureRunning()).rejects.toThrow(
+    await expect(agents.runtime('test-agent').ensureRunning()).rejects.toThrow(
       'Cannot start agent test-agent while it is stopping',
     )
     expect(mockStart).not.toHaveBeenCalled()
@@ -461,19 +464,19 @@ describe('ContainerRuntime — stopContainer during in-flight start', () => {
       startResolvers.push(() => resolve({ status: 'running', port: 4001 }))
     }))
 
-    const startPromise = containerHost.runtime('test-agent').ensureRunning()
+    const startPromise = agents.runtime('test-agent').ensureRunning()
     await vi.waitFor(() => expect(mockStart).toHaveBeenCalledTimes(1))
 
     let releaseStop: (value: { forceStopUsed: boolean }) => void = () => {}
     mockStop.mockImplementation(() => new Promise<{ forceStopUsed: boolean }>((resolve) => {
       releaseStop = resolve
     }))
-    const stopPromise = containerHost.runtime('test-agent').stopContainer()
+    const stopPromise = agents.runtime('test-agent').stopContainer()
     await vi.waitFor(() => expect(mockStop).toHaveBeenCalled())
 
     startResolvers[0]?.()
     await expect(startPromise).rejects.toThrow('Cannot start agent test-agent while it is stopping')
-    expect(containerHost.runtime('test-agent').getCachedInfo().status).toBe('stopped')
+    expect(agents.runtime('test-agent').getCachedInfo().status).toBe('stopped')
 
     releaseStop({ forceStopUsed: false })
     await stopPromise
@@ -485,17 +488,17 @@ describe('ContainerRuntime — stopContainer during in-flight start', () => {
     }))
 
     // Begin starting
-    const startPromise = containerHost.runtime('test-agent').ensureRunning()
+    const startPromise = agents.runtime('test-agent').ensureRunning()
     await vi.waitFor(() => expect(mockStart).toHaveBeenCalledTimes(1))
 
     // Stop while start is in-flight
-    await containerHost.runtime('test-agent').stopContainer()
+    await agents.runtime('test-agent').stopContainer()
 
     // A new ensureRunning should NOT join the old (now orphaned) promise
     // — it should attempt a fresh start
     mockStart.mockResolvedValueOnce(undefined)
-    containerHost.runtime('test-agent').updateCachedStatus('stopped', null)
-    const client = await containerHost.runtime('test-agent').ensureRunning()
+    agents.runtime('test-agent').updateCachedStatus('stopped', null)
+    const client = await agents.runtime('test-agent').ensureRunning()
 
     expect(client).toBeDefined()
     expect(mockStart).toHaveBeenCalledTimes(2)
@@ -510,16 +513,16 @@ describe('ContainerRuntime — stopContainer during in-flight start', () => {
       startResolvers.push(resolve)
     }))
 
-    const startPromise = containerHost.runtime('test-agent').ensureRunning()
+    const startPromise = agents.runtime('test-agent').ensureRunning()
     await vi.waitFor(() => expect(mockStart).toHaveBeenCalledTimes(1))
 
     // Drop the runtime while start is in-flight
-    containerHost.dropRuntime('test-agent')
+    agents.drop('test-agent')
 
     // New ensureRunning creates a fresh client and starts fresh
     mockStart.mockResolvedValueOnce(undefined)
-    containerHost.runtime('test-agent').updateCachedStatus('stopped', null)
-    const client = await containerHost.runtime('test-agent').ensureRunning()
+    agents.runtime('test-agent').updateCachedStatus('stopped', null)
+    const client = await agents.runtime('test-agent').ensureRunning()
 
     expect(client).toBeDefined()
     expect(mockStart).toHaveBeenCalledTimes(2)
@@ -531,67 +534,68 @@ describe('ContainerRuntime — stopContainer during in-flight start', () => {
 })
 
 // ============================================================================
-// syncAllStatuses interaction with in-flight start
+// The watch's status read during an in-flight start
 // ============================================================================
 
-describe('ContainerHost — syncAllStatuses during in-flight start', () => {
+describe('ContainerRuntime — a status read during an in-flight start', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     startResolvers = []
-    containerHost.dropRuntime('test-agent')
-    containerHost.runtime('test-agent').updateCachedStatus('stopped', null)
+    agents.drop('test-agent')
+    agents.runtime('test-agent').updateCachedStatus('stopped', null)
     mockGetInfoFromRuntime.mockResolvedValue({ status: 'running', port: 4001 })
   })
 
-  it('syncAllStatuses does not update cache for an agent with in-flight start', async () => {
+  it('a status read does not update the cache of an agent with an in-flight start', async () => {
     mockStart.mockImplementation(() => new Promise<void>((resolve) => {
       startResolvers.push(resolve)
     }))
 
     // Begin starting
-    containerHost.runtime('test-agent').ensureRunning()
+    agents.runtime('test-agent').ensureRunning()
     await vi.waitFor(() => expect(mockStart).toHaveBeenCalledTimes(1))
 
     // Periodic sync fires — Docker reports "running" but we should ignore it
     mockGetInfoFromRuntime.mockResolvedValue({ status: 'running', port: 4001 })
-    await containerHost.syncAllStatuses()
+    await agents.runtime('test-agent').syncAgentStatus()
 
     // Cache should still be 'stopped' — the sync was suppressed
-    const info = containerHost.runtime('test-agent').getCachedInfo()
+    const info = agents.runtime('test-agent').getCachedInfo()
     expect(info.status).toBe('stopped')
 
     // Complete start — NOW the cache should update
     startResolvers[0]()
     // Need to wait for the ensureRunning promise to settle
     await vi.waitFor(() => {
-      const updated = containerHost.runtime('test-agent').getCachedInfo()
+      const updated = agents.runtime('test-agent').getCachedInfo()
       expect(updated.status).toBe('running')
     })
   })
 
-  it('syncAllStatuses still updates cache for OTHER agents not currently starting', async () => {
+  it('a status read still updates the cache of OTHER agents not currently starting', async () => {
     mockStart.mockImplementation(() => new Promise<void>((resolve) => {
       startResolvers.push(resolve)
     }))
 
     // Set up a second agent that's already running
-    containerHost.runtime('other-agent').getClient()
-    containerHost.runtime('other-agent').updateCachedStatus('running', 4002)
+    agents.runtime('other-agent').getClient()
+    agents.runtime('other-agent').updateCachedStatus('running', 4002)
 
     // Begin starting test-agent
-    containerHost.runtime('test-agent').ensureRunning()
+    agents.runtime('test-agent').ensureRunning()
     await vi.waitFor(() => expect(mockStart).toHaveBeenCalledTimes(1))
 
     // Sync — Docker reports other-agent stopped (crashed externally)
     mockGetInfoFromRuntime.mockImplementation(async () => {
       return { status: 'stopped', port: null }
     })
-    await containerHost.syncAllStatuses()
+    await agents.runtime('test-agent').syncAgentStatus()
+    await agents.runtime('other-agent').syncAgentStatus()
 
     // test-agent: still 'stopped' (suppressed)
-    expect(containerHost.runtime('test-agent').getCachedInfo().status).toBe('stopped')
+    expect(agents.runtime('test-agent').getCachedInfo().status).toBe('stopped')
     // other-agent: updated to 'stopped' (not suppressed)
-    expect(containerHost.runtime('other-agent').getCachedInfo().status).toBe('stopped')
+    expect(agents.runtime('other-agent').getCachedInfo().status).toBe('stopped')
 
     // Cleanup
     startResolvers[0]?.()
@@ -606,15 +610,15 @@ describe('ContainerRuntime — restartContainer with concurrency', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     startResolvers = []
-    containerHost.dropRuntime('test-agent')
-    containerHost.runtime('test-agent').updateCachedStatus('running', 4001)
+    agents.drop('test-agent')
+    agents.runtime('test-agent').updateCachedStatus('running', 4001)
     mockGetInfoFromRuntime.mockResolvedValue({ status: 'running', port: 4002 })
     mockStop.mockResolvedValue({ forceStopUsed: false })
     mockStart.mockResolvedValue(undefined)
   })
 
   it('restartContainer works cleanly (stop clears inflight, then fresh start)', async () => {
-    const client = await containerHost.runtime('test-agent').restartContainer()
+    const client = await agents.runtime('test-agent').restartContainer()
 
     expect(mockStop).toHaveBeenCalledTimes(1)
     expect(mockStart).toHaveBeenCalledTimes(1)
@@ -627,11 +631,11 @@ describe('ContainerRuntime — restartContainer with concurrency', () => {
     }))
 
     // restartContainer: stop completes, then starts — but start hangs
-    const restartPromise = containerHost.runtime('test-agent').restartContainer()
+    const restartPromise = agents.runtime('test-agent').restartContainer()
     await vi.waitFor(() => expect(mockStart).toHaveBeenCalledTimes(1))
 
     // Concurrent ensureRunning while restart's start is in-flight
-    const p2 = containerHost.runtime('test-agent').ensureRunning()
+    const p2 = agents.runtime('test-agent').ensureRunning()
 
     // Both should resolve when start completes
     startResolvers[0]()
@@ -650,19 +654,19 @@ describe('ContainerRuntime — post-start getInfoFromRuntime failure', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     startResolvers = []
-    containerHost.dropRuntime('test-agent')
-    containerHost.runtime('test-agent').updateCachedStatus('stopped', null)
+    agents.drop('test-agent')
+    agents.runtime('test-agent').updateCachedStatus('stopped', null)
   })
 
   it('if getInfoFromRuntime fails after start(), ensureRunning rejects and cleans up', async () => {
     mockStart.mockResolvedValue(undefined)
     mockGetInfoFromRuntime.mockRejectedValue(new Error('docker inspect failed'))
 
-    await expect(containerHost.runtime('test-agent').ensureRunning()).rejects.toThrow('docker inspect failed')
+    await expect(agents.runtime('test-agent').ensureRunning()).rejects.toThrow('docker inspect failed')
 
     // Inflight promise should be cleaned up — retry should work
     mockGetInfoFromRuntime.mockResolvedValue({ status: 'running', port: 4001 })
-    const client = await containerHost.runtime('test-agent').ensureRunning()
+    const client = await agents.runtime('test-agent').ensureRunning()
     expect(client).toBeDefined()
     expect(mockStart).toHaveBeenCalledTimes(2)
   })
