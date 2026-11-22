@@ -74,6 +74,33 @@ test.describe('Transcript live-edge follow', () => {
     expect(final.scrollHeight).toBeGreaterThan(final.clientHeight * 1.5)
   })
 
+  test('keeps the message being read in view across a column reflow', async ({ page }) => {
+    await page.setViewportSize({ width: 1300, height: 700 })
+    await sessionPage.sendMessage(SAGA_PROMPT)
+    const answer = page.getByTestId('message-assistant').last()
+    await expect(answer).toContainText('Here begins a long story', { timeout: 20000 })
+    await expect(sessionPage.getStopButton()).toBeHidden({ timeout: 30000 })
+    const scroller = page.getByTestId('message-list')
+    const box = (await scroller.boundingBox())!
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 3)
+    await page.mouse.wheel(0, -450)
+    await expect(page.getByRole('button', { name: 'Scroll to bottom' })).toBeVisible()
+
+    const readingFraction = () => answer.evaluate(row => {
+      const viewport = row.closest('[data-transcript-scroller]')!.getBoundingClientRect()
+      const rect = row.getBoundingClientRect()
+      return (viewport.top + viewport.height / 3 - rect.top) / rect.height
+    })
+    const before = await readingFraction()
+    expect(before).toBeGreaterThan(0)
+    expect(before).toBeLessThan(1)
+    const originalWidth = (await answer.boundingBox())!.width
+    await page.setViewportSize({ width: 840, height: 700 })
+    await expect.poll(async () => (await answer.boundingBox())!.width).toBeLessThan(originalWidth - 40)
+    await expect.poll(async () => Math.abs(await readingFraction() - before)).toBeLessThan(0.06)
+    await expect(page.getByRole('button', { name: 'Scroll to bottom' })).toBeVisible()
+  })
+
   test('wheel-up pauses following; the pill returns to the live edge and re-engages', async ({ page }) => {
     await sessionPage.sendMessage(SAGA_PROMPT)
     await sessionPage.waitForResponse(15000)

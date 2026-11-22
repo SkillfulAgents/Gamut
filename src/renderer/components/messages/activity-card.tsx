@@ -11,6 +11,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@rende
 import type { Todo } from '@shared/lib/utils/derive-task-list'
 import { AgentAvatar, type AvatarMotionState } from '@renderer/components/agents/agent-avatar/agent-avatar'
 import type { ApiAgent } from '@shared/lib/types/api'
+import { CANVAS_FLOAT_SHADOW_CLASS } from './chat-composer-box'
 import { ActivityOrb, type ActivityOrbState } from './activity-orb'
 
 /**
@@ -157,7 +158,8 @@ export function ActivityCard({
           card until it pushes the chat history off screen. */}
       <div
         className={cn(
-          'relative max-h-[30vh] overflow-y-auto border border-border/70 bg-background/85 px-3 pt-3 shadow-[0_0_24px_rgba(15,23,42,0.07),0_2px_10px_-4px_rgba(15,23,42,0.08)] backdrop-blur-md supports-[backdrop-filter]:bg-background/65 dark:shadow-[0_0_26px_rgba(0,0,0,0.22),0_2px_12px_-4px_rgba(0,0,0,0.16)]',
+          'relative max-h-[30vh] overflow-y-auto border border-border/70 bg-background/85 px-3 pt-3 backdrop-blur-md supports-[backdrop-filter]:bg-background/65',
+          CANVAS_FLOAT_SHADOW_CLASS,
           isAwaitingInput || detached
             ? 'rounded-dialog pb-3'
             : 'rounded-t-dialog border-b-0 pb-8',
