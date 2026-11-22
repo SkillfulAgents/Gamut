@@ -137,9 +137,10 @@ export function GlobalSettingsPage({ onClose, onOpenWizard, initialSection, onSe
       render: () => deferredTab(<ConnectionsTab />),
       headerActions: <Suspense fallback={null}><NewIntegrationButton /></Suspense>,
     },
-    // External agents (Claude Code, Codex, Cursor) reading this workspace. Not
-    // served in auth mode until OAuth lands, so the page exists without it only.
-    ...(!isAuthMode ? [{ id: 'mcp-server', label: 'MCP Server', icon: <AnimatedNavIcon name="plug" className="h-4 w-4" />, render: () => deferredTab(<McpServerTab />) }] : []),
+    // Everyone: external agents (Claude Code, Codex, Cursor, Claude) working
+    // with this workspace. In auth mode each person connects their own tools
+    // (OAuth) and lists them here; the switch inside is the admin's.
+    { id: 'mcp-server', label: 'MCP Server', icon: <AnimatedNavIcon name="plug" className="h-4 w-4" />, render: () => deferredTab(<McpServerTab />) },
     { id: 'volumes', label: 'Drives', icon: <AnimatedNavIcon name="folder" className="h-4 w-4" />, render: () => deferredTab(<VolumesTab />) },
     // Everyone: each user's vault is their own.
     { id: 'logins', label: 'Logins', icon: <AnimatedNavIcon name="key" className="h-4 w-4" />, render: () => deferredTab(<LoginsTab />) },

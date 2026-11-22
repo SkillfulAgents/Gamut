@@ -67,7 +67,8 @@ function RootLayoutContent() {
     select: (s) => s.location.search as Record<string, unknown>,
   })
   // The MCP consent page stands alone: a person signing in there for the first
-  // time is connecting a client, not setting up, so the wizard waits.
+  // time is connecting a client, not setting up, so the wizard waits, and the
+  // signup handoff does not read the OAuth query's `prompt` as its own.
   const standalone = useRouterState({ select: (s) => s.location.pathname === '/oauth/consent' })
   const { prompt, template_slug } = lenient(homeSearchSchema)(search)
   const hasAutoOpened = useRef(false)
@@ -182,7 +183,9 @@ function RootLayoutContent() {
             ) : null}
             {/* Above the wizard ternary: the wizard replaces the outlet, so a
                 consumer inside the outlet may never commit an effect. */}
-            <SignupHandoffConsumer />
+            {/* Not on the consent page: an OAuth request carries `prompt=consent`,
+                which is not the signup handoff's `?prompt=` and must not be read as one. */}
+            {!standalone && <SignupHandoffConsumer />}
             {wizardOpen && !standalone ? (
               <Suspense fallback={null}>
                 <GettingStartedWizard agentOnly={wizardAgentOnly} onClose={() => setWizardOpen(false)} />

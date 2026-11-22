@@ -45,6 +45,7 @@
     "test:e2e:forms": "E2E_MOCK=true playwright test --config=playwright.forms.config.ts --project=forms-chromium --project=forms-chromium-touch",
     "test:e2e:pwa": "E2E_MOCK=true playwright test --config=playwright.pwa.config.ts",
     "test:e2e:mcp": "E2E_MOCK=true playwright test --config=playwright.mcp.config.ts",
+    "test:e2e:mcp-oauth": "E2E_MOCK=true playwright test --config=playwright.mcp-oauth.config.ts",
     "test:e2e:a11y": "E2E_MOCK=true E2E_INCLUDE_A11Y=true playwright test e2e/specs/a11y-audit.spec.ts --project=web-chromium",
     "test:e2e:headed": "E2E_MOCK=true playwright test --project=web-chromium --headed",
     "test:e2e:ui": "E2E_MOCK=true playwright test --ui",

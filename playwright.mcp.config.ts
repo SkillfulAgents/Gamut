@@ -20,6 +20,8 @@ const command = process.platform === 'win32'
 
 export default defineConfig({
   testDir: './e2e/mcp',
+  // The auth-mode OAuth suite runs against its own server (playwright.mcp-oauth.config.ts).
+  testIgnore: ['**/oauth/**'],
   outputDir: process.env.PLAYWRIGHT_OUTPUT_DIR ?? 'test-results/mcp',
   // One server, whose switch and token the specs change: one test at a time.
   fullyParallel: false,
