@@ -50,6 +50,7 @@ import { getPlatformProxyBaseUrl } from '../platform-auth/config'
 import { rewriteLoopbackForContainer } from '../llm-provider/container-url'
 import { runsInAppSandbox } from '../facts/capabilities'
 import { getServerFacts } from '../facts/server-facts'
+import { contextBreakdownResponseSchema, type ContextBreakdown } from './context-breakdown-schema'
 import { dockerStoppedInspectSchema } from './container-stop-schema'
 
 /**
@@ -1793,6 +1794,15 @@ export abstract class BaseContainerClient extends EventEmitter implements Contai
       return false
     }
     return true
+  }
+
+  async getContextBreakdown(sessionId: string): Promise<ContextBreakdown | null> {
+    const response = await this.fetch(`/sessions/${sessionId}/context`, { method: 'GET' })
+    // A missing route on an older agent image and a non-resident session
+    // both mean that detailed usage is unavailable.
+    if (response.status === 404) return null
+    if (!response.ok) throw new Error(`Context breakdown returned HTTP ${response.status}`)
+    return contextBreakdownResponseSchema.parse(await response.json()).breakdown
   }
 
   async forkSession(sessionId: string): Promise<{ id: string } | null> {

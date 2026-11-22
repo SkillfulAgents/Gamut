@@ -35,3 +35,19 @@ describe('BaseContainerClient.forkSession', () => {
     expect(await client.forkSession('src-1')).toEqual({ id: 'fork-1' })
   })
 })
+
+describe('BaseContainerClient.getContextBreakdown', () => {
+  it('supports older agent images and non-resident sessions', async () => {
+    const old = new StubFetchClient(new Response('404 Not Found', { status: 404 }))
+    expect(await old.getContextBreakdown('s')).toBeNull()
+    const stopped = new StubFetchClient(Response.json({ breakdown: null }))
+    expect(await stopped.getContextBreakdown('s')).toBeNull()
+  })
+
+  it('surfaces runtime and payload errors for retry', async () => {
+    const failed = new StubFetchClient(new Response(null, { status: 500 }))
+    await expect(failed.getContextBreakdown('s')).rejects.toThrow('HTTP 500')
+    const invalid = new StubFetchClient(Response.json({ breakdown: { categories: [] } }))
+    await expect(invalid.getContextBreakdown('s')).rejects.toThrow()
+  })
+})

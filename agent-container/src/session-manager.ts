@@ -1342,6 +1342,10 @@ export class SessionManager extends EventEmitter {
     return { found: true, discardedUuids: outcome.discardedUuids, processKept: outcome.processKept };
   }
 
+  async contextBreakdown(sessionId: string) {
+    return await this.sessions.get(sessionId)?.process.contextBreakdown() ?? null;
+  }
+
   /**
    * Stop one background task of a live session. found=false when the session
    * is not resident; stopped=false when it has no live query to ask.
