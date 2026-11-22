@@ -39,6 +39,7 @@ const AuditLogTab = lazyRouteComponent(() => import('./audit-log-tab'), 'AuditLo
 const ExperimentsTab = lazyRouteComponent(() => import('./experiments-tab'), 'ExperimentsTab')
 const VolumesTab = lazyRouteComponent(() => import('./volumes-tab'), 'VolumesTab')
 const LoginsTab = lazyRouteComponent(() => import('./logins-tab'), 'LoginsTab')
+const McpServerTab = lazyRouteComponent(() => import('./mcp-server-tab'), 'McpServerTab')
 
 function deferredTab(content: ReactNode): ReactNode {
   return (
@@ -136,6 +137,9 @@ export function GlobalSettingsPage({ onClose, onOpenWizard, initialSection, onSe
       render: () => deferredTab(<ConnectionsTab />),
       headerActions: <Suspense fallback={null}><NewIntegrationButton /></Suspense>,
     },
+    // External agents (Claude Code, Codex, Cursor) reading this workspace. Not
+    // served in auth mode until OAuth lands, so the page exists without it only.
+    ...(!isAuthMode ? [{ id: 'mcp-server', label: 'MCP Server', icon: <AnimatedNavIcon name="plug" className="h-4 w-4" />, render: () => deferredTab(<McpServerTab />) }] : []),
     { id: 'volumes', label: 'Drives', icon: <AnimatedNavIcon name="folder" className="h-4 w-4" />, render: () => deferredTab(<VolumesTab />) },
     // Everyone: each user's vault is their own.
     { id: 'logins', label: 'Logins', icon: <AnimatedNavIcon name="key" className="h-4 w-4" />, render: () => deferredTab(<LoginsTab />) },

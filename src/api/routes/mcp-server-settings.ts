@@ -17,17 +17,9 @@ import { resolvePublicAppBaseUrl } from '@shared/lib/agent-integrations/app-link
 import { getSettings } from '@shared/lib/config/settings'
 import { getOrCreateMcpInstallationToken, regenerateMcpInstallationToken } from '@shared/lib/mcp-server/installation-token'
 import { isMcpServerEnabledFrom, setMcpServerEnabled } from '@shared/lib/mcp-server/mcp-server-settings'
+import type { McpServerStatusResponse } from '@shared/lib/mcp-server/mcp-server-settings-schema'
 import { MCP_ROUTE_PATH } from './mcp'
 import { Authenticated, IsAdmin } from '../middleware/auth'
-
-export interface McpServerStatusResponse {
-  /** False where `/mcp` is not served yet (auth mode, until OAuth lands). */
-  available: boolean
-  enabled: boolean
-  endpointUrl: string
-  /** The installation token; null in auth mode, which has none. */
-  token: string | null
-}
 
 const routes = new Hono()
 routes.use('*', Authenticated())

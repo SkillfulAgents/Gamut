@@ -29,7 +29,8 @@ afterAll(async () => {
 describe('/mcp in auth mode', () => {
   it('answers 404 to every request, even one carrying an installation token', async () => {
     const token = await getOrCreateMcpInstallationToken()
-    for (const headers of [{}, { Authorization: `Bearer ${token}` }]) {
+    const variants: Array<Record<string, string>> = [{}, { Authorization: `Bearer ${token}` }]
+    for (const headers of variants) {
       const response = await app.request('/mcp', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream', ...headers },
