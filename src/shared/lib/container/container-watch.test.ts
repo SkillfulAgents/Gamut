@@ -1,18 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { stopBackgroundWork, taskManager } from '@shared/lib/background-work'
-import type { LocalTaskManager } from '@shared/lib/background-work/local-task-manager'
 import { ContainerWatch } from './container-watch'
+import type { IdleTimer } from './idle-alarm'
 
 const HEALTH_MS = 30_000
 const STATUS_MS = 300_000
 
-function watchOf(slug: string) {
+function watchOf(timer?: () => IdleTimer) {
   const checkHealth = vi.fn(async () => {})
   const checkStatus = vi.fn(async () => {})
-  return { watch: new ContainerWatch(slug, { checkHealth, checkStatus }), checkHealth, checkStatus }
+  return { watch: new ContainerWatch({ checkHealth, checkStatus, timer }), checkHealth, checkStatus }
 }
-
-const jobIds = () => (taskManager() as LocalTaskManager).scheduled().map((job) => job.id).sort()
 
 describe('ContainerWatch', () => {
   beforeEach(() => {
@@ -24,12 +21,12 @@ describe('ContainerWatch', () => {
   })
 
   it('checks the status every 300 s until it stops, and the health every 30 s only while the container runs', async () => {
-    const { watch, checkHealth, checkStatus } = watchOf('agent-a')
+    const { watch, checkHealth, checkStatus } = watchOf()
     watch.start()
-    expect(jobIds()).toEqual(['container-watch.status:agent-a'])
+    expect(watch.isWatching()).toBe(true)
+    expect(watch.isCheckingHealth()).toBe(false)
 
     watch.startHealth()
-    expect(jobIds()).toEqual(['container-watch.health:agent-a', 'container-watch.status:agent-a'])
     await vi.advanceTimersByTimeAsync(HEALTH_MS - 1)
     expect(checkHealth).not.toHaveBeenCalled()
     await vi.advanceTimersByTimeAsync(1)
@@ -37,20 +34,18 @@ describe('ContainerWatch', () => {
 
     // Seen stopped: the status is still read, in case the read was wrong.
     watch.stopHealth()
-    expect(jobIds()).toEqual(['container-watch.status:agent-a'])
     await vi.advanceTimersByTimeAsync(STATUS_MS - HEALTH_MS)
     expect(checkHealth).toHaveBeenCalledTimes(1)
     expect(checkStatus).toHaveBeenCalledTimes(1)
 
     watch.stop()
     expect(watch.isWatching()).toBe(false)
-    expect(jobIds()).toEqual([])
     await vi.advanceTimersByTimeAsync(STATUS_MS * 2)
     expect(checkStatus).toHaveBeenCalledTimes(1)
   })
 
-  it('keeps one job of each kind when started twice, and starts again after a stop', async () => {
-    const { watch, checkHealth } = watchOf('agent-a')
+  it('keeps one check of each kind when started twice, and starts again after a stop', async () => {
+    const { watch, checkHealth } = watchOf()
     watch.startHealth()
     watch.startHealth()
     await vi.advanceTimersByTimeAsync(HEALTH_MS)
@@ -64,27 +59,30 @@ describe('ContainerWatch', () => {
     watch.stop()
   })
 
-  it('holds up only its own agent when a check hangs', async () => {
+  it('sets the next pass when the last one ends, and holds up only its own agent when a check hangs', async () => {
     let release = () => {}
-    const stuck = watchOf('agent-a')
+    const stuck = watchOf()
     stuck.checkHealth.mockImplementation(() => new Promise<void>((resolve) => { release = () => resolve() }))
-    const other = watchOf('agent-b')
+    const other = watchOf()
     stuck.watch.startHealth()
     other.watch.startHealth()
 
     await vi.advanceTimersByTimeAsync(HEALTH_MS * 3)
-    // A pass that comes due while the last one runs is skipped, not queued.
     expect(stuck.checkHealth).toHaveBeenCalledTimes(1)
     expect(other.checkHealth).toHaveBeenCalledTimes(3)
+
+    release()
+    await vi.advanceTimersByTimeAsync(HEALTH_MS)
+    expect(stuck.checkHealth).toHaveBeenCalledTimes(2)
     stuck.watch.stop()
     other.watch.stop()
-    // Gives back the slot it held, for the tests after this one.
+    // Gives back the slot the second pass holds, for the tests after this one.
     release()
   })
 
   it('runs at most 4 checks of a kind at once, and none for a watch that stopped while it waited', async () => {
     const releases: Array<() => void> = []
-    const agents = ['a', 'b', 'c', 'd', 'e', 'f'].map((name) => watchOf(`agent-${name}`))
+    const agents = ['a', 'b', 'c', 'd', 'e', 'f'].map(() => watchOf())
     for (const { watch, checkHealth } of agents) {
       checkHealth.mockImplementation(() => new Promise<void>((resolve) => { releases.push(() => resolve()) }))
       watch.startHealth()
@@ -105,11 +103,25 @@ describe('ContainerWatch', () => {
     releases.splice(0).forEach((release) => release())
   })
 
-  it('starts nothing once dispatch has stopped', async () => {
-    await stopBackgroundWork()
-    const { watch } = watchOf('agent-a')
+  it('waits on the timer the deployment gives, one per check', async () => {
+    const timers: Array<{ set: ReturnType<typeof vi.fn>; clear: ReturnType<typeof vi.fn> }> = []
+    const { watch, checkStatus } = watchOf(() => {
+      const timer = { set: vi.fn(), clear: vi.fn() }
+      timers.push(timer)
+      return timer
+    })
     watch.startHealth()
-    expect(watch.isWatching()).toBe(false)
-    expect(watch.isCheckingHealth()).toBe(false)
+    expect(timers).toHaveLength(2)
+    expect(timers.map((timer) => timer.set.mock.calls[0][0])).toEqual([STATUS_MS, HEALTH_MS])
+
+    // The deployment's timer goes off: the check runs, and the next pass is set on the same timer.
+    timers[0].set.mock.calls[0][1]()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(checkStatus).toHaveBeenCalledTimes(1)
+    expect(timers[0].set).toHaveBeenCalledTimes(2)
+
+    watch.stop()
+    expect(timers[0].clear).toHaveBeenCalled()
+    expect(timers[1].clear).toHaveBeenCalled()
   })
 })

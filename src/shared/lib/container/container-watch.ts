@@ -1,6 +1,7 @@
 /**
  * The checks on one agent's container, which the agent's actor owns, as it
- * owns the idle alarm. Each is a recurring task-manager job for this one agent.
+ * owns the idle alarm: each waits on a timer of the watch's own (`IdleTimer`),
+ * and nothing host-wide schedules them.
  *
  * - Every 300 s, whether the container runs. A container can exit without
  *   this process (a crash, a kill, a runtime that restarted), and a read that
@@ -10,17 +11,14 @@
  * - Every 30 s, the container's health (the memory and CPU warnings the app
  *   shows), while the runtime sees the container running.
  *
- * A check that hangs holds up its own agent's passes, which the manager skips
- * while one runs, and one of the slots its kind of check has in this
- * process; every other agent has its own jobs.
- *
- * Tasks on their own, with no service around them, like the session index's
- * wakeup: they register on the manager in use the first time a watch starts.
+ * The next pass of a check is set when the last one ends, so passes of one
+ * agent never overlap. A check that hangs holds up its own agent's passes and
+ * one of the slots its kind of check has in this process; the runner reads
+ * the checks make give up after a bound, which frees the slot.
  */
-import { z } from 'zod'
 import pLimit from 'p-limit'
 import { background } from '../background'
-import { Task, taskManager, type TaskManager, type TaskResult } from '../background-work'
+import { processIdleTimer, type IdleTimer } from './idle-alarm'
 
 /** Interval for checking that a running container still runs (in ms). Default: 300 seconds */
 const STATUS_CHECK_INTERVAL_MS = parseInt(
@@ -41,12 +39,20 @@ const HEALTH_CHECK_INTERVAL_MS = parseInt(
  * is theirs to keep.
  */
 const CHECKS_AT_ONCE = 4
+const statusSlots = pLimit(CHECKS_AT_ONCE)
+const healthSlots = pLimit(CHECKS_AT_ONCE)
 
 export interface ContainerWatchDeps {
   /** One health check of the running container. */
   checkHealth(): Promise<void>
   /** Ask the runtime whether the container still runs, and update what the app shows. */
   checkStatus(): Promise<void>
+  /**
+   * What each check waits with between passes, read once per check at its
+   * first start; this process's timer unless the deployment gives one (see
+   * `IdleTimer`).
+   */
+  timer?(): IdleTimer
 }
 
 /**
@@ -61,114 +67,87 @@ export interface AgentContainerWatches {
   peek(slug: string): ContainerWatch | undefined
 }
 
-const payloadSchema = z.object({ agentSlug: z.string() }).strict()
-type Payload = z.infer<typeof payloadSchema>
+/** One check that runs every `intervalMs` while it is on. */
+class RecurringCheck {
+  private on = false
+  private waiting: IdleTimer | undefined
 
-/**
- * What each agent with a started watch checks. A function cannot go in a
- * payload, so the payload names the agent and this holds the calls. On
- * `globalThis`, like the manager whose jobs name its keys: a handler
- * registered by one instance of this module (before a dev-server reload, or a
- * test's `vi.resetModules()`) serves the watches of another.
- */
-const WATCHED = Symbol.for('superagent.container-watch')
-const watched = ((globalThis as Record<symbol, Map<string, ContainerWatchDeps> | undefined>)[WATCHED] ??= new Map())
+  constructor(
+    private readonly name: string,
+    private readonly intervalMs: number,
+    private readonly slots: ReturnType<typeof pLimit>,
+    private readonly check: () => Promise<void>,
+    private readonly timer: () => IdleTimer,
+  ) {}
 
-class ContainerCheckTask extends Task<Payload> {
-  readonly payloadSchema = payloadSchema
-  private readonly slots = pLimit(CHECKS_AT_ONCE)
-
-  constructor(readonly type: string, private readonly check: (deps: ContainerWatchDeps) => Promise<void>) {
-    super()
+  isOn(): boolean {
+    return this.on
   }
 
-  async execute({ agentSlug }: Payload): Promise<TaskResult<Payload>> {
-    await this.slots(async () => {
-      // Read once a slot is free: a watch that stopped while this waited has nothing to check.
-      const deps = watched.get(agentSlug)
-      if (deps) await this.check(deps)
-    })
-    return { kind: 'done' }
+  start(): void {
+    if (this.on) return
+    this.on = true
+    this.arm()
+  }
+
+  stop(): void {
+    this.on = false
+    this.waiting?.clear()
+  }
+
+  private arm(): void {
+    (this.waiting ??= this.timer()).set(this.intervalMs, () => background(this.pass(), { name: this.name }))
+  }
+
+  private async pass(): Promise<void> {
+    try {
+      // Read once a slot is free: a check stopped while this waited has nothing to check.
+      await this.slots(async () => {
+        if (this.on) await this.check()
+      })
+    } finally {
+      if (this.on) this.arm()
+    }
   }
 }
 
-const statusCheckTask = new ContainerCheckTask('container-watch.status', (deps) => deps.checkStatus())
-const healthCheckTask = new ContainerCheckTask('container-watch.health', (deps) => deps.checkHealth())
-
 export class ContainerWatch {
-  /** The manager the jobs are set on, while the status job runs. */
-  private manager: TaskManager | null = null
-  private checkingHealth = false
+  private readonly status: RecurringCheck
+  private readonly health: RecurringCheck
 
-  constructor(private readonly slug: string, private readonly deps: ContainerWatchDeps) {}
+  constructor(deps: ContainerWatchDeps) {
+    const timer = () => deps.timer?.() ?? processIdleTimer()
+    this.status = new RecurringCheck('container-watch.status', STATUS_CHECK_INTERVAL_MS, statusSlots, () => deps.checkStatus(), timer)
+    this.health = new RecurringCheck('container-watch.health', HEALTH_CHECK_INTERVAL_MS, healthSlots, () => deps.checkHealth(), timer)
+  }
 
-  /**
-   * Start the status job; nothing when it runs already. Nothing either when
-   * no task manager is installed (a script that only reads), or once
-   * dispatch has stopped: the containers are about to stop.
-   */
+  /** Start the status check; nothing when it runs already. */
   start(): void {
-    if (this.manager) return
-    let manager: TaskManager
-    try {
-      manager = taskManager()
-    } catch {
-      return
-    }
-    if (!manager.accepts()) return
-    this.manager = manager
-    watched.set(this.slug, this.deps)
-    this.set(manager, statusCheckTask, STATUS_CHECK_INTERVAL_MS)
+    this.status.start()
   }
 
-  /** The container is seen running: start the health job too. */
+  /** The container is seen running: start the health check too. */
   startHealth(): void {
-    this.start()
-    const manager = this.manager
-    if (!manager || this.checkingHealth) return
-    this.checkingHealth = true
-    this.set(manager, healthCheckTask, HEALTH_CHECK_INTERVAL_MS)
+    this.status.start()
+    this.health.start()
   }
 
-  /** The container is seen stopped: its health job ends, its status job goes on. */
+  /** The container is seen stopped: its health check ends, its status check goes on. */
   stopHealth(): void {
-    const manager = this.manager
-    if (!manager || !this.checkingHealth) return
-    this.checkingHealth = false
-    this.cancel(manager, healthCheckTask)
+    this.health.stop()
   }
 
-  /** Cancel both jobs: the container's runtime or the agent's actor was dropped. */
+  /** End both checks: the container's runtime or the agent's actor was dropped. */
   stop(): void {
-    const manager = this.manager
-    if (!manager) return
-    this.stopHealth()
-    this.cancel(manager, statusCheckTask)
-    this.manager = null
-    if (watched.get(this.slug) === this.deps) watched.delete(this.slug)
+    this.health.stop()
+    this.status.stop()
   }
 
   isWatching(): boolean {
-    return this.manager !== null
+    return this.status.isOn()
   }
 
   isCheckingHealth(): boolean {
-    return this.checkingHealth
-  }
-
-  private set(manager: TaskManager, task: ContainerCheckTask, intervalMs: number): void {
-    if (!manager.handles(task.type)) manager.register(task)
-    background(
-      manager.ensureEvery(this.jobId(task), { taskType: task.type, payload: { agentSlug: this.slug } }, { intervalMs }),
-      { name: `${task.type}.start` },
-    )
-  }
-
-  private cancel(manager: TaskManager, task: ContainerCheckTask): void {
-    background(manager.cancel(this.jobId(task)), { name: `${task.type}.stop` })
-  }
-
-  private jobId(task: ContainerCheckTask): string {
-    return `${task.type}:${this.slug}`
+    return this.health.isOn()
   }
 }

@@ -133,7 +133,7 @@ export function createAgentState(slug: AgentSlug, hooks: AgentStateHooks): Agent
     volumeUploads: new VolumeUploadGuard(),
     deferredNaming: new Set(),
     idleAlarm: new IdleAlarm({ ...hooks.idle, isBusy: () => live.hasActive() || live.hasAwaitingInput() }),
-    containerWatch: new ContainerWatch(slug, hooks.watch),
+    containerWatch: new ContainerWatch(hooks.watch),
   }
 }
 

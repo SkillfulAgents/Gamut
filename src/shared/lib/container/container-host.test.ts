@@ -661,7 +661,7 @@ describe('ContainerRuntime.ensureRunning — mount volumes', () => {
     mockStop.mockResolvedValueOnce({ forceStopUsed: false, stopped: true })
     const runtime = containerHost.runtime('test-agent')
     // The agent's watch, as its actor would hold it.
-    const watch = new ContainerWatch('test-agent', { checkHealth: async () => {}, checkStatus: async () => {} })
+    const watch = new ContainerWatch({ checkHealth: async () => {}, checkStatus: async () => {} })
     containerHost.attachAgentContainerWatches({ get: () => watch, peek: () => watch })
 
     try {
