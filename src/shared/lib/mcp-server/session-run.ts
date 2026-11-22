@@ -156,24 +156,30 @@ function openBlocking(requests: PendingUserInputRequest[], sessionId: string): P
   return requests.filter((request) => request.blocking && !request.autoApproved && (request.scope.sessionId ?? sessionId) === sessionId)
 }
 
-/** A plain question with a payload to answer, when that is all the session waits on. */
+/**
+ * The one plain question the session waits on, when that is all it waits on:
+ * one open request, a question, whose card asks one thing. The chat
+ * integrations answer exactly this with a typed reply and nothing else
+ * (`consumeOrCancelAwaitingInput` in resolve-awaiting-input.ts): a card with
+ * several questions, or any other request, needs Gamut.
+ */
 function answerableQuestion(requests: PendingUserInputRequest[]): PendingUserInputRequest | null {
-  if (requests.length === 0 || !requests.every((request) => request.kind === 'question' && isReplayableUserInputRequest(request))) return null
-  return requests[0]
+  if (requests.length !== 1) return null
+  const [request] = requests
+  if (request.kind !== 'question' || !isReplayableUserInputRequest(request)) return null
+  const questions = Array.isArray(request.payload.questions) ? request.payload.questions as Array<Record<string, unknown>> : []
+  return questions.length === 1 && typeof questions[0].question === 'string' ? request : null
 }
 
-/** The question's answers map, as the app sends it: each question answered with the prompt. */
+/** The answer as the app sends it (`answer-question`): the question's text mapped to the answer. */
 function answersFor(request: PendingUserInputRequest, answer: string): Record<string, string> {
-  const questions = Array.isArray(request.payload.questions) ? request.payload.questions as Array<Record<string, unknown>> : []
-  const answers: Record<string, string> = {}
-  for (const question of questions) {
-    if (typeof question.question === 'string') answers[question.question] = answer
-  }
-  return answers
+  const [question] = request.payload.questions as Array<{ question: string }>
+  return { [question.question]: answer }
 }
 
 interface LastAssistant {
   uuid: string
+  /** The entry's own text, without tool-use placeholders; '' when it has none. */
   text: string
   isError: boolean
 }
@@ -183,10 +189,10 @@ async function lastAssistant(slug: string, sessionId: string): Promise<LastAssis
   if (!entry || entry.type === 'system') return null
   const compact = compactMessage(entry)
   if (!compact) return null
-  return { uuid: entry.uuid, text: compact.content, isError: entry.isApiErrorMessage === true }
+  return { uuid: entry.uuid, text: compact.spoken, isError: entry.isApiErrorMessage === true }
 }
 
-/** The last assistant message newer than `boundaryUuid`, polled briefly when the reply may still be flushing. */
+/** The last assistant entry newer than `boundaryUuid`, polled briefly when the reply may still be flushing. */
 async function replyAfter(slug: string, sessionId: string, boundaryUuid: string | undefined, settle: boolean): Promise<LastAssistant | null> {
   const attempts = settle ? REPLY_FLUSH_ATTEMPTS : 1
   for (let attempt = 0; attempt < attempts; attempt++) {
@@ -197,6 +203,26 @@ async function replyAfter(slug: string, sessionId: string, boundaryUuid: string 
   return null
 }
 
+/** How many view rows a result reads: the current turn's prompt and what followed it. */
+const TURN_VIEW_ROWS = 40
+
+/**
+ * The session's latest turn as a result reports it: the agent's last real
+ * text since the last prompt (the spoken view: text only, never a tool-use
+ * placeholder), or null when it has written none yet; and its delivered files.
+ */
+async function latestTurn(slug: string, sessionId: string): Promise<{ text: string | null; deliveredFiles: RunResult['delivered_files'] }> {
+  const view = await agentRegistry.get(slug).messages.transcriptView(sessionId, { limit: TURN_VIEW_ROWS })
+  let lastPrompt = -1
+  view.messages.forEach((message, index) => { if (message.role === 'user') lastPrompt = index })
+  const replies = view.messages.slice(lastPrompt + 1).filter((message) => message.role === 'assistant' && message.content.trim())
+  const text = replies.at(-1)?.content ?? null
+  return {
+    text: text === null ? null : truncateText(text, LAST_MESSAGE_MAX_CHARS).text,
+    deliveredFiles: view.deliveredFiles.map((file) => ({ delivery_id: file.deliveryId, filename: file.filename, size_bytes: file.sizeBytes })),
+  }
+}
+
 type WaitOutcome = 'settled' | 'awaiting_input' | 'running'
 
 /**
@@ -204,8 +230,24 @@ type WaitOutcome = 'settled' | 'awaiting_input' | 'running'
  * `deadline` or the client goes away. Looks every second, reports progress
  * every few; nothing is left behind when it returns (a look in flight ends
  * within a second on its own).
+ *
+ * `afterDelivery`: the wait follows a prompt (or an answer) this call
+ * delivered. An idle session then counts as settled only once the turn is
+ * known to have run: it was seen active or waiting on the person during this
+ * wait, or an assistant entry newer than `boundaryUuid` exists. Delivery marks
+ * the session active before it returns (`markSending` in delivery.ts, and
+ * `markActive` right after create in its `start`), so this is a second guard,
+ * for a delivery held rather than sent (a recovering session coalesces it) or
+ * a mark something else undid.
  */
-async function waitForSettle(slug: string, sessionId: string, deadline: number, call: McpToolCall, startedAt: number): Promise<WaitOutcome> {
+async function waitForSettle(
+  slug: string,
+  sessionId: string,
+  deadline: number,
+  call: McpToolCall,
+  startedAt: number,
+  afterDelivery?: { boundaryUuid: string | undefined },
+): Promise<WaitOutcome> {
   const sessions = agentRegistry.get(slug).sessions
   let onAbort = () => {}
   const abortedNow = new Promise<'aborted'>((resolve) => { onAbort = () => resolve('aborted') })
@@ -213,11 +255,19 @@ async function waitForSettle(slug: string, sessionId: string, deadline: number, 
   call.signal.addEventListener('abort', onAbort, { once: true })
   const totalSeconds = Math.max(1, Math.round((deadline - startedAt) / 1000))
   let nextProgressAt = Date.now() + PROGRESS_INTERVAL_MS
+  let started = !afterDelivery
   try {
     for (;;) {
       const live = await sessions.live(sessionId)
       if (live.isAwaitingInput) return 'awaiting_input'
-      if (!live.isActive) return 'settled'
+      if (live.isActive) {
+        started = true
+      } else {
+        if (started) return 'settled'
+        const last = await lastAssistant(slug, sessionId)
+        if (last && last.uuid !== afterDelivery?.boundaryUuid) return 'settled'
+        // Delivered, and the turn has not begun: keep waiting for it.
+      }
       const remaining = deadline - Date.now()
       if (call.signal.aborted || remaining <= 0) return 'running'
       if (Date.now() >= nextProgressAt) {
@@ -225,10 +275,14 @@ async function waitForSettle(slug: string, sessionId: string, deadline: number, 
         const elapsed = Math.round((Date.now() - startedAt) / 1000)
         await call.progress(elapsed, totalSeconds, `The agent is working (${elapsed}s)`)
       }
-      // One slice: the session going idle, the slice's end, or the client
-      // leaving. A slice that loses to an abort ends by itself within a second.
+      // One slice: the session going idle (or, not started yet, a pause), the
+      // slice's end, or the client leaving. A slice that loses to an abort
+      // ends by itself within a second.
+      const slice = Math.min(remaining, POLL_SLICE_MS)
       await Promise.race([
-        sessions.waitForIdle(sessionId, { timeoutMs: Math.min(remaining, POLL_SLICE_MS) }).catch(() => 'timeout' as const),
+        live.isActive
+          ? sessions.waitForIdle(sessionId, { timeoutMs: slice }).catch(() => 'timeout' as const)
+          : new Promise((resolve) => setTimeout(resolve, slice)),
         abortedNow,
       ])
     }
@@ -237,60 +291,73 @@ async function waitForSettle(slug: string, sessionId: string, deadline: number, 
   }
 }
 
-/** Where the session stands now, in the result shape. */
+const QUESTION_NOTE = 'The agent asked a question. Answer it by calling invoke_agent with this agent and session_id, and the answer as prompt. If you do not know the answer, ask the person you are working for; they can also answer in Gamut at open_in_gamut_url.'
+const SEVERAL_QUESTIONS_NOTE = 'The agent asked several questions at once (pending_request.text lists them). Those are answered in Gamut, not through this server: give the person open_in_gamut_url, then call wait_for_session with this session_id.'
+const IN_GAMUT_NOTE = 'The agent is waiting on the person, in Gamut: this cannot be done through this server. Give the person open_in_gamut_url; once they have dealt with it, call wait_for_session with this session_id.'
+
+/**
+ * Where the session stands now, in the result shape. `boundaryUuid`: the last
+ * assistant entry before this call's prompt, so a settled turn's reply is the
+ * one after it. `previousReplyCounts`: a wait on a turn already running, whose
+ * reply may have landed before the wait began.
+ */
 async function describe(
   ctx: McpCallContext,
   target: Target,
   sessionId: string,
   outcome: WaitOutcome,
   boundaryUuid: string | undefined,
-  extraNote?: string,
+  options: { extraNote?: string; previousReplyCounts?: boolean } = {},
 ): Promise<RunResult> {
   const actor = agentRegistry.get(target.slug)
-  const { deliveredFiles } = await actor.messages.transcriptView(sessionId, { limit: 1 })
-  const delivered_files = deliveredFiles.map((file) => ({ delivery_id: file.deliveryId, filename: file.filename, size_bytes: file.sizeBytes }))
-  const base = { agent: target.display, session_id: sessionId, delivered_files }
 
   if (outcome === 'awaiting_input') {
     const live = await actor.sessions.live(sessionId)
     const open = openBlocking(live.openRequests, sessionId)
     const question = answerableQuestion(open)
     const request = question ?? open.find((candidate) => candidate.kind !== 'question') ?? open[0]
-    const last = await replyAfter(target.slug, sessionId, boundaryUuid, false)
-    const pending: PendingRequest = {
-      kind: request?.kind ?? 'unknown',
-      text: request ? requestText(request) : 'The agent is waiting on the person in Gamut.',
-      open_in_gamut_url: await sessionLink(ctx, target.slug, sessionId),
-    }
-    const note = question
-      ? 'The agent asked a question. Answer it by calling invoke_agent with this agent and session_id, and the answer as prompt. If you do not know the answer, ask the person you are working for; they can also answer in Gamut at open_in_gamut_url.'
-      : 'The agent is waiting on the person, in Gamut: this cannot be done through this server. Give the person open_in_gamut_url; once they have dealt with it, call wait_for_session with this session_id.'
+    const turn = await latestTurn(target.slug, sessionId)
+    const note = question ? QUESTION_NOTE : request?.kind === 'question' ? SEVERAL_QUESTIONS_NOTE : IN_GAMUT_NOTE
     return {
-      ...base,
+      agent: target.display,
+      session_id: sessionId,
+      delivered_files: turn.deliveredFiles,
       status: 'awaiting_input',
-      last_message: last ? truncateText(last.text, LAST_MESSAGE_MAX_CHARS).text : null,
-      pending_request: pending,
-      note: extraNote ? `${extraNote} ${note}` : note,
+      last_message: turn.text,
+      pending_request: {
+        kind: request?.kind ?? 'unknown',
+        text: request ? requestText(request) : 'The agent is waiting on the person in Gamut.',
+        open_in_gamut_url: await sessionLink(ctx, target.slug, sessionId),
+      },
+      note: options.extraNote ? `${options.extraNote} ${note}` : note,
     }
   }
 
   if (outcome === 'running') {
-    const last = await replyAfter(target.slug, sessionId, boundaryUuid, false)
+    const turn = await latestTurn(target.slug, sessionId)
     return {
-      ...base,
+      agent: target.display,
+      session_id: sessionId,
+      delivered_files: turn.deliveredFiles,
       status: 'running',
-      last_message: last ? truncateText(last.text, LAST_MESSAGE_MAX_CHARS).text : null,
+      last_message: turn.text,
       pending_request: null,
       note: 'The agent is still working. Call wait_for_session with this agent and session_id to keep waiting. Do NOT call invoke_agent again for the same request: that would start a second run.',
     }
   }
 
-  const reply = await replyAfter(target.slug, sessionId, boundaryUuid, true)
+  // Settled: the reply is an entry after the boundary (it may still be flushing).
+  const reply = (await replyAfter(target.slug, sessionId, boundaryUuid, true))
+    ?? (options.previousReplyCounts ? await lastAssistant(target.slug, sessionId) : null)
+  const turn = await latestTurn(target.slug, sessionId)
   const failed = reply?.isError === true
+  const text = !reply ? null : failed ? (reply.text || turn.text) : (turn.text ?? (reply.text || null))
   return {
-    ...base,
+    agent: target.display,
+    session_id: sessionId,
+    delivered_files: turn.deliveredFiles,
     status: failed ? 'failed' : 'completed',
-    last_message: reply ? truncateText(reply.text, LAST_MESSAGE_MAX_CHARS).text : null,
+    last_message: text === null ? null : truncateText(text, LAST_MESSAGE_MAX_CHARS).text,
     pending_request: null,
     ...(failed
       ? { note: 'The agent\'s turn ended with an error (last_message). You can retry by calling invoke_agent with this session_id.' }
@@ -370,10 +437,11 @@ export async function invokeAndWait(ctx: McpCallContext, call: McpToolCall, requ
       if (!question || attachments.length > 0) {
         // Nothing is delivered: cancelling what the person is asked (a secret,
         // a sign-in) from here would take the decision away from them.
-        return describe(ctx, target, request.sessionId, 'awaiting_input', undefined,
-          attachments.length > 0 && question
+        return describe(ctx, target, request.sessionId, 'awaiting_input', undefined, {
+          extraNote: attachments.length > 0 && question
             ? 'Your prompt was NOT delivered: a question is answered with text alone, without attachments.'
-            : 'Your prompt was NOT delivered.')
+            : 'Your prompt was NOT delivered.',
+        })
       }
       const boundary = await lastAssistant(target.slug, request.sessionId)
       const answered = await actor.inputs.answer(question.id, answersFor(question, request.prompt))
@@ -382,7 +450,7 @@ export async function invokeAndWait(ctx: McpCallContext, call: McpToolCall, requ
           ? 'Someone is answering this question right now (in Gamut, or another call). Call wait_for_session to see where the session stands.'
           : 'The question could not be answered (it may have just been answered or cancelled). Call wait_for_session to see where the session stands.')
       }
-      const outcome = await waitForSettle(target.slug, request.sessionId, waitDeadline, call, startedAt)
+      const outcome = await waitForSettle(target.slug, request.sessionId, waitDeadline, call, startedAt, { boundaryUuid: boundary?.uuid })
       return describe(ctx, target, request.sessionId, outcome, boundary?.uuid)
     }
   }
@@ -394,6 +462,15 @@ export async function invokeAndWait(ctx: McpCallContext, call: McpToolCall, requ
     throw new McpToolError('The agent is starting up and was not ready in time. Nothing was sent. Call invoke_agent again with the same arguments in a few seconds.')
   }
 
+  // What a client that goes away does (the call's abort signal):
+  // - up to here: nothing was created or spent, and nothing is sent.
+  // - from here on: the prompt is delivered whatever the client does. The
+  //   service is not handed the signal (for a user caller it would only abort
+  //   an agent's attachment transfer), and a session is never created without
+  //   its prompt: creating one is delivering its first message. An abort then
+  //   ends only this call's wait; nothing here stops a turn.
+  if (call.signal.aborted) throw new McpToolError('The call was cancelled before anything was sent. Nothing was delivered.')
+
   const paths = await takeAttachments(ctx, target.slug, attachments)
   const prompt = appendAttachedFiles(request.prompt, paths)
   const boundary = request.sessionId ? await lastAssistant(target.slug, request.sessionId) : null
@@ -401,20 +478,34 @@ export async function invokeAndWait(ctx: McpCallContext, call: McpToolCall, requ
     userId: ctx.userId,
     isAdmin: ctx.isAdmin,
     sessionName: sessionNameFrom(request.prompt),
+    // Registered only with a session this call creates: a message to an
+    // existing session changes none of its metadata (invoke.ts passes it to
+    // `sessions.start` alone).
     sessionMetadata: { mcpInvocation: { userId: ctx.userId, clientName: call.clientName } },
   })
-  const invoked = await invokeAgent(caller, {
-    slug: target.slug,
-    prompt,
-    sessionId: request.sessionId,
-    sync: false,
-    signal: call.signal,
-  })
-  if (!invoked.ok) throw failureError(invoked, 'user')
+  let invoked: Awaited<ReturnType<typeof invokeAgent>>
+  try {
+    invoked = await invokeAgent(caller, { slug: target.slug, prompt, sessionId: request.sessionId, sync: false })
+  } catch (error) {
+    if (paths.length > 0) throw new McpToolError(`The prompt could not be delivered. ${spentUploadsNote(attachments)}`)
+    throw error
+  }
+  if (!invoked.ok) {
+    const refusal = failureError(invoked, 'user')
+    throw paths.length > 0 ? new McpToolError(`${refusal.message} ${spentUploadsNote(attachments)}`) : refusal
+  }
   const sessionId = invoked.value.sessionId
   call.setAuditTarget({ sessionId })
-  const outcome = await waitForSettle(target.slug, sessionId, waitDeadline, call, startedAt)
+  const outcome = await waitForSettle(target.slug, sessionId, waitDeadline, call, startedAt, { boundaryUuid: boundary?.uuid })
   return describe(ctx, target, sessionId, outcome, boundary?.uuid)
+}
+
+/**
+ * Attachments are spent before delivery, so an upload is never attached twice
+ * (a delivery that failed may still have gone). The client is told.
+ */
+function spentUploadsNote(uploadIds: string[]): string {
+  return `The attached uploads (${uploadIds.join(', ')}) were used up by this call: upload the files again with prepare_file_upload and pass the new upload ids to retry.`
 }
 
 /** wait_for_session: the wait alone, on a session the person can read. */
@@ -429,19 +520,10 @@ export async function waitForSession(
   call.setAuditTarget({ agent: target.slug, sessionId: request.sessionId })
   const actor = agentRegistry.get(target.slug)
   if (!(await actor.sessions.isKnown(request.sessionId))) throw sessionNotFound()
-  // A turn running now: its reply is whatever lands after the last one seen now.
+  // A turn running now: its reply is whatever lands after the last one seen
+  // now or, when none lands, the last one there was.
   const runningNow = (await actor.sessions.live(request.sessionId)).isActive
   const boundary = runningNow ? await lastAssistant(target.slug, request.sessionId) : null
   const outcome = await waitForSettle(target.slug, request.sessionId, deadline, call, startedAt)
-  if (outcome === 'settled' && boundary) {
-    const result = await describe(ctx, target, request.sessionId, outcome, boundary.uuid)
-    // The turn ended without a newer reply: what was there is the answer.
-    if (result.last_message === null) {
-      const rest: RunResult = { ...result }
-      delete rest.note
-      return { ...rest, status: boundary.isError ? 'failed' : 'completed', last_message: truncateText(boundary.text, LAST_MESSAGE_MAX_CHARS).text }
-    }
-    return result
-  }
-  return describe(ctx, target, request.sessionId, outcome, undefined)
+  return describe(ctx, target, request.sessionId, outcome, boundary?.uuid, { previousReplyCounts: true })
 }

@@ -379,6 +379,21 @@ describe('a user caller starting a new session', () => {
     expect(lastStart().metadata).toEqual({ starred: true, createdByUserId: USER_ID })
   })
 
+  it('a message to an existing session carries none of the caller\'s metadata: the session keeps its own origin', async () => {
+    const caller = userXAgentCaller({ userId: USER_ID, sessionName: 'From MCP', sessionMetadata: { mcpInvocation: { userId: USER_ID, clientName: 'Codex' } } })
+    mockStart.mockClear()
+    mockDeliver.mockClear()
+    const result = await invokeAgent(caller, { slug: TARGET, prompt: 'hi', sessionId: SESSION_ID })
+    expect(result).toEqual({ ok: true, value: { sessionId: SESSION_ID, status: 'running' } })
+    expect(mockStart).not.toHaveBeenCalled()
+    expect(mockDeliver).toHaveBeenCalledTimes(1)
+    const request = mockDeliver.mock.calls[0][0] as Record<string, unknown>
+    // No metadata written, no promotion, no rename: only the message goes.
+    expect(request.metadataUpdates).toBeUndefined()
+    expect(request.promote).toBeUndefined()
+    expect(JSON.stringify(request)).not.toContain('mcpInvocation')
+  })
+
   it('drops them even when the service has no creator to record', async () => {
     authModeEnabled = false
     const caller = userXAgentCaller({ userId: 'local', sessionMetadata: { invokedByAgentSlug: CALLER_AGENT, createdByUserId: 'someone-else' } })

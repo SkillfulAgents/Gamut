@@ -3,8 +3,8 @@
  * the request's context. Adding a tool is adding a definition to a module
  * (tool-definition.ts) and the module to this list.
  *
- * Every call goes through the same steps here: the credential's scope, the
- * person's rate limit, the tool, then one audit row (tool-call-guard.ts).
+ * Every call goes through the same steps here: the person's rate limit, the
+ * credential's scope, the tool, then one audit row (tool-call-guard.ts).
  */
 import { CLIENT_INFO_META_KEY, type McpServer, type ServerContext } from '@modelcontextprotocol/server'
 import type { McpCallContext } from './context'
@@ -73,12 +73,14 @@ export function registerTools(server: McpServer, ctx: McpCallContext, tools: rea
       async (args: unknown, context?: ServerContext) => {
         const clientName = clientNameOf(context)
         let target: McpAuditTarget = auditTargetOf(args)
+        // Counted first: every call that can write an audit row has been
+        // admitted, so refusals cannot flood the audit log uncounted.
+        const admission = await admitToolCall(ctx.userId)
+        if (!admission.admitted) return errorResult(rateLimitedMessage(admission.retryAfterSeconds))
         if (!ctx.scopes.includes(tool.scope)) {
           await auditToolCall({ ctx, tool: tool.name, clientName, target, outcome: 'error' })
           return errorResult(`${tool.name} needs the "gamut:${tool.scope}" permission, which this connection was not given. Reconnect and allow it.`)
         }
-        const admission = await admitToolCall(ctx.userId)
-        if (!admission.admitted) return errorResult(rateLimitedMessage(admission.retryAfterSeconds))
         const call: McpToolCall = {
           signal: context?.mcpReq?.signal ?? new AbortController().signal,
           progress: progressSender(context),

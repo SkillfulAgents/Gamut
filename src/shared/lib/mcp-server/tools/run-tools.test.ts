@@ -22,6 +22,14 @@ vi.mock('@shared/lib/auth/config', async (original) => ({
 }))
 
 const fake = vi.hoisted(() => {
+  interface FakeEntry {
+    kind: 'user' | 'assistant'
+    uuid: string
+    text: string
+    isApiErrorMessage?: boolean
+    /** An assistant entry with a tool call and no text (an AskUserQuestion). */
+    toolOnly?: string
+  }
   interface FakeSession {
     id: string
     agent: string
@@ -30,7 +38,7 @@ const fake = vi.hoisted(() => {
     active: boolean
     awaiting: boolean
     openRequests: Array<{ id: string; kind: string; blocking: boolean; autoApproved: boolean; scope: { sessionId?: string }; payload: Record<string, unknown> }>
-    assistant: Array<{ uuid: string; text: string; isApiErrorMessage?: boolean }>
+    entries: FakeEntry[]
     delivered: Array<{ deliveryId: string; filename: string; sizeBytes: number; filePath: string }>
     prompts: string[]
   }
@@ -41,30 +49,58 @@ const fake = vi.hoisted(() => {
     waitCalls: 0,
     next: 0,
   }
+  function blank(id: string, agent: string, name: string, metadata: Record<string, unknown>): FakeSession {
+    return { id, agent, name, metadata, active: false, awaiting: false, openRequests: [], entries: [], delivered: [], prompts: [] }
+  }
+  function say(session: FakeSession, text: string, extra: Partial<FakeEntry> = {}) {
+    session.entries.push({ kind: 'assistant', uuid: `a-${session.entries.length}-${session.id}`, text, ...extra })
+  }
+  const question = (text: string) => ({ question: text, options: [{ label: 'Red' }, { label: 'Blue' }] })
   /** What a delivered prompt makes the fake session do. */
   function play(session: FakeSession, prompt: string) {
     session.prompts.push(prompt)
-    session.active = true
-    if (prompt.includes('[slow]')) return
-    if (prompt.includes('[question]')) {
-      session.awaiting = true
-      session.openRequests = [{ id: `q-${session.id}`, kind: 'question', blocking: true, autoApproved: false, scope: { sessionId: session.id }, payload: { questions: [{ question: 'Which colour?', options: [{ label: 'Red' }, { label: 'Blue' }] }] } }]
+    session.entries.push({ kind: 'user', uuid: `u-${session.entries.length}-${session.id}`, text: prompt })
+    // Delivered but not begun: no active mark, the turn runs later (or never).
+    if (prompt.includes('[late]')) {
+      setTimeout(() => say(session, 'Late but here'), 4_000)
       return
     }
+    if (prompt.includes('[never]')) return
+    session.active = true
+    if (prompt.includes('[slow]')) {
+      say(session, 'Working on it, step 1 done.')
+      say(session, '', { toolOnly: 'Bash' })
+      return
+    }
+    const ask = (requests: FakeSession['openRequests']) => {
+      say(session, 'Let me ask you.')
+      say(session, '', { toolOnly: 'AskUserQuestion' })
+      session.awaiting = true
+      session.openRequests = requests
+    }
+    const request = (id: string, kind: string, payload: Record<string, unknown>) => ({ id, kind, blocking: true, autoApproved: false, scope: { sessionId: session.id }, payload })
+    if (prompt.includes('[questions]')) return ask([request(`q-${session.id}`, 'question', { questions: [question('Which colour?'), question('Which shade?')] })])
+    if (prompt.includes('[question+secret]')) {
+      return ask([
+        request(`q-${session.id}`, 'question', { questions: [question('Which colour?')] }),
+        request(`s-${session.id}`, 'secret', { secretName: 'API_KEY' }),
+      ])
+    }
+    if (prompt.includes('[question]')) return ask([request(`q-${session.id}`, 'question', { questions: [question('Which colour?')] })])
     if (prompt.includes('[secret]')) {
       session.awaiting = true
-      session.openRequests = [{ id: `s-${session.id}`, kind: 'secret', blocking: true, autoApproved: false, scope: { sessionId: session.id }, payload: { secretName: 'API_KEY', reason: 'to call the API' } }]
+      session.openRequests = [request(`s-${session.id}`, 'secret', { secretName: 'API_KEY', reason: 'to call the API' })]
       return
     }
     if (prompt.includes('[deliver]')) {
       session.delivered.push({ deliveryId: 'd1', filename: 'report.md', sizeBytes: 5, filePath: '/workspace/output/report.md' })
     }
     setTimeout(() => {
-      session.assistant.push({ uuid: `a-${session.assistant.length}-${session.id}`, text: prompt.includes('[fail]') ? 'API Error: overloaded' : `Reply to: ${prompt.split('\n')[0]}`, isApiErrorMessage: prompt.includes('[fail]') })
+      say(session, prompt.includes('[fail]') ? 'API Error: overloaded' : `Reply to: ${prompt.split('\n')[0]}`, { isApiErrorMessage: prompt.includes('[fail]') })
       session.active = false
     }, 30)
   }
-  return { state, play }
+  return { state, play, say, blank }
 })
 
 vi.mock('@shared/lib/agent-actor/registry', () => ({
@@ -92,10 +128,18 @@ vi.mock('@shared/lib/agent-actor/registry', () => ({
         },
         messages: {
           findLastEntry: async (id: string) => {
-            const last = find(id)?.assistant.at(-1)
-            return last ? { type: 'assistant', uuid: last.uuid, isApiErrorMessage: last.isApiErrorMessage, message: { content: last.text } } : null
+            const last = find(id)?.entries.filter((entry) => entry.kind === 'assistant').at(-1)
+            if (!last) return null
+            const content = last.toolOnly ? [{ type: 'tool_use', id: `t-${last.uuid}`, name: last.toolOnly, input: {} }] : [{ type: 'text', text: last.text }]
+            return { type: 'assistant', uuid: last.uuid, isApiErrorMessage: last.isApiErrorMessage, message: { content } }
           },
-          transcriptView: async (id: string) => ({ messages: [], total: 0, deliveredFiles: find(id)?.delivered ?? [] }),
+          // The spoken view: prompts, the agent's text, and a stub for tool-only turns.
+          transcriptView: async (id: string, opts: { limit?: number } = {}) => {
+            const view = (find(id)?.entries ?? []).map((entry) => (entry.kind === 'user'
+              ? { role: 'user', content: entry.text }
+              : entry.toolOnly ? { role: 'system', content: 'tool calls + thinking' } : { role: 'assistant', content: entry.text }))
+            return { messages: opts.limit ? view.slice(-opts.limit) : view, total: view.length, deliveredFiles: find(id)?.delivered ?? [] }
+          },
           findDeliveredFile: async (id: string, deliveryId: string) => find(id)?.delivered.find((file) => file.deliveryId === deliveryId),
         },
         inputs: {
@@ -106,7 +150,7 @@ vi.mock('@shared/lib/agent-actor/registry', () => ({
             session.openRequests = []
             session.awaiting = false
             setTimeout(() => {
-              session.assistant.push({ uuid: `a-answer-${session.id}`, text: `Thanks for ${JSON.stringify(value)}` })
+              fake.say(session, `Thanks for ${JSON.stringify(value)}`)
               session.active = false
             }, 30)
             return 'answered'
@@ -131,12 +175,20 @@ vi.mock('@shared/lib/agent-actor/registry', () => ({
   },
 }))
 
+/**
+ * The service's delivery, faked: it starts or messages a session. A prompt
+ * with `[refuse]` is refused (a failure before anything is sent), and one with
+ * `[slow-deliver]` takes 300ms to be delivered.
+ */
 vi.mock('@shared/lib/services/x-agent/invoke', () => ({
-  invokeAgent: async (caller: { kind: string; sessionName: string; sessionMetadata: Record<string, unknown> }, input: { slug: string; prompt: string; sessionId?: string }) => {
+  invokeAgent: async (caller: { kind: string; sessionName: string; sessionMetadata: Record<string, unknown> }, input: { slug: string; prompt: string; sessionId?: string; signal?: AbortSignal }) => {
+    if (input.signal) throw new Error('The MCP layer must not hand the call signal to the service')
+    if (input.prompt.includes('[refuse]')) return { ok: false, status: 500, error: 'Failed to invoke agent (ensure_running): boom' }
+    if (input.prompt.includes('[slow-deliver]')) await new Promise((resolve) => setTimeout(resolve, 300))
     let session = input.sessionId ? fake.state.sessions.get(input.sessionId) : undefined
     if (!session) {
       const id = `session-${++fake.state.next}`
-      session = { id, agent: input.slug, name: caller.sessionName, metadata: { ...caller.sessionMetadata, createdAt: new Date().toISOString() }, active: false, awaiting: false, openRequests: [], assistant: [], delivered: [], prompts: [] }
+      session = fake.blank(id, input.slug, caller.sessionName, { ...caller.sessionMetadata, createdAt: new Date().toISOString() })
       fake.state.sessions.set(id, session)
     }
     fake.play(session, input.prompt)
@@ -254,7 +306,7 @@ describe('the wait', () => {
     // wait_for_session picks it up once it ends.
     const session = fake.state.sessions.get(value.session_id)!
     setTimeout(() => {
-      session.assistant.push({ uuid: 'late', text: 'Done at last' })
+      fake.say(session, 'Done at last')
       session.active = false
     }, 200)
     const waited = await call(waitForSessionTool, { agent: 'alpha', session_id: value.session_id, wait_seconds: 5 }, person('alice'))
@@ -351,9 +403,9 @@ describe('the mcp origin', () => {
   it('list_sessions lists what the app lists plus the person\'s own MCP sessions, not someone else\'s hidden ones', async () => {
     const mine = (await call(invokeAgentTool, { agent: 'alpha', prompt: 'mine' }, person('alice'))).value.session_id
     const bobs = (await call(invokeAgentTool, { agent: 'alpha', prompt: 'bobs' }, person('bob'))).value.session_id
-    fake.state.sessions.set('regular', { id: 'regular', agent: 'alpha', name: 'Regular', metadata: {}, active: false, awaiting: false, openRequests: [], assistant: [], delivered: [], prompts: [] })
-    fake.state.sessions.set('cron', { id: 'cron', agent: 'alpha', name: 'Cron', metadata: { isScheduledExecution: true }, active: false, awaiting: false, openRequests: [], assistant: [], delivered: [], prompts: [] })
-    fake.state.sessions.set('promoted', { id: 'promoted', agent: 'alpha', name: 'Promoted', metadata: { mcpInvocation: { userId: 'bob', clientName: null }, promotedToInteractive: true }, active: false, awaiting: false, openRequests: [], assistant: [], delivered: [], prompts: [] })
+    fake.state.sessions.set('regular', fake.blank('regular', 'alpha', 'Regular', {}))
+    fake.state.sessions.set('cron', fake.blank('cron', 'alpha', 'Cron', { isScheduledExecution: true }))
+    fake.state.sessions.set('promoted', fake.blank('promoted', 'alpha', 'Promoted', { mcpInvocation: { userId: 'bob', clientName: null }, promotedToInteractive: true }))
     const ids = (userId: string) => call(listSessions, { agent: 'alpha' }, person(userId)).then((result) => result.value.sessions.map((s: { session_id: string }) => s.session_id).sort())
     expect(await ids('alice')).toEqual([mine, 'promoted', 'regular'].sort())
     expect(await ids('bob')).toEqual([bobs, 'promoted', 'regular'].sort())
@@ -488,4 +540,107 @@ describe('the rate limit', () => {
 // get_guide stays callable directly (the registry is what counts and audits).
 it('get_guide runs outside the registry without a call context', async () => {
   expect((await call(getGuide, {}, person('alice'))).value.topic).toBe('overview')
+})
+
+describe('review fixes', () => {
+  it('a session MCP did not start keeps its origin when continued, and a user-role member may continue another person\'s session as the app\'s message route allows', async () => {
+    // A person's interactive session (origin user), and an agent's call.
+    fake.state.sessions.set('bobs-chat', fake.blank('bobs-chat', 'alpha', 'Bob chat', { createdByUserId: 'bob' }))
+    fake.state.sessions.set('agent-call', fake.blank('agent-call', 'alpha', 'Invoked by Beta', { invokedByAgentSlug: 'beta' }))
+    // The app's POST /api/agents/:id/sessions/:sessionId/messages is AgentUser()
+    // plus "the session is the agent's": any user-role member may post into any session.
+    expect((await call(invokeAgentTool, { agent: 'alpha', session_id: 'bobs-chat', prompt: 'hello' }, person('alice'))).value.status).toBe('completed')
+    expect((await call(invokeAgentTool, { agent: 'alpha', session_id: 'bobs-chat', prompt: 'hello' }, person('victor'))).error).toMatch(/needs the user role or higher/)
+    expect((await call(invokeAgentTool, { agent: 'alpha', session_id: 'bobs-chat', prompt: 'hello' }, person('nobody'))).error).toMatch(/Agent not found/)
+    expect((await call(invokeAgentTool, { agent: 'alpha', session_id: 'agent-call', prompt: 'hello' }, person('alice'))).value.status).toBe('completed')
+    expect(fake.state.sessions.get('bobs-chat')!.metadata).toEqual({ createdByUserId: 'bob' })
+    expect(sessionOrigin(fake.state.sessions.get('bobs-chat')!.metadata as SessionMetadata)).toBe('user')
+    expect(sessionOrigin(fake.state.sessions.get('agent-call')!.metadata as SessionMetadata)).toBe('agent')
+    // Still what list_sessions (the app's list) shows.
+    const ids = (await call(listSessions, { agent: 'alpha' }, person('alice'))).value.sessions.map((s: { session_id: string }) => s.session_id)
+    expect(ids).toContain('bobs-chat')
+  })
+
+  it('a delivery whose turn has not begun is not reported settled: it waits for the reply (past the reply-flush poll)', async () => {
+    const started = Date.now()
+    const { value } = await call(invokeAgentTool, { agent: 'alpha', prompt: 'Begin later [late]', wait_seconds: 10 }, person('alice'))
+    expect(Date.now() - started).toBeGreaterThanOrEqual(3_900)
+    expect(value).toMatchObject({ status: 'completed', last_message: 'Late but here' })
+  })
+
+  it('a delivery whose turn never begins answers running at the deadline, not completed', async () => {
+    const { value } = await call(invokeAgentTool, { agent: 'alpha', prompt: 'Never [never]', wait_seconds: 1 }, person('alice'))
+    expect(value.status).toBe('running')
+    expect(value.last_message).toBeNull()
+  })
+
+  it('a card with several questions, or a question beside another request, is not answered here: the link and every question', async () => {
+    const asked = (await call(invokeAgentTool, { agent: 'alpha', prompt: 'Ask two [questions]' }, person('alice'))).value
+    expect(asked.status).toBe('awaiting_input')
+    expect(asked.pending_request).toMatchObject({ kind: 'question', text: 'Which colour? (options: Red, Blue)\nWhich shade? (options: Red, Blue)' })
+    expect(asked.note).toMatch(/several questions/)
+    const again = (await call(invokeAgentTool, { agent: 'alpha', session_id: asked.session_id, prompt: 'Blue' }, person('alice'))).value
+    expect(again.status).toBe('awaiting_input')
+    expect(again.note).toMatch(/NOT delivered/)
+    expect(fake.state.answers).toEqual([])
+    expect(fake.state.sessions.get(asked.session_id)!.prompts).toEqual(['Ask two [questions]'])
+
+    const mixed = (await call(invokeAgentTool, { agent: 'alpha', prompt: 'Ask and need [question+secret]' }, person('alice'))).value
+    expect(mixed.pending_request.kind).toBe('secret')
+    expect((await call(invokeAgentTool, { agent: 'alpha', session_id: mixed.session_id, prompt: 'Blue' }, person('alice'))).value.note).toMatch(/NOT delivered/)
+    expect(fake.state.answers).toEqual([])
+  })
+
+  it('last_message is the agent\'s last real text, never a tool-use placeholder, while it waits or works', async () => {
+    const asked = (await call(invokeAgentTool, { agent: 'alpha', prompt: 'Paint it [question]' }, person('alice'))).value
+    expect(asked.last_message).toBe('Let me ask you.')
+    const working = (await call(invokeAgentTool, { agent: 'alpha', prompt: 'Long [slow]', wait_seconds: 0 }, person('alice'))).value
+    expect(working).toMatchObject({ status: 'running', last_message: 'Working on it, step 1 done.' })
+    const fresh = (await call(invokeAgentTool, { agent: 'alpha', prompt: 'Long again [slow]', wait_seconds: 0 }, person('alice'))).value
+    // Nothing from an earlier turn: a session that has written no text yet says null.
+    fake.state.sessions.get(fresh.session_id)!.entries = fake.state.sessions.get(fresh.session_id)!.entries.filter((entry) => entry.kind === 'user' || entry.toolOnly)
+    expect((await call(waitForSessionTool, { agent: 'alpha', session_id: fresh.session_id, wait_seconds: 0 }, person('alice'))).value.last_message).toBeNull()
+  })
+
+  it('the rate limit is checked before the scope: once the window is full, scope refusals write no audit rows', async () => {
+    const alice = registered(person('alice'))
+    for (let i = 0; i < MCP_TOOL_CALLS_PER_MINUTE; i++) await alice('get_guide', {})
+    const before = (await auditRows()).length
+    const readOnly = registered({ ...person('alice'), scopes: ['read'] })
+    for (let i = 0; i < 5; i++) {
+      const refused = await readOnly('invoke_agent', { agent: 'alpha', prompt: 'hi' })
+      expect(refused.content[0].text).toMatch(/Rate limit/)
+    }
+    expect(await auditRows()).toHaveLength(before)
+  })
+
+  it('a failed delivery says the attached uploads were used up; they cannot be attached again', async () => {
+    const prepared = (await call(prepareFileUpload, { agent: 'alpha', filename: 'a.txt' }, person('alice'))).value
+    const grant = await authorizeSignedFileRequest(prepared.upload_url.split('/').pop()!, 'upload')
+    await storeSignedUpload(grant, new Response('x').body, 1)
+    const failed = await call(invokeAgentTool, { agent: 'alpha', prompt: 'Send [refuse]', attachments: [prepared.upload_id] }, person('alice'))
+    expect(failed.error).toContain(`The attached uploads (${prepared.upload_id}) were used up by this call: upload the files again`)
+    expect((await call(invokeAgentTool, { agent: 'alpha', prompt: 'Retry', attachments: [prepared.upload_id] }, person('alice'))).error).toMatch(/not a finished upload/)
+  })
+
+  it('an abort before delivery sends nothing and spends no upload; an abort during delivery still delivers, and never stops the turn', async () => {
+    const prepared = (await call(prepareFileUpload, { agent: 'alpha', filename: 'a.txt' }, person('alice'))).value
+    const grant = await authorizeSignedFileRequest(prepared.upload_url.split('/').pop()!, 'upload')
+    await storeSignedUpload(grant, new Response('x').body, 1)
+    const gone = new AbortController()
+    gone.abort()
+    const early = await call(invokeAgentTool, { agent: 'alpha', prompt: 'hi', attachments: [prepared.upload_id] }, person('alice'), { signal: gone.signal })
+    expect(early.error).toMatch(/cancelled before anything was sent/)
+    expect(fake.state.sessions.size).toBe(0)
+
+    const leaving = new AbortController()
+    setTimeout(() => leaving.abort(), 50)
+    const during = await call(invokeAgentTool, { agent: 'alpha', prompt: 'Work [slow-deliver] [slow]', attachments: [prepared.upload_id] }, person('alice'), { signal: leaving.signal })
+    expect(during.value.status).toBe('running')
+    const session = fake.state.sessions.get(during.value.session_id)!
+    // Created with its prompt (and the attachment), and still working.
+    expect(session.prompts).toHaveLength(1)
+    expect(session.prompts[0]).toMatch(/^Work \[slow-deliver\] \[slow\]\n\n.*\/workspace\/uploads\/a-/s)
+    expect(session.active).toBe(true)
+  })
 })
