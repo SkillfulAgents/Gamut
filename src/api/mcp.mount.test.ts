@@ -337,6 +337,8 @@ describe('the tools', () => {
 
     const binary = (await callTool('read_drive_file', { drive: driveId, path: 'logo.png' })).structuredContent
     expect(binary).toMatchObject({ kind: 'download', mime_type: 'image/png', size_bytes: 7 })
+    // At the origin the client reached /mcp at, not the configured bound address (http://localhost:47891 here).
+    expect(new URL(binary.download_url).origin).toBe('http://localhost')
     const download = await app.request(new URL(binary.download_url).pathname)
     expect(download.status).toBe(200)
     expect(Buffer.from(await download.arrayBuffer())).toEqual(fs.readFileSync(path.join(root, 'brain', 'logo.png')))

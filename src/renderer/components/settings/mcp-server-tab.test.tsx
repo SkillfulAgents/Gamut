@@ -9,6 +9,8 @@ import { McpServerTab } from './mcp-server-tab'
 vi.mock('@renderer/lib/api', () => ({ apiFetch: vi.fn() }))
 const user = vi.hoisted(() => ({ isAdmin: false, isAuthMode: false }))
 vi.mock('@renderer/context/user-context', () => ({ useUser: () => user }))
+const where = vi.hoisted(() => ({ local: true }))
+vi.mock('@renderer/lib/capabilities', () => ({ mcpServerRunsOnThisComputer: () => where.local }))
 
 const mockApiFetch = vi.mocked(apiFetch)
 const ENDPOINT = 'http://localhost:47891/mcp'
@@ -26,6 +28,7 @@ describe('McpServerTab', () => {
   let state: { available: boolean; enabled: boolean; endpointUrl: string; token: string | null }
 
   beforeEach(() => {
+    where.local = true
     state = { available: true, enabled: true, endpointUrl: ENDPOINT, token: 'gamut_mcp_first' }
     mockApiFetch.mockReset()
     mockApiFetch.mockImplementation(async (path, init) => {
@@ -58,6 +61,21 @@ describe('McpServerTab', () => {
     fireEvent.click(screen.getByTestId('mcp-server-regenerate'))
     fireEvent.click(await screen.findByTestId('mcp-server-regenerate-confirm'))
     await waitFor(() => expect(screen.getByTestId('mcp-setup-text-claude-code').textContent).toContain('gamut_mcp_second'))
+  })
+
+  it('says the server is this computer\'s in the desktop app driving its own API', async () => {
+    renderTab()
+    expect(await screen.findByTestId('mcp-server-intro')).toHaveTextContent('other AI tools on this computer')
+    expect(screen.getByTestId('mcp-server-reach')).toHaveTextContent('Web apps such as claude.ai cannot')
+  })
+
+  it('says the server is the workspace\'s on a web deployment, promising nothing about this computer', async () => {
+    where.local = false
+    renderTab()
+    expect(await screen.findByTestId('mcp-server-intro')).toHaveTextContent('read this workspace\'s drives')
+    expect(screen.getByTestId('mcp-server-intro')).not.toHaveTextContent('this computer')
+    expect(screen.getByTestId('mcp-server-reach')).toHaveTextContent('any computer that can reach it')
+    expect(screen.getByTestId('mcp-server-reach')).not.toHaveTextContent('claude.ai')
   })
 
   it('says so where the server is not available', async () => {

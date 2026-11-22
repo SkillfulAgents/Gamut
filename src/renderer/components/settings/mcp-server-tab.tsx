@@ -5,6 +5,7 @@ import { toast } from 'sonner'
 import { apiFetch } from '@renderer/lib/api'
 import { copyTextToClipboard } from '@renderer/lib/clipboard'
 import { useUser } from '@renderer/context/user-context'
+import { mcpServerRunsOnThisComputer } from '@renderer/lib/capabilities'
 import { Button } from '@renderer/components/ui/button'
 import { Switch } from '@renderer/components/ui/switch'
 import {
@@ -104,12 +105,16 @@ export function McpServerTab() {
   }
 
   const setups = status.token ? mcpClientSetups(status.endpointUrl, status.token) : []
+  // Where the server is decides what the page can promise about reaching it.
+  const local = mcpServerRunsOnThisComputer()
 
   return (
     <div className="space-y-6" data-testid="mcp-server-tab">
-      <p className="px-1 text-[11px] leading-relaxed text-muted-foreground">
-        Let other AI tools on this computer, like Claude Code, Codex and Cursor, read your Gamut drives, agents and
-        sessions through MCP. They connect with the token below and can read what you can read here. They cannot change anything.
+      <p className="px-1 text-[11px] leading-relaxed text-muted-foreground" data-testid="mcp-server-intro">
+        {local
+          ? 'Let other AI tools on this computer, like Claude Code, Codex and Cursor, read your Gamut drives, agents and sessions through MCP.'
+          : 'Let AI tools like Claude Code, Codex and Cursor read this workspace\'s drives, agents and sessions through MCP.'}{' '}
+        They connect with the token below and can read what you can read here. They cannot change anything.
       </p>
 
       <div className="space-y-2">
@@ -196,8 +201,10 @@ export function McpServerTab() {
             </div>
           ))}
         </div>
-        <p className="px-1 text-[11px] leading-relaxed text-muted-foreground">
-          The address is this computer&apos;s, so tools running here can reach it. Web apps such as claude.ai cannot.
+        <p className="px-1 text-[11px] leading-relaxed text-muted-foreground" data-testid="mcp-server-reach">
+          {local
+            ? 'The address is this computer\'s, so tools running here can reach it. Web apps such as claude.ai cannot.'
+            : 'The address is this workspace\'s server. A tool can connect from any computer that can reach it.'}
         </p>
       </div>
     </div>

@@ -166,3 +166,14 @@ export function signsInWithAuthSession(): boolean {
 export function signsInWithApple(): boolean {
   return signsInWithAuthSession()
 }
+
+/**
+ * Whether the MCP server this window configures runs on the computer the
+ * window runs on: the desktop app driving its own API. Then its address is a
+ * loopback one, which tools on this computer reach and hosted apps (claude.ai,
+ * ChatGPT) cannot. Otherwise (a web deployment, or a cloud workspace) the
+ * server is another machine, reached at its own address.
+ */
+export function mcpServerRunsOnThisComputer(): boolean {
+  return canUseHostFeatures()
+}

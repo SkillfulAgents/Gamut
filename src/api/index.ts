@@ -304,17 +304,17 @@ app.route('/api/favicon', faviconRouter)
 app.route('/api/server-facts', serverFactsRouter)
 app.route('/api/debug', debugRouter)
 
+// Gamut's MCP server for external agents. Outside `/api` like the cloud proxy
+// below: it carries its own credential (the installation token without auth
+// mode), which `/api/*` never accepts, and the local-mode loopback check does
+// not cover it. See routes/mcp.ts.
+app.route(MCP_ROUTE_PATH, mcpRoute)
+
 // Desktop → cloud-workspace forwarding. Mounted outside `/api` on purpose: it
 // is not an endpoint of this server but a different server's `/api` reached
 // through it, and the local-mode localhost middleware above is scoped to
 // `/api/*`. The route therefore runs its own (stricter) access checks — see
 // cloud-proxy.ts.
-// Gamut's MCP server for external agents. Outside `/api` like the cloud proxy:
-// it carries its own credential (the installation token without auth mode),
-// which `/api/*` never accepts, and the local-mode loopback check does not
-// cover it. See routes/mcp.ts.
-app.route(MCP_ROUTE_PATH, mcpRoute)
-
 if (isCloudProxyEnabled()) {
   app.route(CLOUD_PROXY_PREFIX, cloudProxy)
 }

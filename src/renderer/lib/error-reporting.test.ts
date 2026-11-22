@@ -43,6 +43,18 @@ describe('renderer error reporting facade', () => {
     expect(sentry.init).toHaveBeenCalledOnce()
   })
 
+  it('keeps the MCP installation token out of events and breadcrumbs', async () => {
+    const token = 'gamut_mcp_79lOWwC6FBMALw-Wq3AXJUTLthYKVo47ejm_Zmq56IA'
+    reporting.initRendererErrorReporting()
+    await vi.waitFor(() => expect(sentry.init).toHaveBeenCalledOnce())
+    const { beforeSend, beforeBreadcrumb } = sentry.init.mock.calls[0][0]
+    const event = beforeSend({ message: `setup ${token}`, extra: { response: { token } } }, {})
+    expect(JSON.stringify(event)).not.toContain(token)
+    expect(event.extra.response.token).toBe('gamut_mcp_[redacted]')
+    const crumb = beforeBreadcrumb({ category: 'console', message: `copied --header "Authorization: Bearer ${token}"`, data: { arguments: [token] } })
+    expect(JSON.stringify(crumb)).not.toContain(token)
+  })
+
   it('preserves opt-out set before the provider is loaded', async () => {
     reporting.setRendererErrorReportingEnabled(false)
     reporting.initRendererErrorReporting()

@@ -61,13 +61,24 @@ async function resolveDriveId(ctx: McpCallContext, ref: string): Promise<{ id: s
   throw new McpToolError(`Drive "${ref}" not found, or you cannot see it. Call list_drives for the drives you can read.`)
 }
 
-async function readAll(volume: BaseMountableVolume<unknown>, path: string, maxBytes: number): Promise<{ size: number; bytes: Uint8Array | null }> {
+export async function readAll(volume: BaseMountableVolume<unknown>, path: string, maxBytes: number): Promise<{ size: number; bytes: Uint8Array | null }> {
   const file = await volume.read(path)
   if (file.size > maxBytes) {
     await file.close()
     return { size: file.size, bytes: null }
   }
-  const reader = (await file.stream()).getReader()
+  // The VolumeFile contract: `stream` once, and the stream releases the open
+  // when it ends (read to the end, cancelled, or errored); `close` only when no
+  // stream is taken. So the one path that must close is a stream that never
+  // came (a remote source failing to start it).
+  let body: ReadableStream<Uint8Array>
+  try {
+    body = await file.stream()
+  } catch (error) {
+    await file.close().catch(() => {})
+    throw error
+  }
+  const reader = body.getReader()
   const chunks: Uint8Array[] = []
   let total = 0
   for (;;) {
@@ -312,7 +323,8 @@ export const readDriveFile = defineTool({
         ...(page.truncatedLine ? { note: 'A line longer than one page was cut short.' } : {}),
       }
     }
-    const signed = await mintSignedDownloadUrl(ctx.userId, { kind: 'drive-file', volumeId: drive.id, path })
+    // At the origin this client reached /mcp at, which it can certainly reach again.
+    const signed = await mintSignedDownloadUrl(ctx.userId, { kind: 'drive-file', volumeId: drive.id, path }, { baseUrl: ctx.publicBaseUrl })
     return {
       drive,
       path,

@@ -134,6 +134,13 @@ export interface SignedFileUrl {
 export interface MintOptions {
   /** Shorter than the default if wanted; more than `MAX_SIGNED_FILE_URL_TTL_MS` is refused. */
   ttlMs?: number
+  /**
+   * The origin the URL's holder reaches this app at, when the minter knows it
+   * better than the configuration does: the MCP server passes the origin its
+   * client reached `/mcp` at (itself the configured public address when one is
+   * set). Absent, the configured public address, else the bound one.
+   */
+  baseUrl?: string
 }
 
 // ---------------------------------------------------------------------------
@@ -242,13 +249,14 @@ function lifetime(options: MintOptions): number {
  * (`HOST_PUBLIC_URL`, then the first trusted origin), as the other links the
  * app hands outside use, else the address it is bound to.
  */
-async function signedFilesBaseUrl(): Promise<string> {
+async function signedFilesBaseUrl(options: MintOptions): Promise<string> {
+  if (options.baseUrl) return options.baseUrl.replace(/\/+$/, '')
   return (await resolvePublicAppBaseUrl()) ?? (await getAppBaseUrl())
 }
 
-async function mint(payload: SignedFileTokenPayload): Promise<SignedFileUrl> {
+async function mint(payload: SignedFileTokenPayload, options: MintOptions): Promise<SignedFileUrl> {
   const token = await signFileToken(payload)
-  return { url: `${await signedFilesBaseUrl()}${SIGNED_FILES_ROUTE_PREFIX}/${token}`, expiresAt: new Date(payload.exp) }
+  return { url: `${await signedFilesBaseUrl(options)}${SIGNED_FILES_ROUTE_PREFIX}/${token}`, expiresAt: new Date(payload.exp) }
 }
 
 /**
@@ -271,7 +279,7 @@ export async function mintSignedDownloadUrl(userId: string, target: SignedDownlo
   }
   if (parsed.kind === 'workspace-file' && parsed.path === '') throw new SignedFileUrlError(400, 'Invalid file path')
   const authorized = await authorizeTarget(await principalFor(userId, now), parsed)
-  return mint({ v: SIGNED_FILE_TOKEN_VERSION, jti: newTokenId(), sub: userId, op: 'download', target: authorized, iat: now, exp: now + ttlMs })
+  return mint({ v: SIGNED_FILE_TOKEN_VERSION, jti: newTokenId(), sub: userId, op: 'download', target: authorized, iat: now, exp: now + ttlMs }, options)
 }
 
 /**
@@ -300,7 +308,7 @@ export async function mintSignedUploadUrl(
   // The record a PUT must find: without it the URL is refused.
   const registered = await appState().insertIfAbsent(uploadKey(userId, target.agentSlug, uploadId), { state: 'pending', jti: payload.jti }, { expiry: pendingExpiry(payload) })
   if (!registered.inserted) throw new Error('Upload id collision')
-  const minted = await mint(payload)
+  const minted = await mint(payload, options)
   return { ...minted, uploadId }
 }
 

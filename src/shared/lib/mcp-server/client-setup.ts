@@ -22,8 +22,18 @@ export interface McpClientSetup {
   text: string
 }
 
-/** A single-quoted POSIX shell word. */
-function shellQuote(value: string): string {
+/** Characters that something between sh, PowerShell and cmd.exe expands or escapes inside double quotes. */
+const UNSAFE_IN_DOUBLE_QUOTES = /["$`\\!%]/
+
+/**
+ * One shell word for a command a person pastes. Double quotes when the value
+ * holds nothing any of sh/bash/zsh, PowerShell and cmd.exe treats specially
+ * inside them, since cmd.exe does not treat `'` as a quote (the desktop app
+ * ships on Windows). Otherwise a POSIX single-quoted word, the only safe form
+ * for such a value, which cmd.exe cannot take.
+ */
+export function shellQuote(value: string): string {
+  if (!UNSAFE_IN_DOUBLE_QUOTES.test(value)) return `"${value}"`
   return `'${value.replace(/'/g, `'\\''`)}'`
 }
 

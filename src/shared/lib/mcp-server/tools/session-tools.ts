@@ -117,7 +117,7 @@ export const readSession = defineTool({
       role: message.role,
       content: truncateText(message.content, MESSAGE_MAX_CHARS).text,
       ...(message.toolName ? { toolName: message.toolName } : {}),
-    })).slice(0, MESSAGES_MAX_PAGE_SIZE)
+    }))
     const delivered = deliveredFiles.map((file) => ({
       delivery_id: file.deliveryId,
       filename: file.filename,

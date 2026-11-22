@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { NodeOptions } from '@sentry/node'
 import { GrammyError, HttpError } from 'grammy'
-import { CREDENTIAL_BODY_ROUTE, createServerProvider, redactBotTokens, redactSignedFileTokens, scrubCredentialRequestBody } from './sentry-provider'
+import { CREDENTIAL_BODY_ROUTE, createServerProvider, redactBotTokens, redactMcpTokens, redactSignedFileTokens, scrubCredentialRequestBody } from './sentry-provider'
 import { backgroundSettled } from '../background'
 
 const sentry = vi.hoisted(() => ({
@@ -338,5 +338,45 @@ describe('signed file URL redaction', () => {
     expect(await beforeSend()(event, {})).toEqual({
       request: { url: 'http://localhost:47891/api/signed-files/[redacted]', method: 'GET' },
     })
+  })
+})
+
+describe('MCP installation token redaction', () => {
+  const token = 'gamut_mcp_79lOWwC6FBMALw-Wq3AXJUTLthYKVo47ejm_Zmq56IA'
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    settings.getSettings.mockResolvedValue({})
+    environment.probeEnvironmentData.mockResolvedValue({})
+    sentry.httpIntegration.mockReturnValue({ name: 'Http' })
+  })
+
+  it('replaces the token in a header value, prose and JSON, keeping the prefix', () => {
+    expect(redactMcpTokens(`Bearer ${token}`)).toBe('Bearer gamut_mcp_[redacted]')
+    expect(redactMcpTokens(`{"token":"${token}","enabled":true}`)).toBe('{"token":"gamut_mcp_[redacted]","enabled":true}')
+    expect(redactMcpTokens(`rejected ${token}.`)).toBe('rejected gamut_mcp_[redacted].')
+    expect(redactMcpTokens('no token here')).toBe('no token here')
+  })
+
+  it('takes the token out of the Authorization header of an event raised while handling /mcp', async () => {
+    initializeProvider()
+    const event = {
+      type: undefined,
+      request: {
+        url: 'http://localhost:47892/mcp',
+        method: 'POST',
+        headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      },
+      breadcrumbs: [{ category: 'console', message: `token ${token} refused` }],
+    }
+    const sent = await beforeSend()(event, {})
+    expect(JSON.stringify(sent)).not.toContain(token)
+    expect(sent).toMatchObject({ request: { headers: { authorization: 'Bearer gamut_mcp_[redacted]' } } })
+  })
+
+  it('takes it out of a breadcrumb as it is recorded (a logged settings response, a fetch URL)', () => {
+    initializeProvider()
+    const crumb = beforeBreadcrumb()({ category: 'console', message: `GET /api/mcp-server -> {"token":"${token}"}`, data: { url: `http://x/?t=${token}` } }, {})
+    expect(JSON.stringify(crumb)).not.toContain(token)
   })
 })
