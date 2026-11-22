@@ -2,7 +2,7 @@ import { SessionChatColumn } from './session-chat-column'
 import { pickRuntimeOptions } from '@shared/lib/container/runtime-options'
 import { FilePreviewProvider } from '@renderer/context/file-preview-context'
 import { WorkflowProvider } from '@renderer/context/workflow-context'
-import { CalendarClock, GitFork, Plug, Wrench, Zap } from 'lucide-react'
+import { Cable, CalendarClock, GitFork, Plug, Wrench, Zap } from 'lucide-react'
 import { SessionProvenanceBanner } from './session-provenance-banner'
 import { useCallback, useEffect, useMemo } from 'react'
 import { useSession, useSetSessionMarkedUnread, useClearSessionUnread } from '@renderer/hooks/use-sessions'
@@ -182,6 +182,20 @@ export function SessionView({ agentSlug, sessionId, onSessionCreated: handleSess
             testId: 'widget-repair-session-back-button',
           }}
           testId="widget-repair-session-banner"
+        />
+      )}
+      {session?.mcpInvocation && (
+        <SessionProvenanceBanner
+          icon={Cable}
+          text={<>Session started through MCP{session.mcpInvocation.clientName ? <> from &quot;{session.mcpInvocation.clientName}&quot;</> : null}</>}
+          back={{
+            label: 'Back',
+            onClick: () => {
+              void navigate({ to: '/agents/$slug/called-from-agents', params: { slug: agentSlug } })
+            },
+            testId: 'mcp-session-back-button',
+          }}
+          testId="mcp-session-banner"
         />
       )}
       {session?.invokedByAgentSlug && (

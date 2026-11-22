@@ -171,6 +171,8 @@ export interface ApiSession extends RuntimeOptions {
   // Present when another agent created this session through x-agent.
   invokedByAgentSlug?: string
   invokedByAgentName?: string
+  // Present when a person started this session through the MCP server.
+  mcpInvocation?: { clientName: string | null }
   // Automatic widget repairs also appear in the inbound invocation history.
   isWidgetRepair?: boolean
   widgetRepairSlug?: string

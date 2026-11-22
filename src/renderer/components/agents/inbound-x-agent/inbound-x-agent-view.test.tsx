@@ -73,6 +73,29 @@ describe('InboundXAgentView', () => {
     })
   })
 
+  it('lists MCP sessions in the run history, with their client and that they came through MCP', () => {
+    mocks.useDetails.mockReturnValue({
+      data: {
+        sessions: [
+          { id: 'mcp-named', createdAt: '2026-08-21T18:00:00.000Z', mcp: { clientName: 'Claude Code' } },
+          { id: 'mcp-unnamed', createdAt: '2026-08-20T18:00:00.000Z', mcp: { clientName: null } },
+        ],
+        callers: [],
+      },
+      isLoading: false,
+      error: null,
+    })
+    renderWithProviders(<InboundXAgentView agentSlug="target" />)
+
+    const named = screen.getByRole('button', { name: 'Open MCP session from Claude Code' })
+    expect(within(named).getByText('Claude Code')).toBeInTheDocument()
+    expect(within(named).getByText('Through MCP')).toBeInTheDocument()
+    const unnamed = screen.getByRole('button', { name: 'Open MCP session' })
+    expect(within(unnamed).getByText('An MCP client')).toBeInTheDocument()
+    fireEvent.click(named)
+    expect(mocks.navigate).toHaveBeenCalledWith({ to: '/agents/$slug/sessions/$sessionId', params: { slug: 'target', sessionId: 'mcp-named' } })
+  })
+
   it('shows a flat caller card split by automatic and approval decisions', () => {
     renderWithProviders(<InboundXAgentView agentSlug="target" />)
 

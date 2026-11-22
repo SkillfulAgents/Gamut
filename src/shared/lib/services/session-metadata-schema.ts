@@ -102,6 +102,11 @@ export const sessionMetadataSchema = z
     llmProviderId: z.string().nullish(),
     errorProviders: z.record(z.string(), z.string()).optional(),
     invokedByAgentSlug: z.string().optional(),
+    // Started through the MCP server: who, and through which client.
+    mcpInvocation: z.object({
+      userId: z.string(),
+      clientName: z.string().nullable(),
+    }).loose().optional(),
     // Widget repair session: automated, and the slug is the dedupe key that
     // stops a permanently broken widget opening one session per refresh.
     isWidgetRepair: z.boolean().optional(),

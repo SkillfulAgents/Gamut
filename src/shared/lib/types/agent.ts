@@ -135,6 +135,11 @@ export interface SessionMetadata extends RuntimeOptions {
   // X-Agent: present when this session was created by another agent invoking this one.
   // Such sessions are hidden as automated until promoted for human input.
   invokedByAgentSlug?: string
+  // MCP: present when a person started this session through Gamut's MCP
+  // server from another AI tool. Hidden as automated until promoted, like an
+  // x-agent invocation. `clientName` is what the client called itself in MCP
+  // `clientInfo`, null when its protocol era does not send it per request.
+  mcpInvocation?: { userId: string; clientName: string | null }
   // Widget repair: the platform opened this session because the artifact's
   // widget refresh script failed. Automated (hidden) like a cron run, and the
   // slug doubles as the per-widget dedupe key.
@@ -157,7 +162,7 @@ export interface SessionMetadataMap {
   [sessionId: string]: SessionMetadata
 }
 
-export type SessionOrigin = 'user' | 'scheduled' | 'webhook' | 'integration' | 'agent' | 'widget-repair'
+export type SessionOrigin = 'user' | 'scheduled' | 'webhook' | 'integration' | 'agent' | 'mcp' | 'widget-repair'
 
 /**
  * Session info derived from JSONL file + metadata
