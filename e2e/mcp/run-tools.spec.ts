@@ -385,13 +385,17 @@ test.describe('rate limit', () => {
     try {
       let admitted = 0
       let refused: { content: Array<{ text?: string }>; isError?: boolean } | null = null
-      for (let i = 0; i < 130 && !refused; i++) {
+      // The window is a fixed minute from its first hit, and earlier tests may
+      // have opened it: it can expire while this loop runs, which resets the
+      // count. Two windows' worth of calls cannot all be admitted.
+      for (let i = 0; i < 250 && !refused; i++) {
         const result = await mcp.callTool('get_guide', {})
         if (result.isError) refused = result
         else admitted++
       }
       expect(refused, 'no call was refused').not.toBeNull()
-      expect(admitted).toBeLessThanOrEqual(120)
+      // At most one window that was already open plus one full new one.
+      expect(admitted).toBeLessThanOrEqual(240)
       expect(refused!.content[0].text).toMatch(/Rate limit: at most 120 Gamut tool calls a minute\. Nothing was done\. Wait \d+ seconds/)
       // Listing tools is not a tool call: the connection still answers.
       expect((await mcp.listTools()).tools.length).toBeGreaterThan(0)
