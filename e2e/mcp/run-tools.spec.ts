@@ -167,6 +167,8 @@ test.describe('sessions waiting on a person', () => {
       expect(asked.pending_request.text).toMatch(/Which database should we use\?/)
       expect(asked.pending_request.text).toMatch(/PostgreSQL/)
       expect(asked.note).toMatch(/invoke_agent with this agent and session_id/)
+      // The agent's own text, never the AskUserQuestion tool-use placeholder.
+      expect(asked.last_message ?? '').not.toContain('[tool_use')
       // Waiting on a person promotes it into the main list.
       await waitFor('the session to be promoted', async () => (await metadataOf(runner.slug, asked.session_id))?.promotedToInteractive === true)
       expect(await mainList(runner.slug)).toContain(asked.session_id)
@@ -205,6 +207,45 @@ test.describe('sessions waiting on a person', () => {
     } finally {
       await mcp.close()
     }
+  })
+})
+
+test.describe('sessions MCP did not start', () => {
+  test('a card with several questions is not answered through MCP: the link and every question', async () => {
+    const mcp = await client('v2-modern')
+    try {
+      const asked = resultJson(await mcp.callTool('invoke_agent', { agent: runner.displaySlug, prompt: 'Please ask multi questions' }))
+      expect(asked.status).toBe('awaiting_input')
+      expect(asked.pending_request.kind).toBe('question')
+      for (const question of ['Which database should we use?', 'Which cloud provider do you prefer?', 'Preferred language?']) {
+        expect(asked.pending_request.text).toContain(question)
+      }
+      expect(asked.note).toMatch(/several questions/)
+      const again = resultJson(await mcp.callTool('invoke_agent', { agent: runner.displaySlug, session_id: asked.session_id, prompt: 'PostgreSQL' }))
+      expect(again.status).toBe('awaiting_input')
+      expect(again.note).toMatch(/NOT delivered/)
+    } finally {
+      await mcp.close()
+    }
+  })
+
+  test('continuing a session a person started in the app leaves it theirs: no mcp origin, still in the main list', async () => {
+    const created = await api<{ id: string }>(`/api/agents/${runner.slug}/sessions`, { method: 'POST', body: JSON.stringify({ message: 'Started in the app' }) })
+    await untilIdle(runner.slug, created.id)
+    const before = await metadataOf(runner.slug, created.id)
+    expect(await mainList(runner.slug)).toContain(created.id)
+    const mcp = await client('v2-modern')
+    try {
+      const result = resultJson(await mcp.callTool('invoke_agent', { agent: runner.displaySlug, session_id: created.id, prompt: 'A follow-up through MCP' }))
+      expect(result).toMatchObject({ status: 'completed', session_id: created.id, last_message: MOCK_REPLY })
+    } finally {
+      await mcp.close()
+    }
+    const after = await metadataOf(runner.slug, created.id)
+    expect(after?.mcpInvocation).toBeUndefined()
+    expect(after?.invokedByAgentSlug).toBeUndefined()
+    expect(after?.name).toBe(before?.name)
+    expect(await mainList(runner.slug)).toContain(created.id)
   })
 })
 
@@ -330,6 +371,9 @@ test.describe('in Gamut', () => {
   })
 })
 
+// Every MCP suite in this run acts as user `local`, so all of them share one
+// 120-calls-a-minute window. This test fills it, so it runs last; a suite that
+// grows past ~120 tool calls within a minute would start seeing refusals.
 test.describe('rate limit', () => {
   // Last: it uses up this minute's window for the local user.
   test('past 120 calls a minute, a tool error that says when to retry; the connection keeps working', async () => {

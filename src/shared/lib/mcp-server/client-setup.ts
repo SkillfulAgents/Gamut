@@ -74,7 +74,9 @@ export function mcpClientSetups(endpointUrl: string, token: string): McpClientSe
     {
       id: 'codex',
       label: 'Codex',
-      hint: 'Add to ~/.codex/config.toml.',
+      // An observation (Codex 0.167): exec runs without approvals, and Codex
+      // asks approval for tools not marked read-only that reach the open world.
+      hint: 'Add to ~/.codex/config.toml. Seen with Codex 0.167: codex exec refuses invoke_agent and ask_team_brain, which need approval, unless this server sets default_tools_approval_mode.',
       language: 'toml',
       text: codexSetup(endpointUrl, token),
     },
