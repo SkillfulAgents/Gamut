@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { Hono } from 'hono'
+import { APP_VERSION } from '@shared/lib/config/version'
 
 vi.mock('@shared/lib/proxy/token-store', () => ({ validateProxyToken: vi.fn(async () => 'test-agent') }))
 vi.mock('@shared/lib/services/platform-auth-service', () => ({ getPlatformAccessToken: async () => null }))
@@ -37,21 +38,19 @@ it('serves a saved keyless You.com choice through the authenticated host route w
   const app = new Hono().route('/api/x-agent/web-search', webSearch)
   const observed: string[] = []
   vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit) => {
-    expect(url).toBe('https://api.you.com/mcp?profile=free')
+    expect(url).toBe('https://api.you.com/mcp/free')
     expect(new Headers(init.headers).has('Authorization')).toBe(false)
-    expect(new Headers(init.headers).get('User-Agent')).toBe('youdotcom-integration/SkillfulAgents-Gamut')
+    expect(new Headers(init.headers).get('User-Agent')).toBe(`Gamut/${APP_VERSION}`)
     const rpc = JSON.parse(String(init.body))
     observed.push(rpc.method)
     if (rpc.method === 'notifications/initialized') return new Response(null, { status: 202 })
+    const payload = { results: { web: [
+      { url: 'https://example.com/guide', title: 'Native search guide', contents: { highlights: ['Keyless search works through the host.'] } },
+      { url: 'https://blocked.test/page', title: 'Blocked', description: 'Must not reach the agent' },
+    ] } }
     const result = rpc.method === 'initialize' ? { protocolVersion: '2025-03-26' }
       : rpc.method === 'tools/list' ? { tools: [{ name: 'you-search' }] }
-        : { content: [{ type: 'text', text: JSON.stringify({ results: { web: [
-          { url: 'https://example.com/guide', title: 'Native search guide', snippets: ['Keyless search works through the host.'] },
-          { url: 'https://blocked.test/page', title: 'Blocked', snippets: ['Must not reach the agent'] },
-        ] } }) }], structuredContent: { results: { web: [
-          { url: 'https://example.com/guide', title: 'Native search guide', snippets: ['Keyless search works through the host.'] },
-          { url: 'https://blocked.test/page', title: 'Blocked', snippets: ['Must not reach the agent'] },
-        ] } } }
+        : { content: [{ type: 'text', text: JSON.stringify(payload) }], structuredContent: payload }
     return new Response(JSON.stringify({ jsonrpc: '2.0', id: rpc.id, result }), { headers: { 'Content-Type': 'application/json' } })
   }))
   const res = await app.request('http://localhost/api/x-agent/web-search/search', {

@@ -19,10 +19,12 @@ const YouComWebHitSchema = z.object({
   url: z.string(),
   title: z.string().nullable().optional(),
   description: z.string().nullable().optional(),
-  snippets: z.array(z.string()).optional(),
-  favicon_url: z.string().nullable().optional(),
-  published_date: z.string().nullable().optional(),
+  snippets: z.array(z.string()).nullish(),
+  contents: z.object({ highlights: z.array(z.string()).nullish() }).nullish(),
+  page_age: z.string().nullish(),
 })
+
+export type YouComWebHit = z.infer<typeof YouComWebHitSchema>
 
 export const YouComSearchResponseSchema = z.object({
   results: z.object({

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createTestDatabase, type TestDatabase } from '@shared/lib/db/testing/create-test-database'
+import { APP_VERSION } from '../config/version'
 import { YouComWebProvider } from './youcom-web-provider'
 
 let handle: TestDatabase
@@ -10,7 +11,7 @@ const provider = new YouComWebProvider()
 const defaultResults = {
   results: {
     web: [
-      { url: 'https://example.com/a', title: 'A', snippets: ['Useful excerpt'], published_date: '2026-09-01' },
+      { url: 'https://example.com/a', title: 'A', contents: { highlights: ['Useful excerpt'] }, page_age: '2026-09-01', favicon_url: 'https://you.com/favicon?domain=example.com' },
       { url: 'https://blocked.com/b', title: null, description: 'Excluded' },
     ],
   },
@@ -26,7 +27,9 @@ function mockMcp(options?: { sse?: boolean; error?: boolean; missingTool?: boole
     if (request.method === 'initialize') rpcResult = { protocolVersion: '2025-03-26' }
     if (request.method === 'tools/list') rpcResult = { tools: options?.missingTool ? [] : [{ name: 'you-search' }] }
     if (request.method === 'tools/call') {
-      rpcResult = { content: [{ type: 'text', text: JSON.stringify(result) }], structuredContent: result, isError: options?.error }
+      rpcResult = options?.error
+        ? { content: [{ type: 'text', text: 'Failed to perform search. Error code: 401' }], isError: true }
+        : { content: [{ type: 'text', text: JSON.stringify(result) }], structuredContent: result }
     }
     const body = JSON.stringify({ jsonrpc: '2.0', id: options?.mismatchedId ? 999 : request.id, result: rpcResult })
     return new Response(options?.sse ? `event: message\ndata: ${body}\n\n` : body, {
@@ -38,26 +41,27 @@ function mockMcp(options?: { sse?: boolean; error?: boolean; missingTool?: boole
 }
 
 beforeEach(async () => {
-  delete process.env.YDC_API_KEY
+  vi.stubEnv('YDC_API_KEY', '')
   handle = await createTestDatabase()
   testDb = handle.db
 })
 afterEach(async () => {
-  vi.unstubAllGlobals(); vi.unstubAllEnvs(); result = defaultResults
-  delete process.env.YDC_API_KEY
+  vi.unstubAllGlobals()
+  vi.unstubAllEnvs()
+  result = defaultResults
   await handle.close()
 })
 
 it.each([false, true])('maps useful normalized hits over JSON/SSE (SSE=%s) without credentials', async (sse) => {
   const fetchMock = mockMcp({ sse })
   expect(await provider.search('current news', { numResults: 1 })).toEqual({ hits: [
-    { url: 'https://example.com/a', title: 'A', snippet: 'Useful excerpt', publishedDate: '2026-09-01' },
+    { url: 'https://example.com/a', title: 'A', snippet: 'Useful excerpt' },
   ] })
-  expect(await provider.getEffectiveApiKey()).toBeUndefined()
+  expect(await provider.getEffectiveApiKey()).toBeFalsy()
   for (const [url, init] of fetchMock.mock.calls) {
-    expect(url).toBe('https://api.you.com/mcp?profile=free')
+    expect(url).toBe('https://api.you.com/mcp/free')
     expect(new Headers(init?.headers).has('Authorization')).toBe(false)
-    expect(new Headers(init?.headers).get('User-Agent')).toBe('youdotcom-integration/SkillfulAgents-Gamut')
+    expect(new Headers(init?.headers).get('User-Agent')).toBe(`Gamut/${APP_VERSION}`)
     expect(init?.signal).toBeInstanceOf(AbortSignal)
   }
   const requests = fetchMock.mock.calls.map(([, init]) => init)
@@ -70,21 +74,29 @@ it.each([false, true])('maps useful normalized hits over JSON/SSE (SSE=%s) witho
 })
 
 it('uses the authenticated MCP endpoint when YDC_API_KEY is set', async () => {
-  process.env.YDC_API_KEY = 'test-ydc-key'
+  vi.stubEnv('YDC_API_KEY', 'test-ydc-key')
   const fetchMock = mockMcp()
   await provider.search('current news', { numResults: 1 })
   expect(await provider.getEffectiveApiKey()).toBe('test-ydc-key')
   for (const [url, init] of fetchMock.mock.calls) {
     expect(url).toBe('https://api.you.com/mcp')
     expect(new Headers(init?.headers).get('Authorization')).toBe('Bearer test-ydc-key')
-    expect(new Headers(init?.headers).get('User-Agent')).toBe('youdotcom-integration/SkillfulAgents-Gamut')
+    expect(new Headers(init?.headers).get('User-Agent')).toBe(`Gamut/${APP_VERSION}`)
   }
 })
 
 describe('filter contracts', () => {
-  it('enforces domain and date constraints locally', async () => {
-    mockMcp()
-    const output = await provider.search('news', { includeDomains: ['example.com'], startPublishedDate: '2026-08-01' })
+  it('sends the domain and date range upstream and enforces the site filters locally', async () => {
+    const fetchMock = mockMcp()
+    const output = await provider.search('news', {
+      includeDomains: ['example.com'], excludeDomains: ['blocked.com'],
+      startPublishedDate: '2026-08-01', endPublishedDate: '2026-09-02',
+    })
+    expect(JSON.parse(String(fetchMock.mock.calls[3][1]?.body)).params).toEqual({
+      name: 'you-search',
+      arguments: { query: 'news', count: 10, extraction: 'highlights', freshness: '2026-08-01to2026-09-02' },
+      _meta: { 'com.you.com/search': { include_domains: ['example.com'] } },
+    })
     expect(output.hits.map((hit) => hit.url)).toEqual(['https://example.com/a'])
     expect(output.warnings?.[0]).toMatch(/removed/)
   })
@@ -103,14 +115,15 @@ describe('filter contracts', () => {
       .toEqual(['https://notpython.org/x'])
   })
   it('keeps undated results and treats a date-only end date as the whole day', async () => {
-    result = { results: { web: [
-      { url: 'https://example.com/same-day', snippets: ['a'], published_date: '2026-09-01T18:30:00Z' },
+    result = { results: { news: [
+      { url: 'https://example.com/same-day', snippets: ['a'], page_age: '2026-09-01T18:30:00' },
       { url: 'https://example.com/undated', snippets: ['b'] },
-      { url: 'https://example.com/late', snippets: ['c'], published_date: '2026-09-02T00:00:01Z' },
+      { url: 'https://example.com/late', snippets: ['c'], page_age: '2026-09-02T00:00:01Z' },
     ] } }
     mockMcp()
     const output = await provider.search('news', { endPublishedDate: '2026-09-01' })
     expect(output.hits.map((hit) => hit.url)).toEqual(['https://example.com/same-day', 'https://example.com/undated'])
+    expect(output.hits[0].publishedDate).toBe('2026-09-01T18:30:00.000Z')
   })
   it('does not fail the whole search on one non-http result URL', async () => {
     result = { results: { web: [{ url: 'ftp://example.com/file', snippets: ['x'] }, ...defaultResults.results.web] } }
@@ -118,9 +131,23 @@ describe('filter contracts', () => {
     expect((await provider.search('news', {})).hits.length).toBeGreaterThan(0)
   })
   it('honors exclusions even when the server returns an excluded URL', async () => {
-    mockMcp()
-    expect((await provider.search('news', { excludeDomains: ['example.com'] })).hits[0].url).toBe('https://blocked.com/b')
+    const fetchMock = mockMcp()
+    const output = await provider.search('news', { excludeDomains: ['example.com', '*.blocked.com'] })
+    expect(JSON.parse(String(fetchMock.mock.calls[3][1]?.body)).params.arguments.exclude_domains).toEqual(['example.com'])
+    expect(output.hits[0].url).toBe('https://blocked.com/b')
   })
+})
+
+it.each([true, false])('validates the supplied key with a search (tool error: %s)', async (error) => {
+  vi.stubEnv('YDC_API_KEY', 'different-env-key')
+  const fetchMock = mockMcp({ error })
+  const validated = await provider.validateKey('settings-input')
+  expect(validated.valid).toBe(!error)
+  if (error) expect(validated.error).toContain('search permissions')
+  const [url, call] = fetchMock.mock.calls[3]
+  expect(url).toBe('https://api.you.com/mcp')
+  expect(new Headers(call?.headers).get('Authorization')).toBe('Bearer settings-input')
+  expect(JSON.parse(String(call?.body)).params.name).toBe('you-search')
 })
 
 it.each([{ error: true }, { missingTool: true }, { mismatchedId: true }])('fails loudly on MCP errors: %j', async (options) => {

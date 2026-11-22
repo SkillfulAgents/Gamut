@@ -35,7 +35,7 @@ const WEB_PROVIDERS: {
   {
     value: 'youcom',
     label: 'You.com',
-    note: 'Web search without an API key (about 100 searches a day). An optional key lifts the daily limit. Works with every model. Page reading uses the model\'s built-in tools when available.',
+    note: 'Up to 100 searches a day without a key. Add an API key to use your You.com account’s billing and rate limits. Page reading uses the model’s built-in tools when available.',
     docsUrl: 'https://you.com/docs/agents/mcp-server',
   },
   {
@@ -216,7 +216,8 @@ export function WebTab() {
                     validationEndpoint="/api/settings/validate-web-key"
                     validationBody={(apiKey) => ({ provider: 'youcom', apiKey })}
                     envVarName="YDC_API_KEY"
-                    placeholder="Optional. Leave blank to use the free tier."
+                    helpText="Saving a key runs one search to verify access."
+                    placeholder="Enter your You.com API key"
                     showNotConfiguredAlert={false}
                   />
                 ) : null}

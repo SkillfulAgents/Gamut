@@ -57,6 +57,14 @@ describe('buildSettingsAuditDetails', () => {
     expect(details?.sections).toEqual(['Model Provider', 'Web Search'])
   })
 
+  it('records a You.com key change under Web Search and redacts the key', () => {
+    const updated = baseSettings()
+    updated.apiKeys = { ydcApiKey: 'test-key' }
+    expect(buildSettingsAuditDetails(baseSettings(), updated)).toEqual({
+      sections: ['Web Search'], changes: { 'apiKeys.ydcApiKey': 'set' },
+    })
+  })
+
   it('redacts custom env var values but keeps their names', () => {
     const current = baseSettings()
     current.customEnvVars = { MY_TOKEN: 'hunter2' }
