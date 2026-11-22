@@ -108,22 +108,25 @@ test.describe('waiting', () => {
       test.setTimeout(120_000)
       const mcp = await client(kind)
       try {
-        const progress: Array<{ progress: number; total?: number; message?: string }> = []
         const startedAt = Date.now()
-        const first = resultJson(await mcp.callTool('invoke_agent', { agent: runner.displaySlug, prompt: 'Please work very slowly on this', wait_seconds: 6 }, { onprogress: (p) => progress.push(p) }))
+        // The mock turn works for 12s; a 2s wait ends with it still running.
+        const first = resultJson(await mcp.callTool('invoke_agent', { agent: runner.displaySlug, prompt: 'Please work very slowly on this', wait_seconds: 2 }))
         const took = Date.now() - startedAt
         expect(first.status).toBe('running')
         expect(first.note).toMatch(/wait_for_session/)
         expect(first.note).toMatch(/Do NOT call invoke_agent again/)
-        expect(took).toBeGreaterThanOrEqual(5_000)
-        expect(took).toBeLessThan(15_000)
-        // One progress notification about every 5s of waiting.
-        expect(progress.length).toBeGreaterThanOrEqual(1)
-        expect(progress[0].message).toMatch(/working/)
+        expect(took).toBeGreaterThanOrEqual(1_500)
+        expect(took).toBeLessThan(10_000)
 
+        // The rest of the turn (about 10s) is long enough for two 5s ticks
+        // of the wait's own clock; at least one must arrive.
+        const progress: Array<{ progress: number; total?: number; message?: string }> = []
         const waited = resultJson(await mcp.callTool('wait_for_session', { agent: first.agent, session_id: first.session_id, wait_seconds: 30 }, { onprogress: (p) => progress.push(p) }))
         expect(waited).toMatchObject({ status: 'completed', session_id: first.session_id })
         expect(waited.last_message).toBeTruthy()
+        expect(progress.length).toBeGreaterThanOrEqual(1)
+        expect(progress[0]).toMatchObject({ progress: 5, total: 30 })
+        expect(progress[0].message).toMatch(/working/)
         // A settled session answers at once.
         const again = Date.now()
         expect(resultJson(await mcp.callTool('wait_for_session', { agent: first.agent, session_id: first.session_id }))).toMatchObject({ status: 'completed' })
