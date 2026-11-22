@@ -37,7 +37,7 @@ export function describeTrayTab(entry: TrayEntry, scope: TrayScope, onSelect: ()
         badge: <WorkflowBadge scope={scope} runId={entry.runId} /> }
     case 'utility': {
       const resident = trayResidents.find(item => item.id === entry.id)!
-      return { ...common, kind: 'utility', label: resident.label, icon: <resident.Icon className="h-3.5 w-3.5" /> }
+      return { ...common, kind: 'utility', label: resident.titleFor?.(entry.target) ?? resident.label, icon: <resident.Icon className="h-3.5 w-3.5" /> }
     }
     case 'new':
       return { ...common, kind: 'new', label: 'New tab', icon: <Plus size={14} /> }

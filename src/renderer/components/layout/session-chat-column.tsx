@@ -69,7 +69,7 @@ export function SessionChatColumn({
   pendingWakeSummary,
   messageTarget,
 }: SessionChatColumnProps) {
-  const { isActive, browserActive, isWaitingBackground } = useMessageStream(sessionId, agentSlug, ['isActive', 'browserActive', 'isWaitingBackground'])
+  const { isActive, browserActive, browserStatusKnown, isWaitingBackground } = useMessageStream(sessionId, agentSlug, ['isActive', 'browserActive', 'browserStatusKnown', 'isWaitingBackground'])
   const voiceModeActive = useIsVoiceModeActive(sessionId)
   // Who the composer's message only notifies, said in place of the key hints.
   const [notifiesOnly, setNotifiesOnly] = useState<string | null>(null)
@@ -100,7 +100,7 @@ export function SessionChatColumn({
     <SessionThread
       sessionId={sessionId}
       agentSlug={agentSlug}
-      browserActive={browserActive}
+      browserActive={browserActive || browserStatusKnown ? browserActive : null}
       pendingUserMessages={pendingUserMessages}
       pendingRequestCount={pendingRequestCount}
       onPendingMessageAppeared={onPendingMessageAppeared}

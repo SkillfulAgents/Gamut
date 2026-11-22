@@ -26,4 +26,3 @@ export function getPreviewTabKey(tab: PreviewTab): string {
 export function getWorkspaceFileKey(agentSlug: string, filePath: string): string {
   return `${agentSlug}:${filePath}`
 }
-

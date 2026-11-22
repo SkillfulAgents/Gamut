@@ -9,6 +9,7 @@ import { useMessages } from '@renderer/hooks/use-messages'
 import { describeWorkspaceFile } from '@renderer/lib/workspace-file'
 
 interface TrayEmptyStateProps {
+  launcherKey: string
   agentSlug: string
   sessionId: string
   /** Open one of the session's files. */
@@ -23,9 +24,10 @@ const CARD = 'flex flex-col items-start gap-3 rounded-card bg-muted/60 p-4 text-
  * (the context window, the subagents, background tasks, the agents it called),
  * then the session's files.
  */
-export function TrayEmptyState({ agentSlug, sessionId, onOpenFile, onOpenWorkspace }: TrayEmptyStateProps) {
+export function TrayEmptyState({ launcherKey, agentSlug, sessionId, onOpenFile, onOpenWorkspace }: TrayEmptyStateProps) {
   const { data: messages } = useMessages(sessionId, agentSlug)
   const tray = useRequiredTray()
+  const choose = (open: () => void) => tray.pickFromLauncher(launcherKey, open)
   // Pictures and videos show as thumbnails; everything else as a named row.
   const { media, others } = useMemo(() => {
     const described = collectSessionFiles(messages).map(entry => ({ entry, file: describeWorkspaceFile(entry.filePath, agentSlug) }))
@@ -40,12 +42,12 @@ export function TrayEmptyState({ agentSlug, sessionId, onOpenFile, onOpenWorkspa
         <div className="mx-auto w-full max-w-xl pb-10 pt-6">
           <h2 className="text-xs text-muted-foreground">Session utilities</h2>
           <div className="mt-3 grid grid-cols-2 gap-2">
-            <button type="button" className={CARD} onClick={onOpenWorkspace}>
+            <button type="button" className={CARD} onClick={() => choose(onOpenWorkspace)}>
               <FolderOpen className="h-4 w-4 text-muted-foreground" />
               Workspace files
             </button>
             {trayResidents.map(({ id, label, Icon, Count }) => (
-              <button type="button" key={id} className={CARD} onClick={() => tray.openUtility(id)} data-testid={`tray-empty-${id}`}>
+              <button type="button" key={id} className={CARD} onClick={() => choose(() => tray.openUtility(id))} data-testid={`tray-empty-${id}`}>
                 <Icon className="h-4 w-4 text-muted-foreground" />
                 <span className="flex items-baseline gap-1.5">{label}{Count && <Count agentSlug={agentSlug} sessionId={sessionId} />}</span>
               </button>
@@ -61,7 +63,7 @@ export function TrayEmptyState({ agentSlug, sessionId, onOpenFile, onOpenWorkspa
                   <li key={file.path}>
                     <button
                       type="button"
-                      onClick={() => onOpenFile(entry.filePath, entry.description)}
+                      onClick={() => choose(() => onOpenFile(entry.filePath, entry.description))}
                       title={entry.uploaded ? `${file.relativePath} · Uploaded by you` : file.relativePath}
                       aria-label={entry.uploaded ? `${file.name}, uploaded by you` : file.name}
                       className="group relative block aspect-square w-full overflow-hidden rounded-item border border-black/5 bg-muted/60 dark:border-white/5"
@@ -105,7 +107,7 @@ export function TrayEmptyState({ agentSlug, sessionId, onOpenFile, onOpenWorkspa
                     <li key={file.path}>
                       <button
                         type="button"
-                        onClick={() => onOpenFile(entry.filePath, entry.description)}
+                        onClick={() => choose(() => onOpenFile(entry.filePath, entry.description))}
                         title={file.relativePath}
                         className="flex w-full items-center gap-2.5 rounded-item px-2 py-1.5 text-left text-sm text-foreground transition-colors hover:bg-muted/60"
                         data-testid="tray-session-file"
@@ -130,4 +132,3 @@ export function TrayEmptyState({ agentSlug, sessionId, onOpenFile, onOpenWorkspa
     </div>
   )
 }
-

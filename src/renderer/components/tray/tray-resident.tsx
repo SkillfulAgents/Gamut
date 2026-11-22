@@ -15,6 +15,8 @@ export interface RegisteredResident {
   label: string
   Icon: ComponentType<{ className?: string }>
   Count?: ComponentType<TrayScope>
+  keyFor?: (target: unknown) => string
+  titleFor?: (target: unknown) => string
   renderPanel: (tray: SessionTray, scope: TrayScope, target: unknown) => ReactNode
 }
 
@@ -22,12 +24,17 @@ export function defineTrayResident<K extends UtilityId>(resident: {
   id: K
   label: string
   Icon: ComponentType<{ className?: string }>
+  /** Omit for one shared tab. A stable key per resource contributes peers to the strip. */
+  keyFor?: (target: TrayUtilityTargets[K] | null) => string
+  titleFor?: (target: TrayUtilityTargets[K] | null) => string
   Panel: ComponentType<TrayPanelProps<TrayUtilityTargets[K]>>
   Count?: ComponentType<TrayScope>
 }): RegisteredResident {
   const { id, Panel } = resident
   return {
-    ...resident,
+    id, label: resident.label, Icon: resident.Icon, Count: resident.Count,
+    keyFor: resident.keyFor as RegisteredResident['keyFor'],
+    titleFor: resident.titleFor as RegisteredResident['titleFor'],
     renderPanel(tray, scope, target) {
       // openUtility accepts only the target declared for this resident's id.
       return <Panel {...scope} target={target as TrayUtilityTargets[K]} openDetail={detail => tray.openUtility(id, detail)} />

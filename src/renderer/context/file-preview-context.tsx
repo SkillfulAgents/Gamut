@@ -273,7 +273,7 @@ function FilePreviewState({ children, sessionId, sessionAgentSlug, commentsEnabl
       )
       return next
     })
-  }, [mapFiles])
+  }, [mapFiles, setComments])
 
   const closeTab = useCallback((tabKey: string) => {
     const closed = tray.snapshot().tabs.find(tab => tab.key === tabKey)
@@ -351,7 +351,7 @@ function FilePreviewState({ children, sessionId, sessionAgentSlug, commentsEnabl
       }
       return changed ? next : prev
     })
-  }, [mapFiles])
+  }, [mapFiles, setComments])
 
   const removeDirectoryPath = useCallback((directory: string, agentSlug: string) => {
     const directoryPath = previewPath(directory)
@@ -442,7 +442,7 @@ function FilePreviewState({ children, sessionId, sessionAgentSlug, commentsEnabl
       next.set(key, [...(next.get(key) ?? []), { ...comment, filePath, id }])
       return next
     })
-  }, [commentsEnabled])
+  }, [commentsEnabled, setComments])
 
   const removeComment = useCallback((filePath: string, agentSlug: string, commentId: string) => {
     const key = getWorkspaceFileKey(agentSlug, previewPath(filePath))
@@ -455,7 +455,7 @@ function FilePreviewState({ children, sessionId, sessionAgentSlug, commentsEnabl
       else next.set(key, filtered)
       return next
     })
-  }, [])
+  }, [setComments])
 
   const clearComments = useCallback((filePath: string, agentSlug: string) => {
     const key = getWorkspaceFileKey(agentSlug, previewPath(filePath))
@@ -465,7 +465,7 @@ function FilePreviewState({ children, sessionId, sessionAgentSlug, commentsEnabl
       next.delete(key)
       return next
     })
-  }, [])
+  }, [setComments])
 
   const value = useMemo<FilePreviewContextType>(() => ({
     openTabs,

@@ -186,7 +186,8 @@ test.describe('File Preview', () => {
     await july.click()
     await expect(markdown(page).getByRole('heading', { name: 'July Report' })).toBeVisible({ timeout: 10000 })
 
-    await fileTab(page, 'reports').click()
+    await page.getByRole('button', { name: /All tabs/ }).click()
+    await page.getByTestId('tray-tab-all-item').filter({ hasText: 'reports' }).click()
     await expect(year).toHaveAttribute('aria-expanded', 'true')
     await expect(july).toBeVisible()
 
@@ -216,7 +217,8 @@ test.describe('File Preview', () => {
     await summary.click()
     await expect(markdown(page).getByRole('heading', { name: 'Reports Overview' })).toBeVisible({ timeout: 10000 })
 
-    await fileTab(page, 'reports').click()
+    await page.getByRole('button', { name: /All tabs/ }).click()
+    await page.getByTestId('tray-tab-all-item').filter({ hasText: 'reports' }).click()
     await summary.click({ button: 'right' })
     await page.getByRole('menuitem', { name: 'Delete' }).click()
     const deleteDialog = page.getByRole('alertdialog')
