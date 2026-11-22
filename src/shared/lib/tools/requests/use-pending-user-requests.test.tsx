@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { ReactNode } from 'react'
+import { invalidatePendingUserRequests } from '@renderer/lib/pending-request-cache'
 import { usePendingUserRequests } from './use-pending-user-requests'
 
 const mockApiFetch = vi.fn()
@@ -49,7 +50,7 @@ describe('usePendingUserRequests', () => {
 
     await waitFor(() => expect(result.current.data).toHaveLength(1))
     expect(result.current.data?.[0].id).toBe('req-1')
-    expect(mockApiFetch).toHaveBeenCalledWith('/api/agents/agent-1/pending-requests?sessionId=s-1')
+    expect(mockApiFetch).toHaveBeenCalledWith('/api/agents/agent-1/pending-requests?sessionId=s-1', { signal: expect.any(AbortSignal) })
   })
 
   it('does not fetch for an unsent draft and starts when its session id arrives', async () => {
@@ -62,7 +63,7 @@ describe('usePendingUserRequests', () => {
     rerender({ sessionId: 's-1' })
     await waitFor(() => expect(result.current.data).toHaveLength(1))
     expect(mockApiFetch).toHaveBeenCalledTimes(1)
-    expect(mockApiFetch).toHaveBeenCalledWith('/api/agents/agent-1/pending-requests?sessionId=s-1')
+    expect(mockApiFetch).toHaveBeenCalledWith('/api/agents/agent-1/pending-requests?sessionId=s-1', { signal: expect.any(AbortSignal) })
   })
 
   it('omits the sessionId query for the agent-wide view', async () => {
@@ -71,7 +72,23 @@ describe('usePendingUserRequests', () => {
     const { result } = renderHook(() => usePendingUserRequests('agent-1'), { wrapper })
 
     await waitFor(() => expect(result.current.data).toEqual([]))
-    expect(mockApiFetch).toHaveBeenCalledWith('/api/agents/agent-1/pending-requests')
+    expect(mockApiFetch).toHaveBeenCalledWith('/api/agents/agent-1/pending-requests', { signal: expect.any(AbortSignal) })
+  })
+
+  it('reads again when a request opens while the first empty snapshot is in flight', async () => {
+    let deliverFirst!: (response: ReturnType<typeof okResponse>) => void
+    mockApiFetch.mockImplementationOnce(() => new Promise(resolve => { deliverFirst = resolve }))
+    mockApiFetch.mockResolvedValueOnce(okResponse([validEnvelope]))
+    const { result } = renderHook(() => usePendingUserRequests('agent-1', 's-1'), { wrapper })
+    const initialSignal = mockApiFetch.mock.calls[0][1].signal as AbortSignal
+
+    await act(() => invalidatePendingUserRequests(queryClient))
+    expect(initialSignal.aborted).toBe(true)
+    await waitFor(() => expect(result.current.data?.[0].id).toBe('req-1'))
+
+    // Even a transport that finishes the superseded read cannot erase the open card.
+    await act(async () => { deliverFirst(okResponse([])) })
+    expect(result.current.data?.[0].id).toBe('req-1')
   })
 
   it('a failed fetch is an ERROR that keeps the last snapshot — never an empty success', async () => {

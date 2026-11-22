@@ -1,3 +1,4 @@
+import { invalidatePendingUserRequests } from '@renderer/lib/pending-request-cache'
 import { useCallback, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { apiFetch } from '@renderer/lib/api'
@@ -146,7 +147,7 @@ export function useOAuthReconnect() {
       if (latest === latestRef.current) close()
       queryClient.invalidateQueries({ queryKey: ['connected-accounts'] })
       queryClient.invalidateQueries({ queryKey: ['agent-connected-accounts'] })
-      queryClient.invalidateQueries({ queryKey: ['pending-user-requests'] })
+      void invalidatePendingUserRequests(queryClient)
       return reconnectSucceeded
     } catch (err) {
       if (!canceled) close()

@@ -1,4 +1,5 @@
 
+import { invalidatePendingUserRequests } from '@renderer/lib/pending-request-cache'
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useQueryClient, QueryClient } from '@tanstack/react-query'
 import { getApiBaseUrl } from '@renderer/lib/env'
@@ -514,7 +515,7 @@ function getOrCreateEventSource(
     // Resync the unified pending-request store too: its create/resolve
     // events are one-shot, so anything settled or opened while this
     // stream was down must be recovered from the snapshot endpoint.
-    queryClient.invalidateQueries({ queryKey: ['pending-user-requests'] })
+    void invalidatePendingUserRequests(queryClient)
     // A live update or a newer connection supersedes this snapshot while it is in flight.
     const revision = ++browserStatusRevision
     fetch(`${baseUrl}/api/agents/${agentSlug}/browser/status`)
@@ -1218,7 +1219,7 @@ function getOrCreateEventSource(
         // carrier — the refetch reads the server registry snapshot, so a
         // burst of events collapses into one consistent read and a stale
         // in-flight response can never overwrite a newer one.
-        queryClient.invalidateQueries({ queryKey: ['pending-user-requests'] })
+        void invalidatePendingUserRequests(queryClient)
         // The one thing the snapshot can't do in time: an auto-approved
         // script_run / computer_use is ALREADY executing server-side, and
         // between its tool_use streaming in and its result persisting, the
