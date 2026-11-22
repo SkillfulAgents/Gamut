@@ -156,3 +156,5 @@ src/api/mcp.auth-mode.test.ts
 src/shared/lib/mcp-server/installation-token.test.ts
 src/shared/lib/mcp-server/tools/access.test.ts
 src/shared/lib/mcp-server/tools/run-tools.test.ts
+src/api/mcp.oauth.integration.test.ts
+src/api/mcp.oauth-cimd.integration.test.ts

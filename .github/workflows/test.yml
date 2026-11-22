@@ -304,7 +304,8 @@ jobs:
   e2e-isolated-suites:
     runs-on: blacksmith-16vcpu-ubuntu-2404
     # 20 before the MCP suite; it adds a server boot, two conformance runs and two CLI installs.
-    timeout-minutes: 25
+    # The MCP OAuth suite adds another server boot and the same again (~5 more).
+    timeout-minutes: 32
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -403,6 +404,28 @@ jobs:
           export CLAUDE_BIN="$RUNNER_TEMP/agent-clis/node_modules/.bin/claude"
           export CODEX_BIN="$RUNNER_TEMP/agent-clis/node_modules/.bin/codex"
           npm run test:e2e:mcp 2>&1 | tee test-results/mcp.log
+
+      # The MCP server in auth mode, its own server and data dir: the SDKs'
+      # OAuth sign-in through Chromium (DCR and a Client ID Metadata Document),
+      # consent, refresh, disconnect, step-up and roles; the conformance suites
+      # with a real access token; and the same pinned Claude Code and Codex
+      # signing in by OAuth. Both CLIs register with metadata documents on
+      # claude.ai and chatgpt.com, which the server under test fetches.
+      - name: Run MCP OAuth E2E suite
+        if: ${{ !cancelled() }}
+        env:
+          PORT: '3015'
+          MCP_OAUTH_CIMD_PORT: '3016'
+          SUPERAGENT_DATA_DIR: .e2e-data/mcp-oauth
+          PLAYWRIGHT_OUTPUT_DIR: test-results/mcp-oauth
+          PLAYWRIGHT_HTML_REPORT: playwright-report/mcp-oauth
+          MCP_HARNESS_REQUIRED: '1'
+        run: |
+          set -o pipefail
+          mkdir -p test-results
+          export CLAUDE_BIN="$RUNNER_TEMP/agent-clis/node_modules/.bin/claude"
+          export CODEX_BIN="$RUNNER_TEMP/agent-clis/node_modules/.bin/codex"
+          npm run test:e2e:mcp-oauth 2>&1 | tee test-results/mcp-oauth.log
 
       - name: Upload Playwright artifacts
         if: always()
