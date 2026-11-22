@@ -12,6 +12,9 @@ export const PLATFORM_CLIENT_INSTANCE_ID_RECORD_KEY = 'platform-client-instance-
 /** The HMAC key signed file URLs are signed with (`signed-file-urls/`). */
 export const SIGNED_FILE_URL_SECRET_RECORD_KEY = 'signed-file-url-secret'
 
+/** The bearer token MCP clients present on `/mcp` without auth mode (`mcp-server/installation-token.ts`). */
+export const MCP_INSTALLATION_TOKEN_RECORD_KEY = 'mcp-installation-token'
+
 /** Prefix of the per-agent host→container tokens; the agent slug follows. */
 export const HOST_CONTAINER_TOKEN_KEY_PREFIX = 'host-container-token:'
 export function hostContainerTokenKey(agentSlug: string): string {
@@ -47,6 +50,10 @@ export const browserContextIdRecordSchema = z.string().min(1)
 export const platformClientInstanceIdRecordSchema = z.string().trim().min(1)
 /** 32 random bytes, base64url. */
 export const signedFileUrlSecretRecordSchema = z.string().min(43)
+
+/** `gamut_mcp_` then 32 random bytes, base64url. */
+export const MCP_INSTALLATION_TOKEN_PREFIX = 'gamut_mcp_'
+export const mcpInstallationTokenRecordSchema = z.string().regex(/^gamut_mcp_[A-Za-z0-9_-]{43}$/)
 
 /** The legacy `host-container-tokens.json` and Browserbase context files: one string per key. */
 export const legacyStringMapSchema = z.record(z.string(), z.string())

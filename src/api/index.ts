@@ -65,6 +65,8 @@ import mobilePairing from './routes/mobile-pairing'
 import agentBootstrap from './routes/agent-bootstrap'
 import activityRouter from './routes/activity'
 import signedFiles from './routes/signed-files'
+import mcpRoute, { MCP_ROUTE_PATH } from './routes/mcp'
+import mcpServerSettings from './routes/mcp-server-settings'
 import { isAuthMode } from '@shared/lib/auth/mode'
 import { WORKSPACE_UNAVAILABLE_HEADER } from '@shared/lib/workspace-unavailable-header'
 import { sql } from 'drizzle-orm'
@@ -283,6 +285,7 @@ app.route('/api/audit-log', auditLogRouter)
 app.route('/api/connection-logs', connectionLogsRouter)
 app.route('/api/platform-auth', platformAuth)
 app.route('/api/account-deletion', accountDeletion)
+app.route('/api/mcp-server', mcpServerSettings)
 if (isAuthMode()) {
   // Public RP-initiated Platform SSO launcher (SUP-466). Outside /api so the
   // Platform "Open Cloud Agents" link can target a stable deployment path.
@@ -306,6 +309,12 @@ app.route('/api/debug', debugRouter)
 // through it, and the local-mode localhost middleware above is scoped to
 // `/api/*`. The route therefore runs its own (stricter) access checks — see
 // cloud-proxy.ts.
+// Gamut's MCP server for external agents. Outside `/api` like the cloud proxy:
+// it carries its own credential (the installation token without auth mode),
+// which `/api/*` never accepts, and the local-mode loopback check does not
+// cover it. See routes/mcp.ts.
+app.route(MCP_ROUTE_PATH, mcpRoute)
+
 if (isCloudProxyEnabled()) {
   app.route(CLOUD_PROXY_PREFIX, cloudProxy)
 }

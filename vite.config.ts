@@ -50,9 +50,9 @@ export default defineConfig({
         clientsClaim: true,
         // Everything the UI is made of; hdr-*.mp4 stay network-only (decorative).
         globPatterns: ['**/*.{js,css,html,svg,png,ico,webmanifest,woff2}'],
-        // Offline deep links get the app shell; /api and /auth (SSO launcher) must hit the network.
+        // Offline deep links get the app shell; /api, /auth (SSO launcher) and /mcp must hit the network.
         navigateFallback: 'index.html',
-        navigateFallbackDenylist: [/^\/api\//, /^\/auth\//],
+        navigateFallbackDenylist: [/^\/api\//, /^\/auth\//, /^\/mcp(?:$|[/?])/],
         // Vendor chunk exceeds workbox's 2MB default before compression.
         maximumFileSizeToCacheInBytes: 8 * 1024 * 1024,
         inlineWorkboxRuntime: true, // single sw.js file, nothing extra at the dist root
@@ -114,7 +114,7 @@ export default defineConfig({
           registerBackgroundWork()
         }
         server.middlewares.use((req, res, next) => {
-          if (!req.url?.startsWith('/api')) return next()
+          if (!req.url?.startsWith('/api') && !/^\/mcp(?:$|[/?])/.test(req.url ?? '')) return next()
           ensureBooted().then(
             () => next(),
             (error) => {
@@ -165,7 +165,8 @@ export default defineConfig({
     },
     devServer({
       entry: 'src/api/index.ts',
-      exclude: [/^(?!\/api).*/], // Only handle /api/* routes
+      // Only handle /api/* routes and the MCP endpoint (/mcp, outside /api).
+      exclude: [/^(?!\/api|\/mcp(?:$|[/?])).*/],
     }),
   ],
   resolve: {

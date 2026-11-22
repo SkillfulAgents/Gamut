@@ -151,3 +151,7 @@ src/shared/lib/connection-catalog/agent-catalog.test.ts
 src/api/routes/signed-files.test.ts
 src/api/signed-files.mount.test.ts
 src/shared/lib/services/x-agent/x-agent-service.test.ts
+src/api/mcp.mount.test.ts
+src/api/mcp.auth-mode.test.ts
+src/shared/lib/mcp-server/installation-token.test.ts
+src/shared/lib/mcp-server/tools/access.test.ts

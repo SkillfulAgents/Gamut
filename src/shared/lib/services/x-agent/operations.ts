@@ -87,9 +87,19 @@ export interface ListedSession {
 
 export async function getTargetSessions(
   caller: XAgentCaller,
-  input: { slug: string; limit: number; offset: number },
+  input: {
+    slug: string
+    limit: number
+    offset: number
+    /**
+     * List what the app's own session list shows: automated sessions (scheduled,
+     * webhook, called from other agents, …) only once promoted to interactive.
+     * The agent route lists every session.
+     */
+    excludeAutomated?: boolean
+  },
 ): Promise<XAgentResult<{ sessions: ListedSession[]; total: number; offset: number; limit: number }>> {
-  const { slug: rawTargetSlug, limit, offset } = input
+  const { slug: rawTargetSlug, limit, offset, excludeAutomated } = input
 
   // Resolve the model-supplied display slug to the agent and rebind, so every
   // downstream ACL / policy / fs use below keys on the id, not the prefix.
@@ -107,7 +117,9 @@ export async function getTargetSessions(
   if (!policy.allowed) return fail(403, policy.reason ?? 'Forbidden')
 
   const actor = agentRegistry.get(targetSlug)
-  const allSessions = await actor.sessions.list()
+  const allSessions = excludeAutomated
+    ? await actor.sessions.list({ excludeAutomated: true })
+    : await actor.sessions.list()
   const page = allSessions.slice(offset, offset + limit)
   const active = new Set((await actor.live()).activeSessionIds)
   return ok({

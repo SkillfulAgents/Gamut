@@ -19,6 +19,7 @@ import {
 import { InvalidAppRecordError } from '@shared/lib/app-records/errors'
 import { SETTINGS_RECORD_KEY } from '@shared/lib/app-records/record-schemas'
 import { globalInstructionsSchema } from './global-instructions-schema'
+import { mcpServerSettingsSchema, type McpServerSettings } from '../mcp-server/mcp-server-settings-schema'
 import { requestScopedSettings, settingsWritten } from './settings-request-memo'
 import { readyTeamBrain, teamBrainStoredSchema, type TeamBrainRecord, type TeamBrainStored } from './team-brain-schema'
 import { coerceApiTarget, type ApiTarget } from '@shared/lib/api-target'
@@ -368,6 +369,8 @@ export interface AppSettings {
   globalInstructions?: string
   /** The workspace's one Team Brain (team-brain experiment), or its set-up in progress. Written by the Team Brain set-up routes. */
   teamBrain?: TeamBrainStored
+  /** The `/mcp` endpoint's admin switch; absent = the mode's default (`mcp-server/mcp-server-settings.ts`). */
+  mcpServer?: McpServerSettings
   /**
    * Desktop-only: whether the UI drives this machine or the org's cloud
    * workspace. Main-owned rather than per-renderer so the main window and the
@@ -704,6 +707,13 @@ function mergeLoadedSettings(loaded: Record<string, any>): AppSettings {
       const parsed = teamBrainStoredSchema.safeParse(loaded.teamBrain)
       if (parsed.success) return parsed.data
       console.warn('Invalid teamBrain in settings; ignoring it')
+      return undefined
+    })(),
+    mcpServer: (() => {
+      if (loaded.mcpServer === undefined) return undefined
+      const parsed = mcpServerSettingsSchema.safeParse(loaded.mcpServer)
+      if (parsed.success) return parsed.data
+      console.warn('Invalid mcpServer in settings; ignoring it')
       return undefined
     })(),
   }
