@@ -4,7 +4,7 @@
  * check on every Location hop.
  */
 
-import { Agent, fetch as undiciFetch } from 'undici'
+import { Agent, Dispatcher1Wrapper } from 'undici'
 import {
   resolveMcpDiscoveryTarget,
   tryParseUrl,
@@ -17,7 +17,7 @@ const REDIRECT_STATUS = new Set([301, 302, 303, 307, 308])
 
 type FetchWithDispatcher = (
   input: string,
-  init?: RequestInit & { dispatcher?: Agent },
+  init?: RequestInit & { dispatcher?: Dispatcher1Wrapper },
 ) => Promise<Response>
 
 /** Match fetch redirect:follow method rewriting for 301/302/303. */
@@ -50,9 +50,9 @@ async function pinnedFetch(
   const { addresses } = await resolveMcpDiscoveryTarget(url, policy)
   const pinned = addresses[0]
 
-  const agent = new Agent({
-    // undici 8 turns on HTTP/2 by default; remote MCPs keep HTTP/1.1 as before.
-    allowH2: false,
+  // Node's built-in fetch speaks the older dispatcher API; the wrapper bridges
+  // it to this undici Agent (and keeps HTTP/1.1).
+  const agent = new Dispatcher1Wrapper(new Agent({
     connect: {
       lookup(_hostname, _options, callback) {
         // undici invokes lookup with `{ all: true }` and expects an address
@@ -60,11 +60,10 @@ async function pinnedFetch(
         callback(null, [{ address: pinned.address, family: pinned.family }])
       },
     },
-  })
+  }))
 
   try {
-    // Node's built-in fetch cannot drive an undici 8 Agent; use the matching fetch.
-    return await (undiciFetch as unknown as FetchWithDispatcher)(url, {
+    return await (fetch as FetchWithDispatcher)(url, {
       ...init,
       dispatcher: agent,
       redirect: 'manual',

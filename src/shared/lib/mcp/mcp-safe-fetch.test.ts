@@ -10,22 +10,22 @@ vi.mock('node:dns/promises', async (importOriginal) => {
   }
 })
 
-const mockFetch = vi.hoisted(() => vi.fn())
-vi.mock('undici', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('undici')>()
-  return { ...actual, fetch: mockFetch }
-})
-
 import { mcpSafeFetch } from './mcp-safe-fetch'
 
 const lookupMock = dnsPromises.lookup as unknown as ReturnType<typeof vi.fn>
 
 describe('mcpSafeFetch', () => {
+  const mockFetch = vi.fn()
+
   beforeEach(() => {
     vi.clearAllMocks()
-    mockFetch.mockReset()
     delete process.env.E2E_MOCK
     lookupMock.mockResolvedValue({ address: '93.184.216.34', family: 4 })
+    vi.stubGlobal('fetch', mockFetch)
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
   })
 
   it('follows a public redirect and strips Authorization cross-origin', async () => {
@@ -107,10 +107,8 @@ describe('mcpSafeFetch', () => {
 describe('mcpSafeFetch pin (live connect)', () => {
   let originalE2EMock: string | undefined
 
-  beforeEach(async () => {
+  beforeEach(() => {
     vi.clearAllMocks()
-    const { fetch: realFetch } = await vi.importActual<typeof import('undici')>('undici')
-    mockFetch.mockReset().mockImplementation(realFetch)
     originalE2EMock = process.env.E2E_MOCK
     process.env.E2E_MOCK = 'true'
     lookupMock.mockResolvedValue({ address: '127.0.0.1', family: 4 })
