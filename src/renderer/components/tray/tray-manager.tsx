@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Maximize2, Minimize2, PanelRight, PanelRightOpen, Plus, X } from 'lucide-react'
 import { cn } from '@shared/lib/utils/cn'
@@ -68,7 +68,22 @@ export function TrayManager({
   useEffect(() => {
     if (targetId && targetId !== viewed.current) pageActionsRef.current?.select(targetId)
   }, [targetId])
+  const panelId = useId()
+  const toggleRef = useRef<HTMLButtonElement>(null)
+  const drawerRef = useRef<HTMLDivElement>(null)
+  const focusAfterClose = useRef<string | null>(null)
+  useLayoutEffect(() => {
+    const closing = focusAfterClose.current
+    if (!closing || tabs.some(tab => tab.key === closing)) return
+    focusAfterClose.current = null
+    // A browser page may close asynchronously. Respect focus moved elsewhere in the meantime.
+    if (document.activeElement !== document.body) return
+    const next = drawerRef.current?.querySelector<HTMLButtonElement>('[data-active="true"] button[aria-pressed="true"]')
+    const destination = next ?? toggleRef.current
+    destination?.focus()
+  }, [tabs])
   const orderedTabs = tabs.map(tab => describeTrayTab(tab, { agentSlug, sessionId }, () => tray.select(tab.key), () => {
+    if (drawerRef.current?.contains(document.activeElement)) focusAfterClose.current = tab.key
     if (tab.kind === 'browser' && tab.page) pageActionsRef.current?.close(tab.page.targetId)
     else if (tab.kind === 'file') closeTab(tab.key)
     else tray.close(tab.key)
@@ -159,6 +174,7 @@ export function TrayManager({
                 : `Show panel, ${orderedTabs.length} ${orderedTabs.length === 1 ? 'tab' : 'tabs'}`
           }
           aria-pressed={drawerShown}
+          ref={toggleRef}
           data-testid={drawerShown ? 'tray-hide' : 'tray-show'}
         >
           <PanelRight className="h-4 w-4" />
@@ -173,6 +189,7 @@ export function TrayManager({
             className="flex items-center gap-1 p-1.5 rounded-item hover:bg-muted transition-colors text-muted-foreground hover:text-foreground"
             title="Show panel"
             aria-label={`Show panel, ${orderedTabs.length} ${orderedTabs.length === 1 ? 'tab' : 'tabs'}`}
+            ref={toggleRef}
             data-testid="tray-show"
           >
             <PanelRightOpen className="h-4 w-4" />
@@ -194,10 +211,11 @@ export function TrayManager({
       >
         {/* 8px in from the drawer's sides and bottom: the tabs standing on the page, Chrome-style, and under them
             one card holding the front tab's body, which the front tab joins. */}
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col px-2 pb-2">
+        <div ref={drawerRef} className="flex min-h-0 min-w-0 flex-1 flex-col px-2 pb-2">
         <TrayTabs
           tabs={orderedTabs}
           frontKey={front}
+          panelId={panelId}
           onLeadingTabFlush={setLeadingTabFlush}
           afterTabs={persistent && (
             <button
@@ -252,7 +270,7 @@ export function TrayManager({
             </div>
           }
         />
-        <div className={cn(TRAY_PANEL_CLASS, leadingTabFlush && 'rounded-tl-none')} data-testid="tray-panel">
+        <div id={panelId} role="region" aria-label={orderedTabs.find(tab => tab.key === front)?.label} className={cn(TRAY_PANEL_CLASS, leadingTabFlush && 'rounded-tl-none')} data-testid="tray-panel">
         <div className="flex flex-1 flex-col min-w-0 min-h-0">
           {/* The browser stays mounted behind other tabs: its stream, its pages
               and its log would otherwise start over on every visit. */}

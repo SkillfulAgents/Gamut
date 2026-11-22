@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react'
+import { useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { X } from 'lucide-react'
 import { DrawerTabStrip, drawerTabClassName } from './drawer-tab-strip'
 import { cn } from '@shared/lib/utils/cn'
@@ -33,6 +33,7 @@ export interface TrayTab {
 interface TrayTabsProps {
   tabs: TrayTab[]
   frontKey: string | null
+  panelId?: string
   /** Whether the front tab's left edge meets the strip's left inset, so the card below can square its corner. */
   onLeadingTabFlush?: (flush: boolean) => void
   /** Drawer-level controls at the strip's right end. */
@@ -61,11 +62,35 @@ export function shownTabs<T extends { key: string }>(tabs: T[], frontIndex: numb
   return shown
 }
 
-export function TrayTabs({ tabs, frontKey, onLeadingTabFlush, trailing, afterTabs }: TrayTabsProps) {
+export function TrayTabs({ tabs, frontKey, panelId, onLeadingTabFlush, trailing, afterTabs }: TrayTabsProps) {
   const frontIndex = tabs.findIndex(tab => tab.key === frontKey)
   const [capacity, setCapacity] = useState(Number.POSITIVE_INFINITY)
   const shown = shownTabs(tabs, frontIndex, capacity)
   const shownFront = shown.findIndex(tab => tab.key === frontKey)
+  const frontButton = useRef<HTMLButtonElement>(null)
+  const pendingFocus = useRef<string | null>(null)
+  useLayoutEffect(() => {
+    if (pendingFocus.current === frontKey && frontKey !== null) {
+      frontButton.current?.focus()
+      pendingFocus.current = null
+    }
+  }, [frontKey])
+
+  function navigate(event: KeyboardEvent<HTMLButtonElement>, tab: TrayTab) {
+    const index = tabs.indexOf(tab)
+    let next: TrayTab
+    switch (event.key) {
+      case 'ArrowLeft': next = tabs[(index - 1 + tabs.length) % tabs.length]; break
+      case 'ArrowRight': next = tabs[(index + 1) % tabs.length]; break
+      case 'Home': next = tabs[0]; break
+      case 'End': next = tabs[tabs.length - 1]; break
+      default: return
+    }
+    event.preventDefault()
+    if (next.key === frontKey) frontButton.current?.focus()
+    else pendingFocus.current = next.key
+    next.onSelect()
+  }
   return (
     <DrawerTabStrip
       inset="sm"
@@ -82,6 +107,7 @@ export function TrayTabs({ tabs, frontKey, onLeadingTabFlush, trailing, afterTab
           onSelect={tab.onSelect}
           className={cn('group/item gap-2 pr-1.5', index === frontIndex && 'bg-muted/60')}
           data-testid="tray-tab-all-item"
+          aria-current={index === frontIndex || undefined}
           data-active={index === frontIndex || undefined}
         >
           <span className="relative flex shrink-0 items-center">
@@ -109,6 +135,7 @@ export function TrayTabs({ tabs, frontKey, onLeadingTabFlush, trailing, afterTab
           )}
         </DropdownMenuItem>
       ))}
+      label="Tray tabs"
       testId="tray-tab"
     >
       {(reveal) =>
@@ -130,7 +157,11 @@ export function TrayTabs({ tabs, frontKey, onLeadingTabFlush, trailing, afterTab
                 >
                   <button
                     type="button"
+                    ref={isFront ? frontButton : undefined}
+                    aria-pressed={isFront}
+                    aria-controls={panelId}
                     onClick={tab.onSelect}
+                    onKeyDown={event => navigate(event, tab)}
                     // A clipped tab is still in the tab order, and the strip cannot
                     // rely on the browser to reveal it during a smooth scroll of its
                     // own; bring it in explicitly.
@@ -156,7 +187,7 @@ export function TrayTabs({ tabs, frontKey, onLeadingTabFlush, trailing, afterTab
                       aria-label={`Close ${tab.label}`}
                       onClick={tab.onClose}
                       className={cn(
-                        'shrink-0 rounded-icon p-0.5 text-muted-foreground transition-opacity hover:bg-muted-foreground/20 hover:text-foreground group-hover:opacity-100 touch:opacity-100',
+                        'shrink-0 rounded-icon p-0.5 text-muted-foreground transition-opacity hover:bg-muted-foreground/20 hover:text-foreground group-hover:opacity-100 focus:opacity-100 touch:opacity-100',
                         // The front tab keeps its close visible; the rest reveal it on hover.
                         isFront ? 'opacity-100' : 'opacity-0',
                       )}
