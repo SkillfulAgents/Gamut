@@ -380,3 +380,25 @@ describe('MCP installation token redaction', () => {
     expect(JSON.stringify(crumb)).not.toContain(token)
   })
 })
+
+describe('MCP OAuth credential redaction', () => {
+  const jwt = 'eyJ0eXAiOiJhdCtqd3QiLCJhbGciOiJFZERTQSJ9.eyJzdWIiOiJ1c2VyIiwiYXVkIjoiaHR0cHM6Ly94L21jcCJ9.sLyv_xtPLUeBlUf0mwnE4NDTkwDNeamyZR0zJQWD41S46B'
+  const refresh = 'gamut_rt_sZXYmVoJcoFAIhCqfChMDTltNrwoMgbd'
+
+  it('replaces access tokens, refresh tokens, codes and verifiers', () => {
+    expect(redactMcpTokens(`Bearer ${jwt}`)).toBe('Bearer [redacted-jwt]')
+    expect(redactMcpTokens(`refresh ${refresh} failed`)).toBe('refresh gamut_rt_[redacted] failed')
+    expect(redactMcpTokens('grant_type=authorization_code&code=9OjesJgY&code_verifier=abc123&redirect_uri=x'))
+      .toBe('grant_type=authorization_code&code=[redacted]&code_verifier=[redacted]&redirect_uri=x')
+    expect(redactMcpTokens('http://127.0.0.1:5/callback?code=abc&state=s')).toBe('http://127.0.0.1:5/callback?code=[redacted]&state=s')
+    expect(redactMcpTokens('grant_type=refresh_token&refresh_token=opaque123')).toBe('grant_type=refresh_token&refresh_token=[redacted]')
+    expect(redactMcpTokens('the error code was 42')).toBe('the error code was 42')
+  })
+
+  it('takes an access token out of an event raised while handling /mcp', async () => {
+    initializeProvider()
+    const event = { type: undefined, request: { url: 'http://localhost:47892/mcp', method: 'POST', headers: { authorization: `Bearer ${jwt}` } } }
+    const sent = await beforeSend()(event, {})
+    expect(JSON.stringify(sent)).not.toContain(jwt)
+  })
+})

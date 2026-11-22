@@ -9,8 +9,14 @@ import { userXAgentCaller, type UserXAgentCaller } from '@shared/lib/services/x-
 import type { VolumeViewer } from '@shared/lib/services/volume-service'
 import type { McpToolScope } from './tool-definition'
 
-/** How the request was authenticated. The OAuth PR adds its own kind. */
-export type McpCredential = { kind: 'installation-token' }
+/**
+ * How the request was authenticated: the installation token (no auth mode),
+ * or an OAuth access token issued to a client (auth mode). The client's name
+ * is the one it registered with, which it chose itself.
+ */
+export type McpCredential =
+  | { kind: 'installation-token' }
+  | { kind: 'oauth'; clientId: string; clientName: string }
 
 export interface McpCallContext {
   /** The person the call acts for: `local` without auth mode. */

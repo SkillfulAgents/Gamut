@@ -18,6 +18,7 @@ import { auditSessionCreated, resolveSessionCreationMethod } from './session-aud
 import { getGenericOAuthProviderConfigs, type GenericOAuthProviderConfig } from './provider-config'
 import { lazyGenericOAuth } from './lazy-generic-oauth'
 import { oidcIssuerPolicy } from './oidc-issuer-policy'
+import { MCP_OAUTH_DISABLED_PATHS, mcpOAuthPlugins } from '@shared/lib/mcp-server/oauth/oauth-plugins'
 
 // Re-export isAuthMode from its own file (no better-auth imports)
 // so consumers that only need the check don't pull in ESM deps.
@@ -109,6 +110,15 @@ function createAuthInstance({ authSettings, trustedOrigins, baseURL, oauthProvid
         session: schema.authSession,
         account: schema.authAccount,
         verification: schema.verification,
+        // The MCP authorization server (mcp-server/oauth/oauth-plugins.ts).
+        jwks: schema.jwks,
+        oauthClient: schema.oauthClient,
+        oauthResource: schema.oauthResource,
+        oauthClientResource: schema.oauthClientResource,
+        oauthRefreshToken: schema.oauthRefreshToken,
+        oauthAccessToken: schema.oauthAccessToken,
+        oauthConsent: schema.oauthConsent,
+        oauthClientAssertion: schema.oauthClientAssertion,
       },
     }),
     // A session is read with its user in one query (the relations are in db/schema.ts).
@@ -184,7 +194,13 @@ function createAuthInstance({ authSettings, trustedOrigins, baseURL, oauthProvid
       // Run after genericOAuth's before hook so recovered discovery is checked
       // on the same request, before authorization or identity provisioning.
       ...(oauthPlugin ? [oauthPlugin, oidcIssuerPolicy()] : []),
+      // This deployment as the MCP OAuth authorization server. None when the
+      // base URL cannot be one (plain http off loopback).
+      ...mcpOAuthPlugins(baseURL),
     ],
+    // Endpoints of the MCP OAuth plugins this deployment does not serve
+    // (oauth-plugins.ts). Disabled even when the plugins are not added.
+    disabledPaths: MCP_OAUTH_DISABLED_PATHS,
     secret,
     baseURL,
     // When trustedOrigins is explicitly configured, use that list.

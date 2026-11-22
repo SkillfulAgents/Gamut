@@ -24,7 +24,7 @@ export function authInfoFor(ctx: McpCallContext): AuthInfo {
   return {
     // Not the credential: the handler never sees it, and nothing here needs it.
     token: ctx.credential.kind,
-    clientId: ctx.credential.kind,
+    clientId: ctx.credential.kind === 'oauth' ? ctx.credential.clientId : ctx.credential.kind,
     scopes: ctx.scopes.map((scope) => `gamut:${scope}`),
     extra: { [CONTEXT_KEY]: ctx },
   }

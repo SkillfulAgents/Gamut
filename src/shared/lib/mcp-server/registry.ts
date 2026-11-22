@@ -42,6 +42,16 @@ export function clientNameOf(context: ServerContext | undefined): string | null 
   return typeof name === 'string' && name.trim() ? name.trim().slice(0, CLIENT_NAME_MAX_CHARS) : null
 }
 
+/**
+ * The client a call is attributed to (audit rows, session provenance). With
+ * OAuth, the name the client registered under, which every protocol era
+ * carries (the token names the client); otherwise what the request says.
+ */
+export function callerClientName(ctx: McpCallContext, context: ServerContext | undefined): string | null {
+  if (ctx.credential.kind === 'oauth') return ctx.credential.clientName
+  return clientNameOf(context)
+}
+
 /** Progress notifications for this call, when the client sent a progress token. */
 function progressSender(context: ServerContext | undefined): McpToolCall['progress'] {
   const token = context?.mcpReq?._meta?.progressToken
@@ -71,7 +81,7 @@ export function registerTools(server: McpServer, ctx: McpCallContext, tools: rea
         annotations: { title: tool.title, ...tool.annotations },
       },
       async (args: unknown, context?: ServerContext) => {
-        const clientName = clientNameOf(context)
+        const clientName = callerClientName(ctx, context)
         let target: McpAuditTarget = auditTargetOf(args)
         // Counted first: every call that can write an audit row has been
         // admitted, so refusals cannot flood the audit log uncounted.

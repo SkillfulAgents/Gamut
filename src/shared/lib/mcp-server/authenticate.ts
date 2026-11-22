@@ -1,9 +1,9 @@
 /**
  * The endpoint's authentication step: an incoming `/mcp` request becomes the
- * context it acts for, or the response that refuses it. This is the seam the
- * OAuth PR fills for auth mode (verify the access token, load the user, require
- * an active account); without auth mode the one credential is the
- * installation token and the call acts as the local user.
+ * context it acts for, or the response that refuses it. In auth mode the one
+ * credential is an OAuth access token this deployment issued
+ * (oauth/access-token.ts); without auth mode it is the installation token and
+ * the call acts as the local user.
  */
 import { isAuthMode } from '@shared/lib/auth/mode'
 import { resolvePublicAppBaseUrl } from '@shared/lib/agent-integrations/app-link'
@@ -41,8 +41,9 @@ async function publicBaseUrlOf(request: Request): Promise<string> {
 
 export async function authenticateMcpRequest(request: Request): Promise<McpAuthentication> {
   if (isAuthMode()) {
-    // OAuth lands with the auth-mode PR; until then the route is not served there.
-    return { ok: false, response: new Response(JSON.stringify({ error: 'Not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } }) }
+    // OAuth access tokens only: the installation token and sessions are refused (oauth/access-token.ts).
+    const { authenticateOAuthMcpRequest } = await import('./oauth/access-token')
+    return authenticateOAuthMcpRequest(request)
   }
   const token = bearerTokenOf(request)
   if (!token) return { ok: false, response: unauthorized('Send the installation token from Gamut Settings → MCP Server as "Authorization: Bearer <token>".') }
