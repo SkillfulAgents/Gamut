@@ -38,6 +38,9 @@ vi.mock('@shared/lib/agent-actor/registry', () => ({
         list: async (options?: { excludeAutomated?: boolean }) => (actors.sessions[slug] ?? [])
           .filter((session) => !(options?.excludeAutomated && session.hidden))
           .map(({ hidden: _hidden, ...session }) => ({ ...session, agentSlug: slug })),
+        readMetadata: async () => Object.fromEntries((actors.sessions[slug] ?? [])
+          .filter((session) => session.hidden)
+          .map((session) => [session.id, { isScheduledExecution: true }])),
         isKnown: async (id: string) => (actors.sessions[slug] ?? []).some((session) => session.id === id),
         live: async () => ({ isActive: false, isAwaitingInput: false }),
       },
@@ -237,7 +240,7 @@ describe('both protocol eras, raw JSON-RPC', () => {
 
     const listed = await legacy('tools/list')
     expect(listed.result.tools.map((tool: { name: string }) => tool.name).sort()).toEqual(
-      ['get_guide', 'list_agents', 'list_drive_files', 'list_drives', 'list_sessions', 'read_drive_file', 'read_session'],
+      ['ask_team_brain', 'get_file_download', 'get_guide', 'invoke_agent', 'list_agents', 'list_drive_files', 'list_drives', 'list_sessions', 'prepare_file_upload', 'read_drive_file', 'read_session', 'wait_for_session'],
     )
     const called = await callTool('get_guide', {})
     expect(called.structuredContent.topic).toBe('overview')
@@ -251,7 +254,7 @@ describe('both protocol eras, raw JSON-RPC', () => {
     expect(discovered.result.instructions).toBe(SERVER_INSTRUCTIONS)
 
     const listed = await modern('tools/list')
-    expect(listed.result.tools).toHaveLength(7)
+    expect(listed.result.tools).toHaveLength(12)
     const called = await modern('tools/call', { name: 'list_agents', arguments: {} })
     expect(called.result.isError).toBeFalsy()
     expect(called.result.structuredContent.agents.map((agent: { name: string }) => agent.name).sort()).toEqual(['Alpha', 'Brain'])
@@ -264,12 +267,15 @@ describe('both protocol eras, raw JSON-RPC', () => {
 })
 
 describe('the tools', () => {
-  it('every tool has a title, a read-only hint, a name within 64 characters and an output schema', async () => {
+  it('every tool has a title, honest hints, a name within 64 characters and an output schema', async () => {
     const { result } = await legacy('tools/list')
+    // The tools that make an agent act (or stage a file for it) are not read-only; none deletes anything.
+    const acting = new Set(['invoke_agent', 'ask_team_brain', 'prepare_file_upload'])
     for (const tool of result.tools) {
       expect(tool.name.length).toBeLessThanOrEqual(64)
       expect(tool.title).toBeTruthy()
-      expect(tool.annotations).toMatchObject({ readOnlyHint: true, destructiveHint: false, title: tool.title })
+      expect(tool.annotations).toMatchObject({ readOnlyHint: !acting.has(tool.name), destructiveHint: false, title: tool.title })
+      if (tool.name === 'invoke_agent' || tool.name === 'ask_team_brain') expect(tool.annotations).toMatchObject({ openWorldHint: true, idempotentHint: false })
       expect(tool.outputSchema?.type).toBe('object')
       expect(tool.description.length).toBeGreaterThan(20)
     }

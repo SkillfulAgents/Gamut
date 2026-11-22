@@ -500,3 +500,26 @@ export async function resolveSignedUpload(userId: string, agentSlug: string, upl
   const entry = await appState().get(uploadKey(userId, canonical, uploadId))
   return entry?.value.state === 'completed' ? entry.value.result : null
 }
+
+/**
+ * A completed signed upload taken for one use: what `resolveSignedUpload`
+ * answers, with its record consumed in the same step (on the revision read),
+ * so of two calls attaching the same upload id exactly one gets it. Null as
+ * `resolveSignedUpload` is, and for an id already taken. The file stays in
+ * the workspace; only the id is spent.
+ */
+export async function takeSignedUpload(userId: string, agentSlug: string, uploadId: string): Promise<SignedUploadResult | null> {
+  if (!userId || !agentSlug || !uploadId) return null
+  let canonical: string
+  try {
+    canonical = await requireAgentRole(await principalFor(userId, Date.now()), agentSlug, 'user')
+  } catch (error) {
+    if (error instanceof SignedFileUrlError) return null
+    throw error
+  }
+  const key = uploadKey(userId, canonical, uploadId)
+  const entry = await appState().get(key)
+  if (entry?.value.state !== 'completed') return null
+  const taken = await appState().consume(key, { revision: entry.revision })
+  return taken.consumed ? entry.value.result : null
+}

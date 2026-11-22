@@ -7,6 +7,7 @@
 import { isAuthMode } from '@shared/lib/auth/mode'
 import { userXAgentCaller, type UserXAgentCaller } from '@shared/lib/services/x-agent/caller'
 import type { VolumeViewer } from '@shared/lib/services/volume-service'
+import type { McpToolScope } from './tool-definition'
 
 /** How the request was authenticated. The OAuth PR adds its own kind. */
 export type McpCredential = { kind: 'installation-token' }
@@ -19,6 +20,11 @@ export interface McpCallContext {
   /** Where a client reaches this app (no trailing slash), for links handed out. */
   publicBaseUrl: string
   credential: McpCredential
+  /**
+   * What the credential grants: `read`, and `run` to make agents act. The
+   * installation token grants both; an OAuth token grants what its scopes say.
+   */
+  scopes: readonly McpToolScope[]
 }
 
 /** The x-agent service's caller for this person (role checks, no agent policy). */

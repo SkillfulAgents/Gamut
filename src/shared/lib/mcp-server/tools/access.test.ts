@@ -28,6 +28,7 @@ vi.mock('@shared/lib/agent-actor/registry', () => ({
       live: async () => ({ container: { status: 'stopped', port: null, healthWarnings: [], stale: false, idleSince: null }, activeSessionIds: [] }),
       sessions: {
         list: async () => [{ id: 's1', agentSlug: slug, name: 'One', createdAt: new Date(1), lastActivityAt: new Date(2) }],
+        readMetadata: async () => ({}),
         isKnown: async (id: string) => id === 's1',
         live: async () => ({ isActive: false, isAwaitingInput: false }),
       },
@@ -42,18 +43,18 @@ import { runTool, jsonResult } from '../tool-result'
 import { listDriveFiles, listDrives, readDriveFile } from './drive-tools'
 import { listAgents } from './agent-tools'
 import { listSessions, readSession } from './session-tools'
-import type { McpToolDefinition } from '../tool-definition'
+import { detachedCall, type McpToolDefinition } from '../tool-definition'
 
 let root: string
 let privateDrive: string
 let publicDrive: string
 
 function person(userId: string, isAdmin = false): McpCallContext {
-  return { userId, isAdmin, publicBaseUrl: 'https://gamut.test', credential: { kind: 'installation-token' } }
+  return { userId, isAdmin, publicBaseUrl: 'https://gamut.test', credential: { kind: 'installation-token' }, scopes: ['read', 'run'] }
 }
 
 async function call(tool: McpToolDefinition<any, any>, args: Record<string, unknown>, ctx: McpCallContext) {
-  const result = await runTool(tool.name, async () => jsonResult(await tool.handler(tool.input.parse(args), ctx)))
+  const result = await runTool(tool.name, async () => jsonResult(await tool.handler(tool.input.parse(args), ctx, detachedCall())))
   return { error: result.isError ? (result.content[0] as { text: string }).text : null, value: result.structuredContent as any }
 }
 

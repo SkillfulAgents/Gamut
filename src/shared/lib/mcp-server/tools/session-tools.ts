@@ -37,7 +37,7 @@ function refusal(failure: XAgentFailure): McpToolError {
 export const listSessions = defineTool({
   name: 'list_sessions',
   title: 'List agent sessions',
-  description: 'An agent\'s sessions (conversations), newest first, as the Gamut app lists them: session_id, name, when it started and was last active, and whether the agent is working in it now. Pass a session_id to read_session for its transcript.',
+  description: 'An agent\'s sessions (conversations), newest first: what the Gamut app lists, plus the sessions you started through this server. session_id, name, when it started and was last active, and whether the agent is working in it now. Pass a session_id to read_session for its transcript.',
   scope: 'read',
   input: z.object({
     agent: agentRefSchema,
@@ -58,7 +58,15 @@ export const listSessions = defineTool({
   }),
   annotations: READ_ONLY_ANNOTATIONS,
   async handler({ agent, offset = 0, limit = SESSIONS_PAGE_SIZE }, ctx) {
-    const result = await getTargetSessions(xAgentCallerFor(ctx), { slug: agent, offset, limit, excludeAutomated: true })
+    const result = await getTargetSessions(xAgentCallerFor(ctx), {
+      slug: agent,
+      offset,
+      limit,
+      // What the app lists, plus the sessions this person started through MCP
+      // (hidden there until promoted), so a client can find its own work.
+      excludeAutomated: true,
+      alsoIncludeHidden: (metadata) => metadata.mcpInvocation?.userId === ctx.userId,
+    })
     if (!result.ok) throw refusal(result)
     const sessions = result.value.sessions.map((session) => ({
       session_id: session.id,

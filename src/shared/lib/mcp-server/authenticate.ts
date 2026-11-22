@@ -56,6 +56,8 @@ export async function authenticateMcpRequest(request: Request): Promise<McpAuthe
       isAdmin: true,
       publicBaseUrl: await publicBaseUrlOf(request),
       credential: { kind: 'installation-token' },
+      // The token stands for the person running Gamut, who may do both.
+      scopes: ['read', 'run'],
     },
   }
 }
