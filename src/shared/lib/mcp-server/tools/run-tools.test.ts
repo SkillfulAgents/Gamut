@@ -123,7 +123,7 @@ vi.mock('@shared/lib/agent-actor/registry', () => ({
             const { WorkspaceFileError } = await import('@shared/lib/agent-actor/workspace-path')
             const bytes = fake.state.files.get(`${slug}:${path.replace(/^\/workspace\//, '')}`)
             if (!bytes) throw new WorkspaceFileError('not-found')
-            return { size: bytes.byteLength, stream: new Response(bytes).body! }
+            return { size: bytes.byteLength, stream: new Blob([bytes as Uint8Array<ArrayBuffer>]).stream() }
           },
         },
       }
@@ -149,6 +149,7 @@ import type { McpServer, ServerContext } from '@modelcontextprotocol/server'
 import { mutateSettings } from '@shared/lib/config/settings'
 import { sessionOrigin, isHiddenAutomatedSession } from '@shared/lib/services/session-visibility'
 import { sessionMetadataSchema } from '@shared/lib/services/session-metadata-schema'
+import type { SessionMetadata } from '@shared/lib/types/agent'
 import { authorizeSignedFileRequest, storeSignedUpload } from '@shared/lib/signed-file-urls/signed-file-urls'
 import type { McpCallContext } from '../context'
 import { registerTools } from '../registry'
@@ -337,7 +338,7 @@ describe('the mcp origin', () => {
     const result = await registered(person('alice'))('invoke_agent', { agent: 'alpha', prompt: 'hi' }, 'Claude Code')
     const meta = fake.state.sessions.get(result.structuredContent.session_id)!.metadata
     expect(meta.mcpInvocation).toEqual({ userId: 'alice', clientName: 'Claude Code' })
-    const parsed = sessionMetadataSchema.parse(meta)
+    const parsed = sessionMetadataSchema.parse(meta) as SessionMetadata
     expect(sessionOrigin(parsed)).toBe('mcp')
     expect(isHiddenAutomatedSession(parsed)).toBe(true)
     expect(isHiddenAutomatedSession({ ...parsed, promotedToInteractive: true })).toBe(false)
