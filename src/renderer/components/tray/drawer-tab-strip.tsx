@@ -5,6 +5,7 @@ import { cn } from '@shared/lib/utils/cn'
 
 interface DrawerTabStripProps {
   tabCount: number
+  label?: string
   /** Match the inset of the content card below the tabs. */
   inset?: 'sm' | 'md'
   activeIndex: number
@@ -45,6 +46,7 @@ const AFTER_TABS_PX = 44
 
 export function DrawerTabStrip({
   tabCount,
+  label,
   inset = 'md',
   activeIndex,
   onLeadingTabFlush,
@@ -170,6 +172,8 @@ export function DrawerTabStrip({
 
   return (
     <div
+      role={label ? 'group' : undefined}
+      aria-label={label}
       // The first tab's left edge meets the content card's square corner.
       className={cn(
         'group/strip relative flex shrink-0 items-end pt-1.5',

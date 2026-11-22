@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { useState } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -16,7 +17,7 @@ function fakeOverflow(crowded: boolean) {
   HTMLElement.prototype.scrollTo = vi.fn() as HTMLElement['scrollTo']
 }
 
-const tab = (key: string, label: string, onSelect = vi.fn(), onClose?: () => void): TrayTab => ({ key, kind: 'file', label, icon: null, onSelect, onClose })
+const tab = (key: string, label: string, onSelect: () => void = vi.fn(), onClose?: () => void): TrayTab => ({ key, kind: 'file', label, icon: null, onSelect, onClose })
 
 describe('TrayTabs overflow', () => {
   it('keeps the front tab on show when only some fit', () => {
@@ -32,6 +33,26 @@ describe('TrayTabs overflow', () => {
     render(<TrayTabs tabs={[tab('a', 'Alpha'), tab('b', 'Beta')]} frontKey="a" />)
     expect(screen.queryByTestId('tray-tab-all')).toBeNull()
     expect(screen.queryByTestId('tray-tab-arrows')).toBeNull()
+  })
+
+  it('announces the selected tab and moves keyboard focus to peers in overflow', async () => {
+    fakeOverflow(true)
+    function Navigation() {
+      const [front, select] = useState('Alpha')
+      return <TrayTabs tabs={['Alpha', 'Beta', 'Gamma'].map(label => tab(label, label, () => select(label)))} frontKey={front} />
+    }
+    render(<Navigation />)
+    const user = userEvent.setup()
+    const group = within(screen.getByRole('group', { name: 'Tray tabs' }))
+    group.getByRole('button', { name: 'Alpha', pressed: true }).focus()
+    await user.keyboard('{ArrowRight}')
+    expect(group.getByRole('button', { name: 'Beta', pressed: true })).toHaveFocus()
+    await user.keyboard('{End}')
+    expect(group.getByRole('button', { name: 'Gamma', pressed: true })).toHaveFocus()
+    await user.keyboard('{ArrowRight}')
+    expect(group.getByRole('button', { name: 'Alpha', pressed: true })).toHaveFocus()
+    await user.keyboard('{ArrowLeft}{Home}')
+    expect(group.getByRole('button', { name: 'Alpha', pressed: true })).toHaveFocus()
   })
 
   it('swaps the scroll arrows for a chevron that lists every tab and picks one', async () => {

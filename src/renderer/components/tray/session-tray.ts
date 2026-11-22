@@ -78,7 +78,8 @@ export class SessionTray {
   openUtility = <K extends UtilityId>(id: K, target?: TrayUtilityTargets[K]) => {
     const resident = this.residents.find(entry => entry.id === id)
     const resourceKey = resident?.keyFor?.(target ?? null)
-    const key = resourceKey === undefined ? `utility:${id}` : `utility:${id}:${resourceKey}`
+    const namespace = `utility:${encodeURIComponent(id)}`
+    const key = resourceKey === undefined ? namespace : `${namespace}:${resourceKey}`
     const previous = this.state.tabs.find(tab => tab.key === key)
     this.open({ kind: 'utility', id, key, target: target === undefined && previous?.kind === 'utility' ? previous.target : target ?? null })
   }

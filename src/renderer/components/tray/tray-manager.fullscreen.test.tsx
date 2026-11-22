@@ -9,6 +9,7 @@ vi.mock('@renderer/components/browser/browser-tray-content', () => ({
   BrowserTrayContent: () => <div data-testid="browser-drawer-panel" />,
 }))
 vi.mock('@renderer/components/file-preview/file-preview-tray-content', () => ({ FilePreviewTrayContent: () => null }))
+vi.mock('./tray-empty-state', () => ({ TrayEmptyState: () => null }))
 vi.mock('@renderer/components/workflow/workflow-tray-content', () => ({ WorkflowTrayContent: () => null }))
 vi.mock('@renderer/context/file-preview-context', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@renderer/context/file-preview-context')>()),
@@ -60,6 +61,19 @@ describe('TrayManager full screen', () => {
     sidebar.open = true
     sidebar.setOpen.mockClear()
     localStorage.clear()
+  })
+
+  it('returns keyboard focus to a neighbor after close and the opener after the last tab', async () => {
+    const user = userEvent.setup()
+    render(<TrayManager agentSlug="a" sessionId="s" browserActive={false} persistent />)
+    await user.click(screen.getByTestId('tray-show'))
+    await user.click(screen.getByTestId('tray-new-tab'))
+    screen.getAllByTestId('new-tab-close')[1].focus()
+    await user.keyboard('{Enter}')
+    expect(screen.getByRole('button', { name: 'New tab', pressed: true })).toHaveFocus()
+    screen.getByTestId('new-tab-close').focus()
+    await user.keyboard('{Enter}')
+    expect(screen.getByTestId('tray-show')).toHaveFocus()
   })
 
   it('leaves full screen and restores the sidebar when the panel is hidden, and reopens at normal size', async () => {

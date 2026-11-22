@@ -12,6 +12,7 @@ declare module './tray-resident' {
   interface TrayUtilityTargets {
     collectionFixture: string | null
     resourceFixture: string | null
+    'resourceFixture:child': string | null
   }
 }
 
@@ -70,6 +71,16 @@ describe('session tray navigation', () => {
     tray.close(notes)
     expect(tray.snapshot().selected).toBe(launcher)
     expect(tray.snapshot().tabs.map(tab => tab.kind)).toEqual(['browser', 'new'])
+  })
+
+  it('keeps a resident namespace distinct from a resource with the same name', () => {
+    const components = { Icon: () => null, Panel: () => null }
+    const resources = defineTrayResident({ id: 'resourceFixture', label: 'Resources', keyFor: item => item ?? 'list', ...components })
+    const child = defineTrayResident({ id: 'resourceFixture:child', label: 'Child', ...components })
+    const tray = new SessionTray([resources, child])
+    tray.openUtility('resourceFixture', 'child')
+    tray.openUtility('resourceFixture:child')
+    expect(tray.snapshot().tabs).toHaveLength(2)
   })
 
   it('lets a resident group its details or give each resource a peer tab', () => {
