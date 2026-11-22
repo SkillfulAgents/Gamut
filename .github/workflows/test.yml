@@ -303,7 +303,8 @@ jobs:
   # Suites that need a server and data dir of their own, run back to back.
   e2e-isolated-suites:
     runs-on: blacksmith-16vcpu-ubuntu-2404
-    timeout-minutes: 20
+    # 20 before the MCP suite; it adds a server boot, two conformance runs and two CLI installs.
+    timeout-minutes: 25
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -376,6 +377,32 @@ jobs:
           set -o pipefail
           mkdir -p test-results
           E2E_MOCK=true npx playwright test --config=playwright.radix.config.ts --project=radix-chromium --project=radix-chromium-touch --retries=0 2>&1 | tee test-results/radix-chromium.log
+
+      # The MCP server (/mcp) on its own server and data dir: the suite switches
+      # the endpoint off and regenerates its token mid-run. Besides the SDK
+      # clients it runs the pinned MCP conformance suite and real Claude Code and
+      # Codex binaries (pinned below) against a stub model: no account, no secret,
+      # no model call.
+      - name: Install pinned agent CLIs for the MCP suite
+        id: mcp_clis
+        if: ${{ !cancelled() }}
+        run: npm install --no-save --no-package-lock --prefix "$RUNNER_TEMP/agent-clis" @anthropic-ai/claude-code@2.1.325 @openai/codex@0.167.0
+
+      - name: Run MCP server E2E suite
+        if: ${{ !cancelled() }}
+        env:
+          PORT: '3000'
+          SUPERAGENT_DATA_DIR: .e2e-data/mcp
+          PLAYWRIGHT_OUTPUT_DIR: test-results/mcp
+          PLAYWRIGHT_HTML_REPORT: playwright-report/mcp
+          # A missing CLI fails the suite here instead of skipping its tests.
+          MCP_HARNESS_REQUIRED: '1'
+        run: |
+          set -o pipefail
+          mkdir -p test-results
+          export CLAUDE_BIN="$RUNNER_TEMP/agent-clis/node_modules/.bin/claude"
+          export CODEX_BIN="$RUNNER_TEMP/agent-clis/node_modules/.bin/codex"
+          npm run test:e2e:mcp 2>&1 | tee test-results/mcp.log
 
       - name: Upload Playwright artifacts
         if: always()

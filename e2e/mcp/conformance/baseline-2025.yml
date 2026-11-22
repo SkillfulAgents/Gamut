@@ -1,0 +1,67 @@
+# Expected failures of @modelcontextprotocol/conformance 0.1.16 (`--suite all`,
+# protocol revisions 2025-06-18 and 2025-11-25) against Gamut's /mcp.
+#
+# 0.1.16 baselines whole scenarios only (check-level entries arrived in 0.2),
+# and counts a WARNING as a failure when a baseline is given. A scenario that
+# starts passing fails the run (stale baseline): remove its entry. Scenarios
+# that must pass, and are therefore absent here: server-initialize, ping,
+# tools-list.
+#
+# Why each fails (from each scenario's checks.json, 2026-11-21):
+# - FIXTURE: the scenario calls a tool of the suite's reference "everything"
+#   server (test_simple_text, test_image_content, …). Gamut does not ship test
+#   tools; "Tool … not found".
+# - NO-CAPABILITY: the scenario exercises a capability Gamut does not declare
+#   (resources, prompts, completions, logging). The server answers -32601
+#   Method not found, which is correct for an undeclared capability.
+# - DESIGN: see the entry.
+server:
+  # NO-CAPABILITY: logging/setLevel.
+  - logging-set-level
+  # NO-CAPABILITY: completion/complete.
+  - completion-complete
+  # FIXTURE: test_simple_text, test_image_content, test_audio_content,
+  # test_embedded_resource, test_multiple_content_types, test_error_handling,
+  # test_tool_with_progress, test_sampling, test_elicitation.
+  - tools-call-simple-text
+  - tools-call-image
+  - tools-call-audio
+  - tools-call-embedded-resource
+  - tools-call-mixed-content
+  - tools-call-error
+  - tools-call-with-progress
+  - tools-call-sampling
+  - tools-call-elicitation
+  # NO-CAPABILITY + FIXTURE: needs logging and its tool.
+  - tools-call-with-logging
+  # FIXTURE: json_schema_2020_12_tool.
+  - json-schema-2020-12
+  # FIXTURE: test_elicitation_sep1034_defaults, test_elicitation_sep1330_enums
+  # (elicitation is out of scope for V1).
+  - elicitation-sep1034-defaults
+  - elicitation-sep1330-enums
+  # DESIGN: stateless serving. These check SSE resumability of a sessionful
+  # server (a session id, a priming event, a retry field); the endpoint keeps
+  # no per-connection state (legacy: 'stateless'), so it has none of them.
+  # Only WARNINGs, no failed checks.
+  - server-sse-polling
+  - server-sse-multiple-streams
+  # NO-CAPABILITY: resources (the portable surface is tools returning text).
+  - resources-list
+  - resources-read-text
+  - resources-read-binary
+  - resources-templates-read
+  - resources-subscribe
+  - resources-unsubscribe
+  # NO-CAPABILITY: prompts.
+  - prompts-list
+  - prompts-get-simple
+  - prompts-get-with-args
+  - prompts-get-embedded-resource
+  - prompts-get-with-image
+  # DESIGN: the server accepts any Host/Origin. Without auth mode the
+  # installation token is what keeps other machines and web pages out (a
+  # rebinding page cannot know it), so no Host/Origin check is added; the spec
+  # (SUP-1569, "Non-auth mode") decided this. The suite also runs through a
+  # header-adding proxy, which rewrites Host.
+  - dns-rebinding-protection
