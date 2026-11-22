@@ -159,6 +159,7 @@ export const SETTINGS_TABS = [
   'logins',
   'capabilities',
   'global-guidance',
+  'mcp-server',
   'computer-use',
   'account-provider',
   'voice',
