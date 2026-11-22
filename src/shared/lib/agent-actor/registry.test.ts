@@ -303,18 +303,37 @@ describe('createAgentRegistry', () => {
       expect(watchOf(registry).isWatching()).toBe(true)
     })
 
-    it('stops reading once the runner confirms the container stopped', async () => {
-      seenStopped().getClient.mockResolvedValue({ isDefinitelyStopped: vi.fn(async () => true) })
-      const registry = createAgentRegistry(fake.deps)
-      await firstRead(registry)
-      expect(watchOf(registry).isWatching()).toBe(false)
+    it('only reads on its first read, and stops reading once the next pass confirms the container stopped', async () => {
+      vi.useFakeTimers()
+      try {
+        const isDefinitelyStopped = vi.fn(async () => true)
+        seenStopped().getClient.mockResolvedValue({ isDefinitelyStopped })
+        const registry = createAgentRegistry(fake.deps)
+        await firstRead(registry)
+        expect(isDefinitelyStopped).not.toHaveBeenCalled()
+        expect(watchOf(registry).isWatching()).toBe(true)
+
+        await vi.advanceTimersByTimeAsync(300_000)
+        expect(isDefinitelyStopped).toHaveBeenCalledTimes(1)
+        expect(watchOf(registry).isWatching()).toBe(false)
+      } finally {
+        vi.useRealTimers()
+      }
     })
 
     it('keeps reading a container read as stopped that the runner does not confirm stopped', async () => {
-      seenStopped()
-      const registry = createAgentRegistry(fake.deps)
-      await firstRead(registry)
-      expect(watchOf(registry).isWatching()).toBe(true)
+      vi.useFakeTimers()
+      try {
+        const isDefinitelyStopped = vi.fn(async () => false)
+        seenStopped().getClient.mockResolvedValue({ isDefinitelyStopped })
+        const registry = createAgentRegistry(fake.deps)
+        await firstRead(registry)
+        await vi.advanceTimersByTimeAsync(300_000)
+        expect(isDefinitelyStopped).toHaveBeenCalledTimes(1)
+        expect(watchOf(registry).isWatching()).toBe(true)
+      } finally {
+        vi.useRealTimers()
+      }
     })
 
     it('marks the container stopped, and keeps reading, when the status cannot be read', async () => {

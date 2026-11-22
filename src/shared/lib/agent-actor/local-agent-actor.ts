@@ -219,10 +219,12 @@ function createIdleAlarmHooks(slug: AgentSlug, deps: LocalActorDeps, runtime: ()
  * What the agent's container watch checks: the agent's container runtime. A
  * failed check is logged, and the next pass runs as usual. The status check
  * ends once the runner confirms the container stopped (`isDefinitelyStopped`):
- * a read that failed reads as stopped too, so until then it is read again. A
- * start turns the checks back on.
+ * a read that failed reads as stopped too, so until then it is read again. The
+ * actor's first read only reads: startup waits for every agent's first read,
+ * so the next pass confirms a stop. A start turns the checks back on.
  */
 function createContainerWatchHooks(slug: AgentSlug, self: () => AgentState): AgentStateHooks['watch'] {
+  let firstRead = true
   return {
     checkHealth: async () => {
       try {
@@ -234,6 +236,8 @@ function createContainerWatchHooks(slug: AgentSlug, self: () => AgentState): Age
     checkStatus: async () => {
       const state = self()
       const runtime = state.runtime()
+      const confirmsStop = !firstRead
+      firstRead = false
       // A stop in flight sets the status itself.
       if (runtime.isStopping()) return
       const info = await runtime.syncAgentStatus().catch((error: unknown) => {
@@ -241,7 +245,7 @@ function createContainerWatchHooks(slug: AgentSlug, self: () => AgentState): Age
         runtime.markAsStopped()
         return null
       })
-      if (!info || info.status === 'running') return
+      if (!info || info.status === 'running' || !confirmsStop) return
       const confirmed = await runtime.getClient().then((client) => client.isDefinitelyStopped()).catch(() => false)
       // Reading was an await: a start may have begun meanwhile, and it turns the checks back on.
       if (confirmed && !runtime.isStarting() && runtime.getCachedInfo().status !== 'running') state.containerWatch.stop()

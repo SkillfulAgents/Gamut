@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 const mockStart = vi.fn().mockResolvedValue({ status: 'running', port: 4001 })
 const mockStop = vi.fn().mockResolvedValue({ forceStopUsed: false, stopped: true })
 const mockGetInfoFromRuntime = vi.fn().mockResolvedValue({ status: 'running', port: 4001 })
+const mockIsDefinitelyStopped = vi.fn().mockResolvedValue(false)
 
 vi.mock('./client-factory', () => ({
   createContainerClient: () => ({
@@ -18,6 +19,7 @@ vi.mock('./client-factory', () => ({
     stop: mockStop,
     stopSync: vi.fn(),
     getInfoFromRuntime: (...args: unknown[]) => mockGetInfoFromRuntime(...args),
+    isDefinitelyStopped: () => mockIsDefinitelyStopped(),
     getStats: vi.fn(),
     fetch: vi.fn(),
     getHostApiBaseUrl: () => 'http://127.0.0.1:3000',
@@ -134,6 +136,7 @@ describe('ContainerRuntime idle alarm', () => {
     vi.clearAllMocks()
     settings.app.autoSleepTimeoutMinutes = 30
     mockGetInfoFromRuntime.mockResolvedValue({ status: 'running', port: 4001 })
+    mockIsDefinitelyStopped.mockResolvedValue(false)
     mockHasActive.mockReturnValue(false)
     mockHasAwaiting.mockReturnValue(false)
     // The agent's live sessions, as its alarm asks them whether it is busy.
@@ -389,6 +392,27 @@ describe('ContainerRuntime idle alarm', () => {
     expect(runtime.getCachedInfo().status).toBe('running')
     expect(alarmOf(SLUG).isArmed()).toBe(true)
     await vi.advanceTimersByTimeAsync(TIMEOUT - 5 * MINUTE + 1)
+    expect(mockStop).toHaveBeenCalledTimes(1)
+  })
+
+  it('reads the container of a start that failed again, and sleeps one the start left running', async () => {
+    // The first read finds nothing running, and the next pass confirms it: the actor stops reading.
+    mockGetInfoFromRuntime.mockResolvedValue({ status: 'stopped', port: null })
+    mockIsDefinitelyStopped.mockResolvedValue(true)
+    await actorOf(SLUG).firstRead
+    await vi.advanceTimersByTimeAsync(5 * MINUTE)
+    expect(actorOf(SLUG).state.containerWatch.isWatching()).toBe(false)
+
+    // The start gives up, and its container comes up anyway.
+    mockStart.mockRejectedValueOnce(new Error('the container did not become ready in time'))
+    await expect(agents.runtime(SLUG).ensureRunning()).rejects.toThrow('did not become ready')
+    expect(actorOf(SLUG).state.containerWatch.isWatching()).toBe(true)
+    mockGetInfoFromRuntime.mockResolvedValue({ status: 'running', port: 4001 })
+
+    await vi.advanceTimersByTimeAsync(5 * MINUTE)
+    expect(agents.runtime(SLUG).getCachedInfo().status).toBe('running')
+    expect(alarmOf(SLUG).isArmed()).toBe(true)
+    await vi.advanceTimersByTimeAsync(TIMEOUT + 1)
     expect(mockStop).toHaveBeenCalledTimes(1)
   })
 

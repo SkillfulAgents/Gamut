@@ -377,7 +377,8 @@ export class ContainerRuntime {
    * Hold a start as the in-flight one until it settles, then arm the idle
    * alarm: a mark made while the start was in flight (the start's own, or a
    * session write) could not arm it, since the alarm is inert during a start.
-   * A start that failed leaves the container not running, so arming is a no-op.
+   * A start that failed is seen as not running, so arming is a no-op, and the
+   * status check reads its container again.
    */
   private async trackStart(startPromise: Promise<ContainerClient>): Promise<void> {
     this.starting = startPromise
@@ -386,6 +387,8 @@ export class ContainerRuntime {
     } catch (error) {
       // Nothing runs on the drives a failed start read, so a mark made during it means nothing.
       if (this.starting === startPromise) this.stale = false
+      // A start that failed can still leave its container running: read it again.
+      if (!this.disposed) this.agent.containerWatch.start()
       throw error
     } finally {
       // A later start that replaced this one clears and arms for itself when it settles.
