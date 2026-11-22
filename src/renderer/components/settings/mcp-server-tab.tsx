@@ -19,12 +19,14 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from '@renderer/components/ui/alert-dialog'
-import { mcpClientSetups } from '@shared/lib/mcp-server/client-setup'
+import { mcpClientSetups, mcpOAuthClientSetups, type McpClientSetup } from '@shared/lib/mcp-server/client-setup'
 import type { McpServerStatusResponse } from '@shared/lib/mcp-server/mcp-server-settings-schema'
+import type { ConnectedMcpClient } from '@shared/lib/mcp-server/oauth/connected-clients'
 
 const CARD_CLASS = 'rounded-card border bg-background divide-y divide-border/50 overflow-hidden'
 const SECTION_HEADING = 'text-xs font-medium text-muted-foreground px-1'
 const QUERY_KEY = ['mcp-server'] as const
+const CLIENTS_QUERY_KEY = ['mcp-server', 'oauth-clients'] as const
 
 async function readStatus(): Promise<McpServerStatusResponse> {
   const response = await apiFetch('/api/mcp-server')
@@ -32,7 +34,13 @@ async function readStatus(): Promise<McpServerStatusResponse> {
   return response.json()
 }
 
-async function send(path: string, init: RequestInit): Promise<McpServerStatusResponse> {
+async function readClients(): Promise<ConnectedMcpClient[]> {
+  const response = await apiFetch('/api/mcp-server/oauth/clients')
+  if (!response.ok) throw new Error('Could not load your connected clients')
+  return ((await response.json()) as { clients: ConnectedMcpClient[] }).clients
+}
+
+async function send<T = McpServerStatusResponse>(path: string, init: RequestInit): Promise<T> {
   const response = await apiFetch(path, init)
   if (!response.ok) {
     const body = await response.json().catch(() => null) as { error?: string } | null
@@ -65,17 +73,33 @@ function CopyButton({ text, label, testId }: { text: string; label: string; test
   )
 }
 
-/**
- * Settings → MCP Server: the switch for `/mcp`, where it is, and the setup to
- * paste into Claude Code, Codex or Cursor, with the installation token in it.
- */
-export function McpServerTab() {
-  const { isAdmin, isAuthMode } = useUser()
-  const canManage = !isAuthMode || isAdmin
-  const queryClient = useQueryClient()
-  const { data: status, isLoading, error } = useQuery({ queryKey: QUERY_KEY, queryFn: readStatus })
+function SetupList({ setups }: { setups: McpClientSetup[] }) {
+  return (
+    <div className={CARD_CLASS}>
+      {setups.map((setup) => (
+        <div key={setup.id} className="space-y-2 px-4 py-3" data-testid={`mcp-setup-${setup.id}`}>
+          <div className="flex items-center gap-3">
+            <div className="min-w-0 flex-1">
+              <div className="text-xs font-medium">{setup.label}</div>
+              <div className="mt-0.5 text-[11px] text-muted-foreground">{setup.hint}</div>
+            </div>
+            <CopyButton text={setup.text} label={`Copy ${setup.label} setup`} testId={`mcp-setup-copy-${setup.id}`} />
+          </div>
+          <pre
+            className="overflow-x-auto whitespace-pre-wrap break-all rounded-md bg-muted px-3 py-2 font-mono text-[11px] leading-relaxed"
+            data-testid={`mcp-setup-text-${setup.id}`}
+          >
+            {setup.text}
+          </pre>
+        </div>
+      ))}
+    </div>
+  )
+}
 
-  const toggle = useMutation({
+function useToggle() {
+  const queryClient = useQueryClient()
+  return useMutation({
     mutationFn: (enabled: boolean) => send('/api/mcp-server/enabled', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
@@ -84,6 +108,171 @@ export function McpServerTab() {
     onSuccess: (next) => queryClient.setQueryData(QUERY_KEY, next),
     onError: (err) => toast.error(err instanceof Error ? err.message : 'The change did not save'),
   })
+}
+
+function ServerRows({ status, canManage, onText, offText }: { status: McpServerStatusResponse; canManage: boolean; onText: string; offText: string }) {
+  const toggle = useToggle()
+  return (
+    <>
+      <div className="flex items-center gap-3 px-4 py-3">
+        <div className="min-w-0 flex-1">
+          <label htmlFor="mcp-server-enabled" className="block cursor-default text-xs font-medium">MCP server</label>
+          <div className="mt-0.5 text-[11px] text-muted-foreground" data-testid="mcp-server-enabled-state">
+            {status.enabled ? onText : offText}
+          </div>
+        </div>
+        <Switch
+          id="mcp-server-enabled"
+          checked={status.enabled}
+          disabled={!canManage || toggle.isPending}
+          onCheckedChange={(checked: boolean) => toggle.mutate(checked)}
+          data-testid="mcp-server-enabled-switch"
+        />
+      </div>
+      <div className="flex items-center gap-3 px-4 py-3">
+        <div className="min-w-0 flex-1">
+          <div className="text-xs font-medium">Endpoint</div>
+          <div className="mt-0.5 break-all font-mono text-[11px] text-muted-foreground" data-testid="mcp-server-endpoint">
+            {status.endpointUrl}
+          </div>
+        </div>
+        <CopyButton text={status.endpointUrl} label="Copy endpoint URL" testId="mcp-server-copy-endpoint" />
+      </div>
+    </>
+  )
+}
+
+function formatWhen(iso: string | null): string {
+  if (!iso) return 'never'
+  const date = new Date(iso)
+  return Number.isNaN(date.getTime()) ? 'unknown' : date.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
+}
+
+const SCOPE_LABEL: Record<string, string> = { 'gamut:read': 'Read', 'gamut:run': 'Run agents' }
+
+function ConnectedClients() {
+  const queryClient = useQueryClient()
+  const { data: clients, isLoading, error } = useQuery({ queryKey: CLIENTS_QUERY_KEY, queryFn: readClients })
+  const revoke = useMutation({
+    mutationFn: (clientId: string) => send<{ revoked: boolean }>('/api/mcp-server/oauth/clients/revoke', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ clientId }),
+    }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: CLIENTS_QUERY_KEY })
+      toast.success('Disconnected. It can no longer use your account.')
+    },
+    onError: (err) => toast.error(err instanceof Error ? err.message : 'Could not disconnect'),
+  })
+
+  return (
+    <div className="space-y-2">
+      <h3 className={SECTION_HEADING}>Your connected clients</h3>
+      <div className={CARD_CLASS} data-testid="mcp-connected-clients">
+        {isLoading ? (
+          <div className="px-4 py-3 text-[11px] text-muted-foreground" role="status">Loading…</div>
+        ) : error || !clients ? (
+          <div className="px-4 py-3 text-[11px] text-destructive">Could not load your connected clients.</div>
+        ) : clients.length === 0 ? (
+          <div className="px-4 py-3 text-[11px] text-muted-foreground" data-testid="mcp-connected-clients-empty">
+            No clients are connected to your account.
+          </div>
+        ) : clients.map((client) => (
+          <div key={client.clientId} className="flex items-start gap-3 px-4 py-3" data-testid="mcp-connected-client">
+            <div className="min-w-0 flex-1 space-y-0.5">
+              <div className="flex flex-wrap items-center gap-x-2 text-xs font-medium">
+                <span className="break-words" data-testid="mcp-connected-client-name">{client.name}</span>
+                <span className="text-[10px] font-normal text-muted-foreground">
+                  {client.registration === 'metadata-document' ? `described by ${client.documentHost}` : 'unverified name'}
+                </span>
+              </div>
+              <div className="text-[11px] text-muted-foreground">
+                Returns to <span className="font-mono">{client.redirectHosts.join(', ') || 'unknown'}</span>
+              </div>
+              <div className="text-[11px] text-muted-foreground" data-testid="mcp-connected-client-scopes">
+                {client.scopes.map((scope) => SCOPE_LABEL[scope] ?? scope).join(' · ') || 'No permissions'}
+              </div>
+              <div className="text-[11px] text-muted-foreground">
+                Connected {formatWhen(client.connectedAt)} · last active {formatWhen(client.lastActiveAt)}
+              </div>
+            </div>
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button variant="outline" size="sm" disabled={revoke.isPending} data-testid="mcp-connected-client-revoke">
+                  Disconnect
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Disconnect {client.name}?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    It stops working at once and must sign in again to reconnect. Sessions it started stay in Gamut.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  <AlertDialogAction onClick={() => revoke.mutate(client.clientId)} data-testid="mcp-connected-client-revoke-confirm">
+                    Disconnect
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+/** Auth mode: an admin's workspace-wide switch, the endpoint, setup without a token, and the person's own clients. */
+function OAuthServerSettings({ status }: { status: McpServerStatusResponse }) {
+  const { isAdmin } = useUser()
+  return (
+    <div className="space-y-6" data-testid="mcp-server-tab">
+      <p className="px-1 text-[11px] leading-relaxed text-muted-foreground" data-testid="mcp-server-intro">
+        Let AI tools like Claude Code, Codex, Cursor and Claude work with this workspace&apos;s agents through MCP: read
+        drives and sessions, ask the Team Brain, and run agents, sending and receiving files. Each tool signs in with
+        your Gamut account and can only do what you can. A tool you let run agents makes them act with their connected
+        accounts.
+      </p>
+
+      <div className="space-y-2">
+        <h3 className={SECTION_HEADING}>Server</h3>
+        <div className={CARD_CLASS}>
+          <ServerRows
+            status={status}
+            canManage={isAdmin}
+            onText="On for the whole workspace: members can connect their tools."
+            offText={isAdmin ? 'Off for the whole workspace: the endpoint does not answer.' : 'Off: an administrator can turn it on for the workspace.'}
+          />
+        </div>
+      </div>
+
+      <div className="space-y-2">
+        <h3 className={SECTION_HEADING}>Connect a client</h3>
+        <SetupList setups={mcpOAuthClientSetups(status.endpointUrl)} />
+        <p className="px-1 text-[11px] leading-relaxed text-muted-foreground" data-testid="mcp-server-reach">
+          No token to copy: the first time a tool connects, your browser opens Gamut to sign in and approve it.
+        </p>
+      </div>
+
+      <ConnectedClients />
+    </div>
+  )
+}
+
+/**
+ * Settings → MCP Server: the switch for `/mcp`, where it is, and the setup to
+ * paste into Claude Code, Codex or Cursor. Without auth mode the setup carries
+ * the installation token; in auth mode each tool signs in (OAuth) and the page
+ * lists the person's connected clients.
+ */
+export function McpServerTab() {
+  const { isAdmin, isAuthMode } = useUser()
+  const canManage = !isAuthMode || isAdmin
+  const queryClient = useQueryClient()
+  const { data: status, isLoading, error } = useQuery({ queryKey: QUERY_KEY, queryFn: readStatus })
 
   const regenerate = useMutation({
     mutationFn: () => send('/api/mcp-server/token/regenerate', { method: 'POST' }),
@@ -99,10 +288,11 @@ export function McpServerTab() {
   if (!status.available) {
     return (
       <p className="px-1 text-xs text-muted-foreground" data-testid="mcp-server-unavailable">
-        The MCP server is not available in this workspace yet.
+        {status.unavailableReason ?? 'The MCP server is not available in this workspace.'}
       </p>
     )
   }
+  if (status.auth === 'oauth') return <OAuthServerSettings status={status} />
 
   const setups = status.token ? mcpClientSetups(status.endpointUrl, status.token) : []
   // Where the server is decides what the page can promise about reaching it.
@@ -120,30 +310,7 @@ export function McpServerTab() {
       <div className="space-y-2">
         <h3 className={SECTION_HEADING}>Server</h3>
         <div className={CARD_CLASS}>
-          <div className="flex items-center gap-3 px-4 py-3">
-            <div className="min-w-0 flex-1">
-              <label htmlFor="mcp-server-enabled" className="block cursor-default text-xs font-medium">MCP server</label>
-              <div className="mt-0.5 text-[11px] text-muted-foreground">
-                {status.enabled ? 'On: clients with the token can connect.' : 'Off: the endpoint does not answer.'}
-              </div>
-            </div>
-            <Switch
-              id="mcp-server-enabled"
-              checked={status.enabled}
-              disabled={!canManage || toggle.isPending}
-              onCheckedChange={(checked: boolean) => toggle.mutate(checked)}
-              data-testid="mcp-server-enabled-switch"
-            />
-          </div>
-          <div className="flex items-center gap-3 px-4 py-3">
-            <div className="min-w-0 flex-1">
-              <div className="text-xs font-medium">Endpoint</div>
-              <div className="mt-0.5 break-all font-mono text-[11px] text-muted-foreground" data-testid="mcp-server-endpoint">
-                {status.endpointUrl}
-              </div>
-            </div>
-            <CopyButton text={status.endpointUrl} label="Copy endpoint URL" testId="mcp-server-copy-endpoint" />
-          </div>
+          <ServerRows status={status} canManage={canManage} onText="On: clients with the token can connect." offText="Off: the endpoint does not answer." />
           <div className="flex items-center gap-3 px-4 py-3">
             <div className="min-w-0 flex-1">
               <div className="text-xs font-medium">Token</div>
@@ -182,25 +349,7 @@ export function McpServerTab() {
 
       <div className="space-y-2">
         <h3 className={SECTION_HEADING}>Connect a client</h3>
-        <div className={CARD_CLASS}>
-          {setups.map((setup) => (
-            <div key={setup.id} className="space-y-2 px-4 py-3" data-testid={`mcp-setup-${setup.id}`}>
-              <div className="flex items-center gap-3">
-                <div className="min-w-0 flex-1">
-                  <div className="text-xs font-medium">{setup.label}</div>
-                  <div className="mt-0.5 text-[11px] text-muted-foreground">{setup.hint}</div>
-                </div>
-                <CopyButton text={setup.text} label={`Copy ${setup.label} setup`} testId={`mcp-setup-copy-${setup.id}`} />
-              </div>
-              <pre
-                className="overflow-x-auto whitespace-pre-wrap break-all rounded-md bg-muted px-3 py-2 font-mono text-[11px] leading-relaxed"
-                data-testid={`mcp-setup-text-${setup.id}`}
-              >
-                {setup.text}
-              </pre>
-            </div>
-          ))}
-        </div>
+        <SetupList setups={setups} />
         <p className="px-1 text-[11px] leading-relaxed text-muted-foreground" data-testid="mcp-server-reach">
           {local
             ? 'The address is this computer\'s, so tools running here can reach it. Web apps such as claude.ai cannot.'

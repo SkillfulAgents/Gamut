@@ -66,6 +66,9 @@ function RootLayoutContent() {
   const search = useRouterState({
     select: (s) => s.location.search as Record<string, unknown>,
   })
+  // The MCP consent page stands alone: a person signing in there for the first
+  // time is connecting a client, not setting up, so the wizard waits.
+  const standalone = useRouterState({ select: (s) => s.location.pathname === '/oauth/consent' })
   const { prompt, template_slug } = lenient(homeSearchSchema)(search)
   const hasAutoOpened = useRef(false)
   // Latched from the URL on first sighting so stripping the params cannot
@@ -122,7 +125,7 @@ function RootLayoutContent() {
   }, [user])
 
   useEffect(() => {
-    if (hasAutoOpened.current) return
+    if (hasAutoOpened.current || standalone) return
     if (!userSettings || !globalSettings) return
 
     if (userSettings.setupCompleted) return
@@ -141,7 +144,7 @@ function RootLayoutContent() {
       setWizardAgentOnly(true)
       openWizard()
     }
-  }, [userSettings, globalSettings, isAuthMode, isAdmin, openWizard])
+  }, [userSettings, globalSettings, isAuthMode, isAdmin, openWizard, standalone])
 
   return (
     <DialogProvider onOpenWizard={openWizard}>
@@ -180,7 +183,7 @@ function RootLayoutContent() {
             {/* Above the wizard ternary: the wizard replaces the outlet, so a
                 consumer inside the outlet may never commit an effect. */}
             <SignupHandoffConsumer />
-            {wizardOpen ? (
+            {wizardOpen && !standalone ? (
               <Suspense fallback={null}>
                 <GettingStartedWizard agentOnly={wizardAgentOnly} onClose={() => setWizardOpen(false)} />
               </Suspense>

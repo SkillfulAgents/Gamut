@@ -3,7 +3,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { apiFetch } from '@renderer/lib/api'
-import { claudeCodeSetup, codexSetup } from '@shared/lib/mcp-server/client-setup'
+import { claudeCodeOAuthSetup, claudeCodeSetup, codexSetup } from '@shared/lib/mcp-server/client-setup'
 import { McpServerTab } from './mcp-server-tab'
 
 vi.mock('@renderer/lib/api', () => ({ apiFetch: vi.fn() }))
@@ -25,17 +25,27 @@ function renderTab() {
 }
 
 describe('McpServerTab', () => {
-  let state: { available: boolean; enabled: boolean; endpointUrl: string; token: string | null }
+  let state: { available: boolean; unavailableReason: string | null; auth: 'installation-token' | 'oauth'; enabled: boolean; endpointUrl: string; token: string | null }
+  let clients: Array<Record<string, unknown>>
 
   beforeEach(() => {
     where.local = true
-    state = { available: true, enabled: true, endpointUrl: ENDPOINT, token: 'gamut_mcp_first' }
+    user.isAdmin = false
+    user.isAuthMode = false
+    state = { available: true, unavailableReason: null, auth: 'installation-token', enabled: true, endpointUrl: ENDPOINT, token: 'gamut_mcp_first' }
+    clients = []
     mockApiFetch.mockReset()
     mockApiFetch.mockImplementation(async (path, init) => {
       if (path === '/api/mcp-server') return json(state)
       if (path === '/api/mcp-server/enabled' && init?.method === 'PUT') {
         state = { ...state, enabled: JSON.parse(String(init.body)).enabled }
         return json(state)
+      }
+      if (path === '/api/mcp-server/oauth/clients') return json({ clients })
+      if (path === '/api/mcp-server/oauth/clients/revoke' && init?.method === 'POST') {
+        const { clientId } = JSON.parse(String(init.body)) as { clientId: string }
+        clients = clients.filter((client) => client.clientId !== clientId)
+        return json({ revoked: true })
       }
       if (path === '/api/mcp-server/token/regenerate' && init?.method === 'POST') {
         state = { ...state, token: 'gamut_mcp_second' }
@@ -79,8 +89,49 @@ describe('McpServerTab', () => {
   })
 
   it('says so where the server is not available', async () => {
-    state = { available: false, enabled: false, endpointUrl: ENDPOINT, token: null }
+    state = { ...state, available: false, unavailableReason: 'Not on https.', enabled: false, token: null }
     renderTab()
-    expect(await screen.findByTestId('mcp-server-unavailable')).toBeInTheDocument()
+    expect(await screen.findByTestId('mcp-server-unavailable')).toHaveTextContent('Not on https.')
+  })
+
+  describe('in auth mode', () => {
+    const OAUTH_ENDPOINT = 'https://gamut.example.com/mcp'
+
+    beforeEach(() => {
+      user.isAuthMode = true
+      where.local = false
+      state = { available: true, unavailableReason: null, auth: 'oauth', enabled: false, endpointUrl: OAUTH_ENDPOINT, token: null }
+      clients = [{
+        clientId: 'c1', name: 'Claude Code (gamut)', registration: 'dynamic', documentHost: null,
+        redirectHosts: ['localhost (this computer)'], scopes: ['gamut:read', 'gamut:run'],
+        connectedAt: '2026-11-20T10:00:00.000Z', lastActiveAt: '2026-11-21T09:00:00.000Z',
+      }]
+    })
+
+    it('shows setup with no token, and a member cannot flip the switch', async () => {
+      renderTab()
+      expect(await screen.findByTestId('mcp-setup-text-claude-code')).toHaveTextContent(claudeCodeOAuthSetup(OAUTH_ENDPOINT))
+      expect(screen.getByTestId('mcp-setup-claude-ai')).toBeInTheDocument()
+      expect(screen.getByTestId('mcp-server-tab').textContent).not.toMatch(/gamut_mcp_|Bearer/)
+      expect(screen.queryByTestId('mcp-server-regenerate')).toBeNull()
+      expect(screen.getByTestId('mcp-server-enabled-switch')).toBeDisabled()
+      expect(screen.getByTestId('mcp-server-enabled-state')).toHaveTextContent('an administrator can turn it on')
+    })
+
+    it('lets an admin turn it on for the workspace', async () => {
+      user.isAdmin = true
+      renderTab()
+      fireEvent.click(await screen.findByTestId('mcp-server-enabled-switch'))
+      await waitFor(() => expect(screen.getByTestId('mcp-server-enabled-state')).toHaveTextContent('On for the whole workspace'))
+    })
+
+    it("lists the person's connected clients and disconnects one behind a confirmation", async () => {
+      renderTab()
+      expect(await screen.findByTestId('mcp-connected-client-name')).toHaveTextContent('Claude Code (gamut)')
+      expect(screen.getByTestId('mcp-connected-client-scopes')).toHaveTextContent('Read · Run agents')
+      fireEvent.click(screen.getByTestId('mcp-connected-client-revoke'))
+      fireEvent.click(await screen.findByTestId('mcp-connected-client-revoke-confirm'))
+      expect(await screen.findByTestId('mcp-connected-clients-empty')).toBeInTheDocument()
+    })
   })
 })

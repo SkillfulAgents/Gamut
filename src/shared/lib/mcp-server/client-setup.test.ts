@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { claudeCodeSetup, codexSetup, cursorSetup, mcpClientSetups, shellQuote } from './client-setup'
+import { claudeCodeOAuthSetup, claudeCodeSetup, codexOAuthSetup, codexSetup, cursorOAuthSetup, cursorSetup, mcpClientSetups, mcpOAuthClientSetups, shellQuote } from './client-setup'
 
 const URL = 'http://localhost:47891/mcp'
 const TOKEN = 'gamut_mcp_abc-DEF_123'
@@ -39,5 +39,21 @@ describe('client setup', () => {
     const setups = mcpClientSetups(URL, TOKEN)
     expect(setups.map((setup) => setup.label)).toEqual(['Claude Code', 'Codex', 'Cursor'])
     for (const setup of setups) expect(setup.text).toContain(TOKEN)
+  })
+})
+
+describe('client setup with OAuth (auth mode)', () => {
+  const ENDPOINT = 'https://gamut.example.com/mcp'
+
+  it('carries no credential, only the endpoint', () => {
+    expect(claudeCodeOAuthSetup(ENDPOINT)).toBe('claude mcp add --transport http gamut "https://gamut.example.com/mcp"')
+    expect(codexOAuthSetup(ENDPOINT)).toBe('codex mcp add gamut --url "https://gamut.example.com/mcp"\ncodex mcp login gamut')
+    expect(JSON.parse(cursorOAuthSetup(ENDPOINT))).toEqual({ mcpServers: { gamut: { url: ENDPOINT } } })
+    const setups = mcpOAuthClientSetups(ENDPOINT)
+    expect(setups.map((setup) => setup.id)).toEqual(['claude-code', 'codex', 'cursor', 'claude-ai'])
+    for (const setup of setups) {
+      expect(setup.text).toContain(ENDPOINT)
+      expect(setup.text).not.toMatch(/Bearer|gamut_mcp_|Authorization/)
+    }
   })
 })
