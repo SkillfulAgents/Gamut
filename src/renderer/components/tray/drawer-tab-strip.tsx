@@ -261,11 +261,12 @@ export function drawerTabClassName(index: number, activeIndex: number, floating 
     index === activeIndex
       ? cn(
           'z-10 min-w-[9.5rem] -mb-px bg-background text-foreground',
-          // On the page the front tab has no edge: its white fill against the page's off-white and a soft upward
-          // shadow join it to the card, with square inside corners. Dark mode has no fill contrast to carry that, so
-          // there it keeps a faint edge. On a rail, an edge and a hint of lift.
+          // The selected tab joins the panel with its fill and shadow, plus a faint outline in dark mode.
           floating
-            ? 'shadow-[0_-1px_3px_-1px_rgba(15,23,42,0.06)] dark:border dark:border-b-0 dark:border-white/5 dark:shadow-none'
+            ? cn(
+                'shadow-[0_-1px_3px_-1px_rgba(15,23,42,0.06)] dark:border dark:border-b-0 dark:shadow-none',
+                index === 0 ? 'tray-leading-tab dark:border-transparent dark:border-r-white/5' : 'dark:border-white/5',
+              )
             : 'border border-b-0 border-black/5 shadow-[0_-1px_2px_rgba(0,0,0,0.04)] dark:border-white/5',
         )
       // Floating, a tab at the back keeps a faint fill of its own, so it reads as a tab and not loose text, and
