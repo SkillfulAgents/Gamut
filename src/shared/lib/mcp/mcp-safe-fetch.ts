@@ -4,7 +4,7 @@
  * check on every Location hop.
  */
 
-import { Agent } from 'undici'
+import { Agent, fetch as undiciFetch } from 'undici'
 import {
   resolveMcpDiscoveryTarget,
   tryParseUrl,
@@ -51,9 +51,11 @@ async function pinnedFetch(
   const pinned = addresses[0]
 
   const agent = new Agent({
+    // undici 8 turns on HTTP/2 by default; remote MCPs keep HTTP/1.1 as before.
+    allowH2: false,
     connect: {
       lookup(_hostname, _options, callback) {
-        // undici 7 invokes lookup with `{ all: true }` and expects an address
+        // undici invokes lookup with `{ all: true }` and expects an address
         // list; the Node dns `(err, address, family)` shape yields undefined IP.
         callback(null, [{ address: pinned.address, family: pinned.family }])
       },
@@ -61,7 +63,8 @@ async function pinnedFetch(
   })
 
   try {
-    return await (fetch as FetchWithDispatcher)(url, {
+    // Node's built-in fetch cannot drive an undici 8 Agent; use the matching fetch.
+    return await (undiciFetch as unknown as FetchWithDispatcher)(url, {
       ...init,
       dispatcher: agent,
       redirect: 'manual',

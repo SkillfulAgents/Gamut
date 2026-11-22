@@ -10,22 +10,22 @@ vi.mock('node:dns/promises', async (importOriginal) => {
   }
 })
 
+const mockFetch = vi.hoisted(() => vi.fn())
+vi.mock('undici', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('undici')>()
+  return { ...actual, fetch: mockFetch }
+})
+
 import { mcpSafeFetch } from './mcp-safe-fetch'
 
 const lookupMock = dnsPromises.lookup as unknown as ReturnType<typeof vi.fn>
 
 describe('mcpSafeFetch', () => {
-  const mockFetch = vi.fn()
-
   beforeEach(() => {
     vi.clearAllMocks()
+    mockFetch.mockReset()
     delete process.env.E2E_MOCK
     lookupMock.mockResolvedValue({ address: '93.184.216.34', family: 4 })
-    vi.stubGlobal('fetch', mockFetch)
-  })
-
-  afterEach(() => {
-    vi.unstubAllGlobals()
   })
 
   it('follows a public redirect and strips Authorization cross-origin', async () => {
@@ -107,8 +107,10 @@ describe('mcpSafeFetch', () => {
 describe('mcpSafeFetch pin (live connect)', () => {
   let originalE2EMock: string | undefined
 
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.clearAllMocks()
+    const { fetch: realFetch } = await vi.importActual<typeof import('undici')>('undici')
+    mockFetch.mockReset().mockImplementation(realFetch)
     originalE2EMock = process.env.E2E_MOCK
     process.env.E2E_MOCK = 'true'
     lookupMock.mockResolvedValue({ address: '127.0.0.1', family: 4 })
@@ -130,6 +132,36 @@ describe('mcpSafeFetch pin (live connect)', () => {
       const res = await mcpSafeFetch(`http://localhost:${port}/mcp`)
       expect(res.status).toBe(200)
       expect(await res.text()).toBe(`host=localhost:${port}`)
+    } finally {
+      await new Promise<void>((resolve, reject) =>
+        server.close((err) => (err ? reject(err) : resolve())),
+      )
+    }
+  })
+
+  it('reads a body to the end when the server closes the socket while the reader is slow', async () => {
+    // Like a Python BaseHTTPRequestHandler MCP server: a Content-Length body, then the socket closes.
+    const body = Buffer.alloc(400_000, 'a')
+    const server = createServer((_req, res) => {
+      res.writeHead(200, { 'Content-Type': 'application/json', 'Content-Length': body.length, Connection: 'close' })
+      res.end(body)
+    })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    const { port } = server.address() as { port: number }
+
+    const readSlowly = async () => {
+      const res = await mcpSafeFetch(`http://localhost:${port}/mcp`, { method: 'POST', body: '{}' })
+      const reader = res.body!.getReader()
+      let length = 0
+      for (let chunk = await reader.read(); !chunk.done; chunk = await reader.read()) {
+        length += chunk.value.length
+        await new Promise((resolve) => setTimeout(resolve, 1))
+      }
+      return length
+    }
+
+    try {
+      expect(await Promise.all(Array.from({ length: 5 }, readSlowly))).toEqual(Array(5).fill(body.length))
     } finally {
       await new Promise<void>((resolve, reject) =>
         server.close((err) => (err ? reject(err) : resolve())),
