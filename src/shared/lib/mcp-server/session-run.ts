@@ -16,6 +16,7 @@
  * provenance.
  */
 import { agentCatalog, agentRegistry } from '@shared/lib/agent-actor'
+import { background } from '@shared/lib/background'
 import { resolveAppLinkContext, withSessionUrl } from '@shared/lib/agent-integrations/app-link'
 import { callerHasRoleOnTarget, userXAgentCaller } from '@shared/lib/services/x-agent/caller'
 import { invokeAgent } from '@shared/lib/services/x-agent/invoke'
@@ -227,9 +228,9 @@ type WaitOutcome = 'settled' | 'awaiting_input' | 'running'
 
 /**
  * Wait for the session to settle (idle) or to wait on the person, until
- * `deadline` or the client goes away. Looks every second, reports progress
- * every few; nothing is left behind when it returns (a look in flight ends
- * within a second on its own).
+ * `deadline` or the client goes away. Looks every second; nothing is left
+ * behind when it returns (a look in flight ends within a second on its own).
+ * Progress is the call's own clock (`withProgress`), not this loop's.
  *
  * `afterDelivery`: the wait follows a prompt (or an answer) this call
  * delivered. An idle session then counts as settled only once the turn is
@@ -245,7 +246,6 @@ async function waitForSettle(
   sessionId: string,
   deadline: number,
   call: McpToolCall,
-  startedAt: number,
   afterDelivery?: { boundaryUuid: string | undefined },
 ): Promise<WaitOutcome> {
   const sessions = agentRegistry.get(slug).sessions
@@ -253,8 +253,6 @@ async function waitForSettle(
   const abortedNow = new Promise<'aborted'>((resolve) => { onAbort = () => resolve('aborted') })
   if (call.signal.aborted) onAbort()
   call.signal.addEventListener('abort', onAbort, { once: true })
-  const totalSeconds = Math.max(1, Math.round((deadline - startedAt) / 1000))
-  let nextProgressAt = Date.now() + PROGRESS_INTERVAL_MS
   let started = !afterDelivery
   try {
     for (;;) {
@@ -270,11 +268,6 @@ async function waitForSettle(
       }
       const remaining = deadline - Date.now()
       if (call.signal.aborted || remaining <= 0) return 'running'
-      if (Date.now() >= nextProgressAt) {
-        nextProgressAt += PROGRESS_INTERVAL_MS
-        const elapsed = Math.round((Date.now() - startedAt) / 1000)
-        await call.progress(elapsed, totalSeconds, `The agent is working (${elapsed}s)`)
-      }
       // One slice: the session going idle (or, not started yet, a pause), the
       // slice's end, or the client leaving. A slice that loses to an abort
       // ends by itself within a second.
@@ -406,6 +399,34 @@ function sessionNameFrom(prompt: string): string {
   return line.length > 80 ? `${line.slice(0, 77)}…` : line
 }
 
+/**
+ * Runs `work` with a progress notification every `PROGRESS_INTERVAL_MS` from
+ * the call's start, for the whole call: a container start and the delivery
+ * count as much as the wait, so a call that lasts longer than an interval
+ * always reports at least once. The ticks stop before the result goes out.
+ * Each send is best effort (`call.progress` never throws) and does not hold
+ * the call.
+ */
+export async function withProgress<T>(call: McpToolCall, startedAt: number, waitSeconds: number, work: () => Promise<T>): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  let stopped = false
+  const tick = () => {
+    if (stopped) return
+    const elapsed = Math.round((Date.now() - startedAt) / 1000)
+    // The wait is the total while within it; a cold start can run past it, and then there is none to state.
+    const total = elapsed <= waitSeconds ? Math.max(1, Math.round(waitSeconds)) : undefined
+    background(call.progress(elapsed, total, `The agent is working (${elapsed}s)`), { name: 'mcp-server.progress' })
+    timer = setTimeout(tick, PROGRESS_INTERVAL_MS)
+  }
+  timer = setTimeout(tick, Math.max(0, startedAt + PROGRESS_INTERVAL_MS - Date.now()))
+  try {
+    return await work()
+  } finally {
+    stopped = true
+    clearTimeout(timer)
+  }
+}
+
 export interface InvokeRequest {
   agent: string
   prompt: string
@@ -420,6 +441,10 @@ export interface InvokeRequest {
  */
 export async function invokeAndWait(ctx: McpCallContext, call: McpToolCall, request: InvokeRequest): Promise<RunResult> {
   const startedAt = Date.now()
+  return withProgress(call, startedAt, clampWaitSeconds(request.waitSeconds), () => runInvoke(ctx, call, request, startedAt))
+}
+
+async function runInvoke(ctx: McpCallContext, call: McpToolCall, request: InvokeRequest, startedAt: number): Promise<RunResult> {
   const waitDeadline = startedAt + clampWaitSeconds(request.waitSeconds) * 1000
   // However long the client asked to wait, the call returns by here.
   const callDeadline = startedAt + MAX_WAIT_SECONDS * 1000
@@ -450,7 +475,7 @@ export async function invokeAndWait(ctx: McpCallContext, call: McpToolCall, requ
           ? 'Someone is answering this question right now (in Gamut, or another call). Call wait_for_session to see where the session stands.'
           : 'The question could not be answered (it may have just been answered or cancelled). Call wait_for_session to see where the session stands.')
       }
-      const outcome = await waitForSettle(target.slug, request.sessionId, waitDeadline, call, startedAt, { boundaryUuid: boundary?.uuid })
+      const outcome = await waitForSettle(target.slug, request.sessionId, waitDeadline, call, { boundaryUuid: boundary?.uuid })
       return describe(ctx, target, request.sessionId, outcome, boundary?.uuid)
     }
   }
@@ -496,7 +521,7 @@ export async function invokeAndWait(ctx: McpCallContext, call: McpToolCall, requ
   }
   const sessionId = invoked.value.sessionId
   call.setAuditTarget({ sessionId })
-  const outcome = await waitForSettle(target.slug, sessionId, waitDeadline, call, startedAt, { boundaryUuid: boundary?.uuid })
+  const outcome = await waitForSettle(target.slug, sessionId, waitDeadline, call, { boundaryUuid: boundary?.uuid })
   return describe(ctx, target, sessionId, outcome, boundary?.uuid)
 }
 
@@ -515,6 +540,15 @@ export async function waitForSession(
   request: { agent: string; sessionId: string; waitSeconds?: number },
 ): Promise<RunResult> {
   const startedAt = Date.now()
+  return withProgress(call, startedAt, clampWaitSeconds(request.waitSeconds), () => runWait(ctx, call, request, startedAt))
+}
+
+async function runWait(
+  ctx: McpCallContext,
+  call: McpToolCall,
+  request: { agent: string; sessionId: string; waitSeconds?: number },
+  startedAt: number,
+): Promise<RunResult> {
   const deadline = startedAt + clampWaitSeconds(request.waitSeconds) * 1000
   const target = await resolveTarget(ctx, request.agent, 'viewer')
   call.setAuditTarget({ agent: target.slug, sessionId: request.sessionId })
@@ -524,6 +558,6 @@ export async function waitForSession(
   // now or, when none lands, the last one there was.
   const runningNow = (await actor.sessions.live(request.sessionId)).isActive
   const boundary = runningNow ? await lastAssistant(target.slug, request.sessionId) : null
-  const outcome = await waitForSettle(target.slug, request.sessionId, deadline, call, startedAt)
+  const outcome = await waitForSettle(target.slug, request.sessionId, deadline, call)
   return describe(ctx, target, request.sessionId, outcome, boundary?.uuid, { previousReplyCounts: true })
 }

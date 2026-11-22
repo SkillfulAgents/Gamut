@@ -185,6 +185,8 @@ vi.mock('@shared/lib/services/x-agent/invoke', () => ({
     if (input.signal) throw new Error('The MCP layer must not hand the call signal to the service')
     if (input.prompt.includes('[refuse]')) return { ok: false, status: 500, error: 'Failed to invoke agent (ensure_running): boom' }
     if (input.prompt.includes('[slow-deliver]')) await new Promise((resolve) => setTimeout(resolve, 300))
+    // A cold agent: two seconds before the prompt is delivered.
+    if (input.prompt.includes('[cold]')) await new Promise((resolve) => setTimeout(resolve, 2_000))
     let session = input.sessionId ? fake.state.sessions.get(input.sessionId) : undefined
     if (!session) {
       const id = `session-${++fake.state.next}`
@@ -643,4 +645,25 @@ describe('review fixes', () => {
     expect(session.prompts[0]).toMatch(/^Work \[slow-deliver\] \[slow\]\n\n.*\/workspace\/uploads\/a-/s)
     expect(session.active).toBe(true)
   })
+})
+
+describe('progress', () => {
+  it('counts from the call\'s start, so a slow delivery still leaves a tick inside a short wait; nothing is sent after the result', async () => {
+    const ticks: Array<{ progress: number; total: number | undefined; message: string }> = []
+    const progress = async (value: number, total: number | undefined, message: string) => { ticks.push({ progress: value, total, message }) }
+    // Delivery takes 2s and the wait is 6s: a clock started at delivery would
+    // first tick at 7s, after the call answered.
+    const { value } = await call(invokeAgentTool, { agent: 'alpha', prompt: 'Cold start [cold] [slow]', wait_seconds: 6 }, person('alice'), { progress })
+    expect(value.status).toBe('running')
+    expect(ticks).toEqual([{ progress: 5, total: 6, message: 'The agent is working (5s)' }])
+    await new Promise((resolve) => setTimeout(resolve, 5_500))
+    expect(ticks).toHaveLength(1)
+  }, 20_000)
+
+  it('wait_for_session ticks on its own call\'s clock too', async () => {
+    const { value } = await call(invokeAgentTool, { agent: 'alpha', prompt: 'Long [slow]', wait_seconds: 0 }, person('alice'))
+    const ticks: number[] = []
+    await call(waitForSessionTool, { agent: 'alpha', session_id: value.session_id, wait_seconds: 6 }, person('alice'), { progress: async (elapsed: number) => { ticks.push(elapsed) } })
+    expect(ticks).toEqual([5])
+  }, 20_000)
 })
