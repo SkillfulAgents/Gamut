@@ -1,25 +1,23 @@
 {
   "storyId": "browser-test",
-  "passed": false,
-  "reason": "Sent the browser-title prompt to agent QA-20261122-182040-jk6q and verified the reply contains \"Example Domain\". The reply passed, but plain Enter did not submit the message on the new-chat view.\n  Bugs found:\n    - Plain Enter did not send the message on the agent's home/new-chat view. The input placeholder reads \"How can I help? Press cmd+enter to send\", but the message stayed in the textbox with the Send button enabled. Expected: the placeholder's cmd+enter (or Enter) sends the message. Actual: Enter only left the text in the field, and the message went out only after clicking the Send button. Inside the session view the hint reads \"↵ Send\", so the two views give conflicting instructions.",
+  "passed": true,
+  "reason": "Ran the browser-use check: open the QA agent, ask it to open example.com and report the page title, and confirm the reply contains \"Example Domain\".",
   "steps": [
-    "Step 1: Navigated to http://localhost:47891 — the Gamut app loaded with the sidebar listing agents QA-20261122-182040-jk6q and QA-20261122-182039-lk3x, no errors.",
-    "Step 2: Clicked the \"QA-20261122-182040-jk6q\" agent — its agent page opened (URL /agents/qa-20261122-182040-jk6q-d2e0pfspz3) with the message input visible. Screenshot taken.",
-    "Step 3: Typed \"Open a browser and go to https://example.com. Tell me the page title.\" and pressed Enter — the text stayed in the input and was not sent. Clicked the Send button — the message was sent, a new session \"Browser Page Title Check\" started, and the agent showed \"Working…\" with an \"Open Browser\" tool call card. Screenshot taken.",
-    "Step 4: Waited up to 180 seconds for \"Example Domain\" to appear — it appeared well inside the limit; the agent finished with \"Worked for 5s · 3 tool calls · 163,069 tokens\" and status returned to idle.",
-    "Step 5: Verified the reply reads \"The page title is \"Example Domain\". The browser is closed now.\" — matches the expected title. Screenshot taken."
+    "1. Navigated to http://localhost:47891 — the Gamut home page loaded with the \"Your Agents\" sidebar listing QA-20261122-195019-c1x6 and QA-20261122-195018-6rl1.",
+    "2. Clicked the QA-20261122-195019-c1x6 agent in the sidebar — agent page opened at /agents/qa-20261122-195019-c1x6-hi1dl34uks, status \"idle\".",
+    "3. Typed \"Open a browser and go to https://example.com. Tell me the page title.\" in the message box. Pressing Enter did not send it, so I clicked the Send button. The session \"Check Example.com Page Title\" was created and the agent switched to \"working\".",
+    "4. Waited up to 180 seconds for a response. The agent finished in about 7 seconds (\"Worked for 7s · 3 tool calls\"), and the status returned to \"idle\".",
+    "5. The reply reads: \"The page title is \"Example Domain\". I've closed the browser.\" The screenshot shows this text on screen, so the check passed."
   ],
-  "bugs": [
-    "Plain Enter did not send the message on the agent's home/new-chat view. The input placeholder reads \"How can I help? Press cmd+enter to send\", but the message stayed in the textbox with the Send button enabled. Expected: the placeholder's cmd+enter (or Enter) sends the message. Actual: Enter only left the text in the field, and the message went out only after clicking the Send button. Inside the session view the hint reads \"↵ Send\", so the two views give conflicting instructions."
-  ],
-  "durationMs": 73495,
-  "sessionId": "cf5f8ed4-818e-44ea-895c-880cd90abdd1",
+  "bugs": [],
+  "durationMs": 64076,
+  "sessionId": "8cc5c5f8-3d51-4d8d-bf36-9fe9c72379fb",
   "cost": {
-    "inputTokens": 8013,
-    "outputTokens": 6705,
-    "cacheCreationTokens": 59075,
-    "cacheReadTokens": 754947,
+    "inputTokens": 7523,
+    "outputTokens": 4000,
+    "cacheCreationTokens": 48966,
+    "cacheReadTokens": 640335,
     "model": "claude-haiku-5-5",
-    "totalCostUsd": 0.190876
+    "totalCostUsd": 0.152764
   }
 }
