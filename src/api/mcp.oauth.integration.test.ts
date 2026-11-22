@@ -37,6 +37,8 @@ import { mutateSettings } from '@shared/lib/config/settings'
 import { getAuth, resetAuth } from '@shared/lib/auth'
 import { getOrCreateMcpInstallationToken } from '@shared/lib/mcp-server/installation-token'
 import { DCR_LIMITS } from '@shared/lib/mcp-server/oauth/oauth-config'
+import { deleteUnusedClientRegistrations, STALE_REGISTRATION_MS } from '@shared/lib/mcp-server/oauth/client-cleanup'
+import { oauthClient } from '@shared/lib/db/schema'
 import * as flow from '@shared/lib/mcp-server/oauth/testing/oauth-flow'
 
 const options: flow.FlowOptions = { base: BASE, fetch: async (path, init) => app.request(`${BASE}${path}`, init) }
@@ -459,6 +461,97 @@ describe('the authorization server', () => {
     const tampered = location.replace(encodeURIComponent(flow.TEST_REDIRECT_URI), encodeURIComponent('http://127.0.0.1:47999/stolen'))
     const answered = await flow.consent(options, person.cookie, tampered, true)
     expect(answered.status).toBe(400)
+  })
+})
+
+describe('consent every time', () => {
+  it('shows the consent screen again to a client the person already approved, and never issues a code silently', async () => {
+    const person = await flow.signUp(options, email('again'))
+    const clientId = await flow.registeredClientId(options)
+    await flow.connectClient(options, person.cookie, clientId)
+    // Anyone on the machine can send this request with this client's id and a loopback redirect.
+    const again = await flow.authorize(options, person.cookie, { clientId, redirectUri: 'http://127.0.0.1:55555/callback' })
+    expect(again.headers.get('location')).toMatch(/^\/oauth\/consent\?.*prompt=consent/)
+    expect(again.headers.get('location')).not.toContain('code=')
+  })
+
+  it('answers prompt=none with consent_required at the client, approved or not', async () => {
+    const person = await flow.signUp(options, email('none'))
+    const clientId = await flow.registeredClientId(options)
+    for (const round of ['before approval', 'after approval']) {
+      if (round === 'after approval') await flow.connectClient(options, person.cookie, clientId)
+      const silent = await flow.authorize(options, person.cookie, { clientId, state: 'quiet', extra: { prompt: 'none' } })
+      const location = new URL(silent.headers.get('location') ?? '', BASE)
+      expect(location.origin + location.pathname, round).toBe(flow.TEST_REDIRECT_URI)
+      expect(location.searchParams.get('error'), round).toMatch(/consent_required|interaction_required|login_required/)
+      expect(location.searchParams.get('code'), round).toBeNull()
+      expect(location.searchParams.get('state'), round).toBe('quiet')
+    }
+  })
+
+  it('keeps refresh working: a refresh is not an authorization request', async () => {
+    const { clientId, tokens } = await connected()
+    const refreshed = await flow.tokenRequest(options, { grant_type: 'refresh_token', refresh_token: tokens.refresh_token!, client_id: clientId, resource: RESOURCE })
+    expect(refreshed.status).toBe(200)
+  })
+})
+
+describe('scopes at authorize', () => {
+  it('treats a request with no scope as both MCP scopes, shown on the consent screen', async () => {
+    const person = await flow.signUp(options, email('noscope'))
+    const clientId = await flow.registeredClientId(options)
+    const { verifier, challenge } = flow.pkcePair()
+    const query = flow.authorizeQuery(options, { clientId, challenge })
+    query.delete('scope')
+    const redirect = await options.fetch(`/api/auth/oauth2/authorize?${query}`, { headers: { cookie: person.cookie, accept: 'text/html' }, redirect: 'manual' })
+    const location = redirect.headers.get('location')!
+    expect(new URL(location, BASE).searchParams.get('scope')).toBe('gamut:read gamut:run offline_access')
+    const code = new URL((await (await flow.consent(options, person.cookie, location, true)).json() as { url: string }).url).searchParams.get('code')!
+    const tokens = await (await flow.tokenRequest(options, { grant_type: 'authorization_code', code, redirect_uri: flow.TEST_REDIRECT_URI, client_id: clientId, code_verifier: verifier, resource: RESOURCE })).json() as flow.IssuedTokens
+    expect(tokens.scope).toBe('gamut:read gamut:run offline_access')
+  })
+
+  it('refuses a consent granting a scope the request did not ask for', async () => {
+    const person = await flow.signUp(options, email('extra'))
+    const clientId = await flow.registeredClientId(options)
+    const location = (await flow.authorize(options, person.cookie, { clientId, scope: 'gamut:run' })).headers.get('location')!
+    expect(new URL(location, BASE).searchParams.get('scope')).toBe('gamut:run offline_access')
+    const answered = await flow.consent(options, person.cookie, location, true, 'gamut:read gamut:run offline_access')
+    expect(answered.status).toBe(400)
+  })
+})
+
+describe('the session cookie', () => {
+  it('is SameSite=Lax and HttpOnly, so a cross-site frame of the consent page is signed out', async () => {
+    const response = await options.fetch('/api/auth/sign-up/email', {
+      method: 'POST', headers: { origin: BASE, 'content-type': 'application/json' },
+      body: JSON.stringify({ email: email('cookie'), password: 'OauthFlowPassword123!', name: 'cookie' }),
+    })
+    const session = response.headers.getSetCookie().find((cookie) => cookie.startsWith('better-auth.session_token='))!
+    expect(session).toMatch(/SameSite=Lax/i)
+    expect(session).toMatch(/HttpOnly/i)
+  })
+})
+
+describe('unused registration cleanup', () => {
+  it('deletes dynamic registrations nobody connected after a day, keeps the rest, and can run again', async () => {
+    const person = await flow.signUp(options, email('cleanup'))
+    const unused = await flow.registeredClientId(options, { client_name: 'Unused' })
+    const fresh = await flow.registeredClientId(options, { client_name: 'Fresh' })
+    const used = await flow.registeredClientId(options, { client_name: 'Used' })
+    await flow.connectClient(options, person.cookie, used)
+    const old = new Date(Date.now() - STALE_REGISTRATION_MS - 60_000)
+    for (const clientId of [unused, used]) await handle.db.update(oauthClient).set({ createdAt: old }).where(eq(oauthClient.clientId, clientId)).run()
+    // A metadata-document client is never removed here.
+    await handle.db.insert(oauthClient).values({ id: 'cimd-row', clientId: 'https://example.com/c.json', clientDiscoveryId: 'cimd', redirectUris: '[]', createdAt: old }).run()
+
+    expect(await deleteUnusedClientRegistrations()).toBeGreaterThanOrEqual(1)
+    const left = new Set((await handle.db.select({ clientId: oauthClient.clientId }).from(oauthClient).all()).map((row) => row.clientId))
+    expect(left.has(unused)).toBe(false)
+    expect(left.has(fresh)).toBe(true)
+    expect(left.has(used)).toBe(true)
+    expect(left.has('https://example.com/c.json')).toBe(true)
+    expect(await deleteUnusedClientRegistrations()).toBe(0)
   })
 })
 

@@ -158,3 +158,10 @@ function matchesRegistered(uri: string, registered: readonly string[]): boolean 
     return !!other && other.protocol === url.protocol && other.hostname === url.hostname && other.pathname === url.pathname && other.search === url.search
   })
 }
+
+/** Whether `redirectUri` is one this client registered (loopback port aside). */
+export async function isRegisteredRedirect(clientId: string, redirectUri: string): Promise<boolean> {
+  const row = await db.select({ redirectUris: oauthClient.redirectUris, disabled: oauthClient.disabled })
+    .from(oauthClient).where(eq(oauthClient.clientId, clientId)).get()
+  return !!row && !row.disabled && matchesRegistered(redirectUri, parseList(row.redirectUris))
+}

@@ -18,6 +18,12 @@ function staticCacheControl(filePath: string): string {
   return 'public, max-age=3600, must-revalidate'
 }
 
+/** Headers for the MCP consent page's document: never framed. */
+export const CONSENT_PAGE_HEADERS = {
+  'Content-Security-Policy': "frame-ancestors 'none'",
+  'X-Frame-Options': 'DENY',
+} as const
+
 /** Serve the built renderer in `root`: its files, and its HTML entry for every other route. */
 export function mountWebBuild(app: Hono, root: string): void {
   // The HTML entry carries this server's facts, so a page knows them before its
@@ -55,6 +61,13 @@ export function mountWebBuild(app: Hono, root: string): void {
       onFound: (filePath, c) => c.header('Cache-Control', staticCacheControl(filePath)),
     }),
   )
+  // The MCP consent page grants a client access to the person's account, so
+  // no other origin may frame it (clickjacking). Narrow on purpose: only this
+  // route's document; the PWA never answers it from cache (vite.config.ts).
+  app.get('/oauth/*', (c) => {
+    for (const [name, value] of Object.entries(CONSENT_PAGE_HEADERS)) c.header(name, value)
+    return serveIndex(c)
+  })
   // SPA fallback: any unmatched route serves the HTML entry.
   app.get('*', serveIndex)
 }

@@ -40,28 +40,71 @@ const KEY_GRACE_SECONDS = 30 * 24 * 60 * 60
 const SCOPES = [...MCP_OAUTH_SCOPES, OFFLINE_ACCESS_SCOPE]
 
 /**
- * Every authorization request gets `offline_access` (so a refresh token is
- * issued: MCP clients never ask for it) and, when it names none, the one
- * resource this server has (RFC 8707 lets the server pick a default; without
- * a resource the provider would issue an opaque token `/mcp` refuses). A
- * request naming another resource is left alone, and the provider refuses it
- * with `invalid_target`.
+ * What every authorization request is made into before the provider sees it:
+ *
+ * - `scope`: none means both MCP scopes (what the 401 challenge advertises);
+ *   `offline_access` is always added, so a refresh token is issued (MCP
+ *   clients never ask for it).
+ * - `resource`: none means the one resource this server has (RFC 8707 lets the
+ *   server pick a default; without one the provider would issue an opaque
+ *   token `/mcp` refuses). Another resource is left for the provider to refuse
+ *   with `invalid_target`.
+ * - `prompt` always includes `consent`. Every client here is public, and the
+ *   native ones (a CIMD `client_id` anyone can name, a loopback redirect on any
+ *   port) can be impersonated by any program on the person's machine; without
+ *   this, a client approved once would get codes silently forever after
+ *   (RFC 8252 §8.6: do not auto-approve native clients). A refresh is not an
+ *   authorization request, so staying connected is unaffected.
  */
-function withMcpDefaults(params: Record<string, unknown>, resource: string): Record<string, unknown> {
-  const scopes = typeof params.scope === 'string' ? params.scope.split(' ').filter(Boolean) : []
+export function withMcpDefaults(params: Record<string, unknown>, resource: string): Record<string, unknown> {
   const next = { ...params }
-  if (scopes.length > 0 && !scopes.includes(OFFLINE_ACCESS_SCOPE)) next.scope = [...scopes, OFFLINE_ACCESS_SCOPE].join(' ')
+  const scopes = typeof params.scope === 'string' ? params.scope.split(' ').filter(Boolean) : []
+  const withScopes = scopes.length > 0 ? scopes : [...MCP_OAUTH_SCOPES]
+  next.scope = (withScopes.includes(OFFLINE_ACCESS_SCOPE) ? withScopes : [...withScopes, OFFLINE_ACCESS_SCOPE]).join(' ')
   if (next.resource === undefined || next.resource === '') next.resource = resource
+  const prompts = typeof params.prompt === 'string' ? params.prompt.split(' ').filter(Boolean) : []
+  if (!prompts.includes('none') && !prompts.includes('consent')) next.prompt = [...prompts, 'consent'].join(' ')
   return next
 }
 
-function mcpAuthorizeDefaults(resource: string): BetterAuthPlugin {
+/**
+ * `prompt=none` asks for a code with no interaction, which forced consent
+ * never allows: answer `consent_required` at the client's redirect URI. Only
+ * for a client and redirect URI this server already knows to match (the error
+ * may go there); anything else is left for the provider, which refuses an
+ * unknown redirect without redirecting, and answers `login_required` or
+ * `consent_required` itself for a client nobody has approved.
+ */
+async function promptNoneRefusal(params: Record<string, unknown>, issuer: string): Promise<string | null> {
+  const prompts = typeof params.prompt === 'string' ? params.prompt.split(' ') : []
+  if (!prompts.includes('none') || typeof params.client_id !== 'string' || typeof params.redirect_uri !== 'string') return null
+  const { isRegisteredRedirect } = await import('./connected-clients')
+  if (!(await isRegisteredRedirect(params.client_id, params.redirect_uri))) return null
+  const url = URL.parse(params.redirect_uri)
+  if (!url) return null
+  url.searchParams.set('error', 'consent_required')
+  url.searchParams.set('error_description', 'This server asks the person to approve every connection')
+  if (typeof params.state === 'string') url.searchParams.set('state', params.state)
+  url.searchParams.set('iss', issuer)
+  return url.href
+}
+
+function mcpAuthorizeDefaults(resource: string, issuer: string): BetterAuthPlugin {
   return {
     id: 'gamut-mcp-authorize-defaults',
     hooks: {
       before: [{
         matcher: (ctx) => ctx.path === '/oauth2/authorize',
         handler: createAuthMiddleware(async (ctx) => {
+          // The consent endpoint finishes by calling authorize again in
+          // process, and this hook runs for that call too. Only a request a
+          // client sent to /oauth2/authorize is made to ask for consent; the
+          // re-run after the person approved must issue the code.
+          const sentByClient = !!ctx.request && (URL.parse(ctx.request.url)?.pathname ?? '').endsWith('/oauth2/authorize')
+          if (!sentByClient) return
+          const params = (ctx.method === 'POST' ? ctx.body : ctx.query) as Record<string, unknown> | undefined
+          const refusal = params && typeof params === 'object' ? await promptNoneRefusal(params, issuer) : null
+          if (refusal) throw ctx.redirect(refusal)
           const query = ctx.query && typeof ctx.query === 'object' ? withMcpDefaults(ctx.query as Record<string, unknown>, resource) : ctx.query
           const body = ctx.method === 'POST' && ctx.body && typeof ctx.body === 'object' ? withMcpDefaults(ctx.body as Record<string, unknown>, resource) : ctx.body
           return { context: { query, body } }
@@ -104,7 +147,7 @@ export function mcpOAuthPlugins(baseUrl: string) {
         gracePeriod: KEY_GRACE_SECONDS,
       },
     }),
-    mcpAuthorizeDefaults(resource),
+    mcpAuthorizeDefaults(resource, baseUrl.replace(/\/+$/, '')),
     mcp({
       resource,
       scopes: SCOPES,

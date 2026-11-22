@@ -123,8 +123,18 @@ export function McpConsentPage() {
   }
   if (error || !client) return <Problem title="Unknown app" body="Gamut does not know the app that sent you here. Start the connection again from the app." />
 
+  if (requested.length === 0) {
+    return <Problem title="Nothing Gamut can grant" body="The app asked for no Gamut permission. Start the connection again from the app." />
+  }
+  const readRequested = requested.includes(OAUTH_SCOPE_FOR.read)
   const runRequested = requested.includes(OAUTH_SCOPE_FOR.run)
-  const granted = [OAUTH_SCOPE_FOR.read, ...(runRequested && allowRun ? [OAUTH_SCOPE_FOR.run] : []), OFFLINE_ACCESS_SCOPE]
+  // Only what the request asked for: the provider refuses a scope the signed query does not carry.
+  const granted = [
+    ...(readRequested ? [OAUTH_SCOPE_FOR.read] : []),
+    ...(runRequested && allowRun ? [OAUTH_SCOPE_FOR.run] : []),
+    ...(request.scopes.includes(OFFLINE_ACCESS_SCOPE) ? [OFFLINE_ACCESS_SCOPE] : []),
+  ]
+  const grantsSomething = granted.some((scope) => scope !== OFFLINE_ACCESS_SCOPE)
   const destination = client.redirectHost ?? 'an address it registered'
 
   const submit = async (accept: boolean) => {
@@ -158,13 +168,15 @@ export function McpConsentPage() {
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="space-y-3" data-testid="mcp-consent-scopes">
-          <div className="flex gap-3">
-            <Checkbox id="scope-read" checked disabled aria-describedby="scope-read-body" />
-            <div>
-              <label htmlFor="scope-read" className="text-sm font-medium">{SCOPE_TEXT[OAUTH_SCOPE_FOR.read].title}</label>
-              <p id="scope-read-body" className="text-xs text-muted-foreground">{SCOPE_TEXT[OAUTH_SCOPE_FOR.read].body}</p>
+          {readRequested && (
+            <div className="flex gap-3" data-testid="mcp-consent-scope-read">
+              <Checkbox id="scope-read" checked disabled aria-describedby="scope-read-body" />
+              <div>
+                <label htmlFor="scope-read" className="text-sm font-medium">{SCOPE_TEXT[OAUTH_SCOPE_FOR.read].title}</label>
+                <p id="scope-read-body" className="text-xs text-muted-foreground">{SCOPE_TEXT[OAUTH_SCOPE_FOR.read].body}</p>
+              </div>
             </div>
-          </div>
+          )}
           {runRequested && (
             <div className="flex gap-3">
               <Checkbox
@@ -201,7 +213,7 @@ export function McpConsentPage() {
           <Button variant="outline" className="flex-1" disabled={submitting !== null} loading={submitting === 'deny'} onClick={() => submit(false)} data-testid="mcp-consent-deny">
             Deny
           </Button>
-          <Button className="flex-1" disabled={submitting !== null} loading={submitting === 'allow'} onClick={() => submit(true)} data-testid="mcp-consent-allow">
+          <Button className="flex-1" disabled={submitting !== null || !grantsSomething} loading={submitting === 'allow'} onClick={() => submit(true)} data-testid="mcp-consent-allow">
             Allow
           </Button>
         </div>

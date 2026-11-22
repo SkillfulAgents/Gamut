@@ -392,7 +392,11 @@ describe('MCP OAuth credential redaction', () => {
       .toBe('grant_type=authorization_code&code=[redacted]&code_verifier=[redacted]&redirect_uri=x')
     expect(redactMcpTokens('http://127.0.0.1:5/callback?code=abc&state=s')).toBe('http://127.0.0.1:5/callback?code=[redacted]&state=s')
     expect(redactMcpTokens('grant_type=refresh_token&refresh_token=opaque123')).toBe('grant_type=refresh_token&refresh_token=[redacted]')
-    expect(redactMcpTokens('the error code was 42')).toBe('the error code was 42')
+    expect(redactMcpTokens('code=abc123&state=x')).toBe('code=[redacted]&state=x')
+    // What is not an authorization code stays readable.
+    for (const text of ['the error code was 42', 'process exited with exit code=1', 'status code=404', 'Error: code=ENOENT', 'errorcode=E1', '{"code":"SIGNUPS_DISABLED"}', 'promo_code=SAVE10']) {
+      expect(redactMcpTokens(text)).toBe(text)
+    }
   })
 
   it('takes an access token out of an event raised while handling /mcp', async () => {

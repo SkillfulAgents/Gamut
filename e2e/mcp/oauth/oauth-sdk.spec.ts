@@ -244,8 +244,9 @@ test('someone with no role on the admin\'s agents sees none of them through thei
   }
 })
 
-test('the admin switch: off, the endpoint and its discovery answer 404; on again, connections work', async ({ browser }) => {
-  const { mcp } = await connect(browser, cast.admin, 'Gamut E2E admin')
+test('the admin switch: off, the endpoint and its discovery answer 404; on again, the same grant works and refreshes', async ({ browser }) => {
+  const { provider, mcp } = await connect(browser, cast.admin, 'Gamut E2E admin')
+  let reEnabled = false
   try {
     await setMcpEnabled(cast.admin, false)
     expect((await fetch(`${baseUrl()}/.well-known/oauth-protected-resource/mcp`)).status).toBe(404)
@@ -256,14 +257,19 @@ test('the admin switch: off, the endpoint and its discovery answer 404; on again
     const member = await signUpOrIn(cast.member.name, cast.member.email)
     const memberTry = await fetch(`${baseUrl()}/api/mcp-server/enabled`, { method: 'PUT', headers: { cookie: member.cookie, origin: baseUrl(), 'content-type': 'application/json' }, body: '{"enabled":true}' })
     expect(memberTry.status).toBe(403)
-  } finally {
+    // On again: the client kept its grant through the 404s. The same
+    // connection works without signing in again, and refreshes.
     await setMcpEnabled(cast.admin, true)
-    await mcp.close().catch(() => undefined)
-  }
-  const again = await connect(browser, cast.admin, 'Gamut E2E admin again')
-  try {
-    expect((await again.mcp.callTool('get_guide')).isError).toBeFalsy()
+    reEnabled = true
+    const asks = provider.authorizationUrls.length
+    expect((await mcp.callTool('get_guide')).isError).toBeFalsy()
+    const refreshToken = provider.refreshToken
+    provider.spoilAccessToken()
+    expect((await mcp.callTool('get_guide')).isError).toBeFalsy()
+    expect(provider.refreshToken).not.toBe(refreshToken)
+    expect(provider.authorizationUrls.length).toBe(asks)
   } finally {
-    await again.mcp.close()
+    if (!reEnabled) await setMcpEnabled(cast.admin, true)
+    await mcp.close().catch(() => undefined)
   }
 })

@@ -50,10 +50,11 @@ export default defineConfig({
         clientsClaim: true,
         // Everything the UI is made of; hdr-*.mp4 stay network-only (decorative).
         globPatterns: ['**/*.{js,css,html,svg,png,ico,webmanifest,woff2}'],
-        // Offline deep links get the app shell; /api, /auth (SSO launcher), /mcp
-        // and the MCP OAuth discovery documents (/.well-known) must hit the network.
+        // Offline deep links get the app shell; /api, /auth (SSO launcher), /mcp,
+        // the MCP OAuth discovery documents (/.well-known) and the consent page
+        // (/oauth, served with frame-ancestors 'none') must hit the network.
         navigateFallback: 'index.html',
-        navigateFallbackDenylist: [/^\/api\//, /^\/auth\//, /^\/mcp(?:$|[/?])/, /^\/\.well-known\//],
+        navigateFallbackDenylist: [/^\/api\//, /^\/auth\//, /^\/mcp(?:$|[/?])/, /^\/\.well-known\//, /^\/oauth\//],
         // Vendor chunk exceeds workbox's 2MB default before compression.
         maximumFileSizeToCacheInBytes: 8 * 1024 * 1024,
         inlineWorkboxRuntime: true, // single sw.js file, nothing extra at the dist root
@@ -114,6 +115,14 @@ export default defineConfig({
           const { registerBackgroundWork } = await server.ssrLoadModule(startupModule)
           registerBackgroundWork()
         }
+        // The dev server's half of web-build.ts's consent-page headers.
+        server.middlewares.use((req, res, next) => {
+          if (req.url?.startsWith('/oauth/')) {
+            res.setHeader('Content-Security-Policy', "frame-ancestors 'none'")
+            res.setHeader('X-Frame-Options', 'DENY')
+          }
+          next()
+        })
         server.middlewares.use((req, res, next) => {
           if (!req.url?.startsWith('/api') && !/^\/mcp(?:$|[/?])/.test(req.url ?? '') && !req.url?.startsWith('/.well-known/')) return next()
           ensureBooted().then(

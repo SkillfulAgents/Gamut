@@ -18,7 +18,14 @@ export const MCP_REFRESH_TOKEN_PREFIX = 'gamut_rt_'
 const MCP_REFRESH_TOKEN = /\bgamut_rt_[A-Za-z0-9_-]+/g
 /** A compact JWS: any JWT, of which access tokens are one kind. */
 const JWT = /\beyJ[A-Za-z0-9_-]{5,}\.eyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]*/g
-const OAUTH_PARAMETER = /([?&]|^|\b)(code|refresh_token|access_token|code_verifier)=[^&\s"']+/g
+/** Token-shaped parameters are redacted wherever they appear. */
+const OAUTH_TOKEN_PARAMETER = /\b(refresh_token|access_token|code_verifier)=[^&\s"']+/g
+/**
+ * `code=` only where an authorization code can be: in a query string (after
+ * `?` or `&`) or at the start of a form body. "exit code=1" and
+ * "code=ENOENT" in prose stay readable.
+ */
+const AUTHORIZATION_CODE_PARAMETER = /(^|[?&])code=[^&\s"']+/g
 
 /** The text with every MCP credential replaced; a prefix or parameter name stays, to say what it was. */
 export function redactMcpTokens(text: string): string {
@@ -26,7 +33,8 @@ export function redactMcpTokens(text: string): string {
     .replace(MCP_INSTALLATION_TOKEN, 'gamut_mcp_[redacted]')
     .replace(MCP_REFRESH_TOKEN, `${MCP_REFRESH_TOKEN_PREFIX}[redacted]`)
     .replace(JWT, '[redacted-jwt]')
-    .replace(OAUTH_PARAMETER, '$1$2=[redacted]')
+    .replace(OAUTH_TOKEN_PARAMETER, '$1=[redacted]')
+    .replace(AUTHORIZATION_CODE_PARAMETER, '$1code=[redacted]')
 }
 
 /** Redact the token in every string of an object, in place. */

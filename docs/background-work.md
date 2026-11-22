@@ -120,6 +120,7 @@ A service needs no `stop()` just to clear a timer, since the manager owns those.
 | `task-scheduler` | One wakeup per pending schedule (see below) | background, startup slot |
 | `webhook-triggers` | Registration resync (5 min after the last sync, backing off after a failure) | background, startup slot |
 | `session-auto-delete`, `api-log-auto-delete` | Cleanup (30 s after start, then every 4 h) | background |
+| `mcp-oauth-client-cleanup` | Auth mode only: removes MCP clients registered dynamically that nobody connected within a day (60 s after start, then every 6 h) | background |
 | `account-sync` | Sync (10 s after start, then every 5 min) | background |
 | `platform` | Account and billing refresh (10 s after start), cloud-workspace upkeep (30 min) | background |
 | `computer-use`, `active-runner`, `agent-registry`, `containers`, `host-browser` | None: they only release resources | stop only |

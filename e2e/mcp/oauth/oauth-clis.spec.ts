@@ -40,9 +40,45 @@ test.describe.configure({ mode: 'serial' })
 
 const required = process.env.MCP_HARNESS_REQUIRED === '1'
 let stub: StubModel
+
+/**
+ * The CLIs' Client ID Metadata Documents, which the server under test fetches
+ * from the internet. The real fetch stays (it is what tells us an upstream
+ * document stopped fitting our profile), but an unreachable upstream is not a
+ * product failure: when the test process cannot reach a document for network
+ * reasons (DNS, connect, timeout, 5xx) that CLI's spec is skipped, even under
+ * MCP_HARNESS_REQUIRED=1, with a loud annotation. A 200 whose document the
+ * server then refuses still fails the spec.
+ */
+const METADATA_DOCUMENTS = {
+  codex: 'https://chatgpt.com/oauth/codex/client.json',
+  claude: 'https://claude.ai/oauth/claude-code-client-metadata',
+} as const
+const unreachable: Partial<Record<keyof typeof METADATA_DOCUMENTS, string>> = {}
+
+async function probeMetadataDocuments() {
+  for (const [cli, url] of Object.entries(METADATA_DOCUMENTS) as Array<[keyof typeof METADATA_DOCUMENTS, string]>) {
+    try {
+      const response = await fetch(url, { signal: AbortSignal.timeout(15_000), redirect: 'manual' })
+      if (response.status >= 500) unreachable[cli] = `${url} answered ${response.status}`
+    } catch (error) {
+      unreachable[cli] = `${url} could not be fetched: ${String((error as { cause?: unknown }).cause ?? error)}`
+    }
+  }
+}
+
+function skipWhenUpstreamUnreachable(cli: keyof typeof METADATA_DOCUMENTS) {
+  const reason = unreachable[cli]
+  if (!reason) return
+  const message = `UPSTREAM UNREACHABLE, NOT A PRODUCT FAILURE: ${reason}. The ${cli} OAuth spec is skipped.`
+  console.warn(`\n::warning::${message}\n`)
+  test.info().annotations.push({ type: 'warning', description: message })
+  test.skip(true, message)
+}
 let cast: Awaited<ReturnType<typeof people>>
 
 test.beforeAll(async () => {
+  await probeMetadataDocuments()
   stub = await startStubModel()
   cast = await people()
   await setMcpEnabled(cast.admin, true)
@@ -73,6 +109,8 @@ function stubPort(): number {
 
 test.describe('Codex', () => {
   test.beforeEach(() => {
+    // The forced-DCR test fetches no document.
+    if (!test.info().title.includes('DCR')) skipWhenUpstreamUnreachable('codex')
     if (!versionOf(codexBin())) {
       if (required) throw new Error('codex is not installed, and MCP_HARNESS_REQUIRED=1')
       test.skip(true, 'codex is not installed')
@@ -148,6 +186,10 @@ test.describe('Codex', () => {
 
 test.describe('Claude Code', () => {
   let runner: ClaudeRunner
+
+  test.beforeEach(() => {
+    skipWhenUpstreamUnreachable('claude')
+  })
 
   test.beforeAll(() => {
     const made = claudeRunner('claude-oauth', { server: Number(new URL(mcpUrl()).port), stub: stubPort() })

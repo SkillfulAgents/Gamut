@@ -79,6 +79,22 @@ describe('McpConsentPage', () => {
     expect(screen.queryByTestId('mcp-consent-scope-run')).toBeNull()
   })
 
+  it('grants only what was asked: a run-only request has no Read row and sends no read scope', async () => {
+    open({ client_id: 'c1', scope: 'gamut:run offline_access' })
+    await screen.findByTestId('mcp-consent-scope-run')
+    expect(screen.queryByTestId('mcp-consent-scope-read')).toBeNull()
+    fireEvent.click(screen.getByTestId('mcp-consent-allow'))
+    await waitFor(() => expect(consentBodies[0]).toMatchObject({ accept: true, scope: 'gamut:run offline_access' }))
+  })
+
+  it('cannot approve a run-only request with run unticked, and shows nothing to approve without an MCP scope', async () => {
+    open({ client_id: 'c1', scope: 'gamut:run offline_access' })
+    fireEvent.click(await screen.findByTestId('mcp-consent-scope-run'))
+    expect(screen.getByTestId('mcp-consent-allow')).toBeDisabled()
+    open({ client_id: 'c1', scope: 'openid profile' })
+    expect((await screen.findAllByTestId('mcp-consent-problem')).at(-1)).toHaveTextContent('no Gamut permission')
+  })
+
   it('says a request expired, or is missing, without asking anything', async () => {
     open({ client_id: 'c1', exp: '1' })
     expect(await screen.findByTestId('mcp-consent-problem')).toHaveTextContent('last ten minutes')
