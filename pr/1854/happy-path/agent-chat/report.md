@@ -1,10 +1,10 @@
 [TEST_PASS]
-[REASON] Sent "Hello! What is 2+2?" to agent QA-20261122-182544-5pyq and verified the reply contains "4".
-[STEP] Step 1: Navigated to http://localhost:47891 — the Gamut app loaded with the sidebar listing agents, including QA-20261122-182544-5pyq.
-[STEP] Step 2: Clicked QA-20261122-182544-5pyq in the sidebar — the agent page opened at /agents/qa-20261122-182544-5pyq-sj0w68esfo.
-[STEP] Step 3: Checked the agent status — the status indicator in the header reads "idle", which is an allowed state.
-[STEP] Step 4: Typed "Hello! What is 2+2?" into the message input and clicked Send — the browser moved to a new session at /sessions/45f7beae-6f1a-4bd9-8a94-e04c264114e6 and the message appeared in the chat.
-[STEP] Step 5: Waited for the response — "2 + 2 = 4." appeared in the message list on the first check, so no wait was needed. The header status reads "idle" and no activity indicator is visible.
-[STEP] Step 6: Verified the response mentions "4" — it reads "2 + 2 = 4." Screenshot taken as step6-response.png.
+[REASON] Sent "Hello! What is 2+2?" to agent QA-20261122-201428-g152 from the agent home page and confirmed the reply mentions 4.
+[STEP] Step 1: Navigated to http://localhost:47891 — the Gamut app loaded with the sidebar listing agents, including QA-20261122-201428-g152. Screenshot not taken for this step.
+[STEP] Step 2: Clicked QA-20261122-201428-g152 in the sidebar — the agent page opened at /agents/qa-20261122-201428-g152-18fq6p6ltx. Screenshot step1-agent-selected.png taken.
+[STEP] Step 3: Checked agent status — the header and sidebar both show "idle", which is an accepted status.
+[STEP] Step 4: Typed "Hello! What is 2+2?" in the message box and clicked Send — the page navigated to a new session (Simple Arithmetic Greeting Question) and the message appeared in the message list.
+[STEP] Step 5: Waited for the response — the reply "2 + 2 = 4." was already in the message list on the first snapshot after sending, so it arrived well within the 3-minute limit.
+[STEP] Step 6: Verified the response contains "4" ("2 + 2 = 4.") — passed. Screenshot step6-response-verified.png taken.
 
-Bugs: none observed. The only console output was four WebGL GL Driver warnings, which I did not treat as a bug.
+No bugs found.

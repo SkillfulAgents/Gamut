@@ -1,24 +1,24 @@
 {
   "storyId": "agent-chat",
   "passed": true,
-  "reason": "Sent \"Hello! What is 2+2?\" to agent QA-20261122-182544-5pyq and verified the reply contains \"4\".",
+  "reason": "Sent \"Hello! What is 2+2?\" to agent QA-20261122-201428-g152 from the agent home page and confirmed the reply mentions 4.",
   "steps": [
-    "Step 1: Navigated to http://localhost:47891 — the Gamut app loaded with the sidebar listing agents, including QA-20261122-182544-5pyq.",
-    "Step 2: Clicked QA-20261122-182544-5pyq in the sidebar — the agent page opened at /agents/qa-20261122-182544-5pyq-sj0w68esfo.",
-    "Step 3: Checked the agent status — the status indicator in the header reads \"idle\", which is an allowed state.",
-    "Step 4: Typed \"Hello! What is 2+2?\" into the message input and clicked Send — the browser moved to a new session at /sessions/45f7beae-6f1a-4bd9-8a94-e04c264114e6 and the message appeared in the chat.",
-    "Step 5: Waited for the response — \"2 + 2 = 4.\" appeared in the message list on the first check, so no wait was needed. The header status reads \"idle\" and no activity indicator is visible.",
-    "Step 6: Verified the response mentions \"4\" — it reads \"2 + 2 = 4.\" Screenshot taken as step6-response.png."
+    "Step 1: Navigated to http://localhost:47891 — the Gamut app loaded with the sidebar listing agents, including QA-20261122-201428-g152. Screenshot not taken for this step.",
+    "Step 2: Clicked QA-20261122-201428-g152 in the sidebar — the agent page opened at /agents/qa-20261122-201428-g152-18fq6p6ltx. Screenshot step1-agent-selected.png taken.",
+    "Step 3: Checked agent status — the header and sidebar both show \"idle\", which is an accepted status.",
+    "Step 4: Typed \"Hello! What is 2+2?\" in the message box and clicked Send — the page navigated to a new session (Simple Arithmetic Greeting Question) and the message appeared in the message list.",
+    "Step 5: Waited for the response — the reply \"2 + 2 = 4.\" was already in the message list on the first snapshot after sending, so it arrived well within the 3-minute limit.",
+    "Step 6: Verified the response contains \"4\" (\"2 + 2 = 4.\") — passed. Screenshot step6-response-verified.png taken."
   ],
   "bugs": [],
-  "durationMs": 31142,
-  "sessionId": "6d04eb74-c275-4047-a403-052e0ba81f87",
+  "durationMs": 32202,
+  "sessionId": "271709d6-0f7b-401b-a210-517d1c6cb5fc",
   "cost": {
-    "inputTokens": 8299,
-    "outputTokens": 4829,
-    "cacheCreationTokens": 69879,
-    "cacheReadTokens": 650321,
+    "inputTokens": 8204,
+    "outputTokens": 4636,
+    "cacheCreationTokens": 143983,
+    "cacheReadTokens": 489897,
     "model": "claude-haiku-5-5",
-    "totalCostUsd": 0.184825
+    "totalCostUsd": 0.260352
   }
 }

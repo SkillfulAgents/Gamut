@@ -1,7 +1,7 @@
 [TEST_PASS]
-[REASON] Sent the "Open a browser and go to https://example.com. Tell me the page title." prompt to agent QA-20261122-182545-t76t and verified the reply names the page title "Example Domain".
-[STEP] Navigated to http://localhost:47891 — the Gamut home page loaded with the sidebar listing "QA-20261122-182545-t76t" and "QA-20261122-182544-5pyq" under Your Agents.
-[STEP] Clicked the "QA-20261122-182545-t76t" agent in the sidebar — its agent page opened (idle, empty message input, "Opus 5.5 · Medium" model selector).
-[STEP] Typed the message into the agent input and clicked Send — a new session "Check Example.com Page Title" started, the status changed to "working", and the message appeared in the chat.
-[STEP] Waited for a response — the reply appeared with "Worked for 4s · 3 tool calls · 163,078 tokens", the agent returned to idle, and "Example Domain" became visible on the page.
-[STEP] Verified the response and took a screenshot — the agent replied "The page title is "Example Domain". The page loaded normally, and I've closed the browser." The text matches the expected title.
+[REASON] Sent a browser-use prompt to agent QA-20261122-201429-l9ug and verified the reply reports the page title "Example Domain".
+[STEP] Navigated to http://localhost:47891 — Gamut app loaded with the sidebar listing QA-20261122-201429-l9ug and QA-20261122-201428-g152, both Idle.
+[STEP] Clicked QA-20261122-201429-l9ug in the sidebar — agent page opened at /agents/qa-20261122-201429-l9ug-gz70sm0n2m with an empty message composer.
+[STEP] Typed "Open a browser and go to https://example.com. Tell me the page title." and clicked Send — message posted, a session "Browser Page Title Check" was created, and the agent went to Working status.
+[STEP] Waited up to 3 minutes for a response — "Example Domain" appeared in the chat within the wait window. The turn showed "Worked for 4s · 3 tool calls · 163,080 tokens" and the agent returned to idle.
+[STEP] Verified the response and took a screenshot — the reply reads 'The page title is "Example Domain". The page loaded normally, and I closed the browser afterward.' Verification passed.
