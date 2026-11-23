@@ -1,8 +1,9 @@
-[TEST_FAIL]
-[REASON] Sent "Open a browser and go to https://example.com. Tell me the page title." to agent QA-20261123-202413-v9nq and verified the reply mentions "Example Domain". The reply did, so the functional check passed; the one bug is a send-shortcut inconsistency found along the way.
-[BUG_FOUND] Pressing Enter in the new-agent message box does not send the message. The placeholder says "Press cmd+enter to send", but the session view footer says "↵ Send". Pressing Enter left the text in the box and the Send button enabled. The message was sent only by clicking the Send button.
-[STEP] Step 1: Navigated to http://localhost:47891 — the Gamut home page loaded with the "Your Agents" sidebar listing QA-20261123-202413-v9nq and QA-20261123-202412-v69a. No errors.
-[STEP] Step 2: Clicked QA-20261123-202413-v9nq in the sidebar — the agent page opened at /agents/qa-20261123-202413-v9nq-siad0spt9c with the message input, Share/menu buttons, and the Triggers/Connections/Skills/External Integrations/Drives panel. Screenshot taken.
-[STEP] Step 3: Typed the required message into the input and pressed Enter — the text stayed in the box and nothing was sent (see bug). Clicked the Send button — a new session "Check Example.com page title" started, the user message appeared in the chat, and the agent status changed to "working" with a ToolSearch tool call shown.
-[STEP] Step 4: Waited for the response — "Example Domain" appeared in the agent reply within the 3-minute window. The turn showed "Worked for 5s · 3 tool calls · 163,071 tokens", and the status returned to "idle".
-[STEP] Step 5: Verified the response: "The page title at https://example.com is "Example Domain". I've closed the browser." — the reply contains "Example Domain" as required. Screenshot taken of the response.
+[TEST_PASS]
+[REASON] Sent the browser-task prompt to the QA-20261123-212926-knkt agent and verified its reply names the page title "Example Domain" with the live browser preview showing example.com.
+[STEP] Navigated to http://localhost:47891 — Gamut home loaded, and the "QA-20261123-212926-knkt" agent (Idle, Never active) was listed in the "Your Agents" sidebar.
+[STEP] Clicked the QA-20261123-212926-knkt agent in the sidebar — agent page opened at /agents/qa-20261123-212926-knkt-1l92pld6ss with the message composer visible.
+[STEP] Sent "Open a browser and go to https://example.com. Tell me the page title." — pressing Enter left the text in the composer unsent, so I clicked the Send button, and the message posted into a new session "Check Example.com Page Title" with the agent switching to "working".
+[STEP] Waited up to 3 minutes for a response — the reply "The page title is "Example Domain"" appeared well within the window. The turn showed "Worked for 3s · 2 tool calls · 121,835 tokens" and the agent returned to idle.
+[STEP] Verified the response mentions "Example Domain" and took a screenshot — confirmed. The screenshot shows the chat reply, and the browser preview panel on the right titled "Example Domain" at https://example.com/, with "Open Browser https://example.com" under Browser agent actions.
+
+Observation (not counted as a bug): on the home composer, Enter did not submit the message. The placeholder reads "Press cmd+enter to send", so this matches the UI's own hint, and the Send button worked.

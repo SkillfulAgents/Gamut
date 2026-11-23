@@ -1,24 +1,25 @@
 {
   "storyId": "agent-chat",
-  "passed": true,
-  "reason": "Opened the QA-20261123-202412-v69a agent, confirmed it was idle, sent \"Hello! What is 2+2?\", and verified the reply contains \"4\".",
+  "passed": false,
+  "reason": "Early stop: Remaining budget is about $0.0055, too little to run the browser steps, so I stopped before any UI interaction.",
   "steps": [
-    "Step 1: Navigated to http://localhost:47891 — the Gamut app loaded with the sidebar listing \"QA-20261123-202412-v69a\" (idle).",
-    "Step 2: Clicked \"QA-20261123-202412-v69a\" in the sidebar — the agent page opened at /agents/qa-20261123-202412-v69a-d6zkhlspey.",
-    "Step 3: Checked the agent status indicator — it reads \"idle\", which is an allowed status.",
-    "Step 4: Typed \"Hello! What is 2+2?\" into the message input and clicked Send — the message appeared in the conversation and a new session opened.",
-    "Step 5: Waited for the response — the activity indicator showed \"Working...\" briefly, then the agent finished and returned to idle. An early streamed fragment showed only \"2\" while still working; the final reply was \"2 + 2 = 4.\"",
-    "Step 6: Verified the reply contains \"4\" — it does (\"2 + 2 = 4.\"). Screenshot taken showing the user message and the reply."
+    "Loaded the Playwright browser tools via ToolSearch (mcp__playwright__browser_navigate, browser_snapshot, browser_click, browser_type, browser_take_screenshot, and others). Result: tools available, but no browser action was taken because the budget ran out.",
+    "Step 1, navigate to http://localhost:47891 — not executed (budget exhausted).",
+    "Step 2, find and click the \"QA-20261123-212925-h39t\" agent in the sidebar — not executed.",
+    "Step 3, verify status is \"running\" or \"idle\" — not executed.",
+    "Step 4, send \"Hello! What is 2+2?\" — not executed.",
+    "Step 5, wait up to 3 minutes for a response — not executed.",
+    "Step 6, verify the response mentions \"4\" and take a screenshot — not executed."
   ],
   "bugs": [],
-  "durationMs": 60615,
-  "sessionId": "0b51ecad-d828-428c-b5ff-9522c953d1e4",
+  "durationMs": 5677,
+  "sessionId": "1b47d581-b7b5-4280-b72d-9d49e7daf2aa",
   "cost": {
-    "inputTokens": 12143,
-    "outputTokens": 8282,
-    "cacheCreationTokens": 225889,
-    "cacheReadTokens": 851673,
+    "inputTokens": 6284,
+    "outputTokens": 1620,
+    "cacheCreationTokens": 102814,
+    "cacheReadTokens": 0,
     "model": "claude-haiku-5-5",
-    "totalCostUsd": 0.421082
+    "totalCostUsd": 0.142902
   }
 }
