@@ -32,7 +32,7 @@ import {
 import { ensureLimaReady } from './lima-container-client'
 import type { ImagePullProgress, RuntimeReadiness } from './types'
 import { globalFeed } from '@shared/lib/notifications/global-feed'
-import { WEBHOOK_RELAY_CHANGED_EVENT, watchWebhookRelay, type WebhookRelayService } from '@shared/lib/webhook-relay'
+import { WEBHOOK_RELAY_CHANGED_EVENT, getWebhookRelay, watchWebhookRelay, type WebhookRelayService } from '@shared/lib/webhook-relay'
 import { getSettings, mutateSettings } from '@shared/lib/config/settings'
 import path from 'path'
 import { getAgentWorkspaceDir, getAgentsDataDir } from '@shared/lib/config/data-dir'
@@ -92,7 +92,7 @@ export class ContainerHost {
 
   /** A runtime for the agent whose actor hands over `agent`, for this machine's runner. Never does I/O. */
   createRuntime(slug: string, agent: RuntimeAgent): ContainerRuntime {
-    return new ContainerRuntime(slug, this.hooks, agent)
+    return new ContainerRuntime(slug, this.hooks, agent, getWebhookRelay().kind === 'platform')
   }
 
   /**
@@ -152,20 +152,10 @@ export class ContainerHost {
     for (const runtime of this.runningRuntimes()) runtime.markStale()
   }
 
-  /** Record as stale every running agent whose webhook tools no longer match availability. */
-  reconcileWebhookRelay(available: boolean): void {
-    for (const runtime of this.runningRuntimes()) runtime.reconcileWebhookRelay(available)
-  }
-
-  /**
-   * Publishes the webhook relay's status to clients, and keeps running
-   * agents' webhook tools in step with it (their env says whether webhooks
-   * can be received).
-   */
+  /** Publishes the webhook relay's status to clients. */
   watchWebhookRelay(relay: WebhookRelayService): () => void {
     return watchWebhookRelay(relay, {
       broadcast: (status) => globalFeed.publish({ type: WEBHOOK_RELAY_CHANGED_EVENT, status }),
-      reconcileAgents: (available) => this.reconcileWebhookRelay(available),
     })
   }
 

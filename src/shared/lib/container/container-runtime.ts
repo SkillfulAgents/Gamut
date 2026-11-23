@@ -44,7 +44,6 @@ import { isPlatformComposioActiveFrom } from '@shared/lib/composio/client'
 import { getDefaultAccountProvider } from '@shared/lib/account-providers/provider-factory'
 import { getAgentOfferedProviders } from '@shared/lib/account-providers/service-catalog'
 import { platformAccessTokenFrom } from '@shared/lib/services/platform-auth-service'
-import { getWebhookRelay } from '@shared/lib/webhook-relay'
 import { mergeCustomEnvVars } from './reserved-env-vars'
 import { runsInAppSandbox } from '@shared/lib/facts/capabilities'
 import { getServerCapabilities, getServerFacts } from '@shared/lib/facts/server-facts'
@@ -166,16 +165,16 @@ export class ContainerRuntime {
   private stale = false
   /** The start that has read this agent's drives. A drive change after it needs a restart. */
   private drivesReadIn: number | null = null
-  /**
-   * Whether webhooks could be received when this process built the
-   * container's env (WEBHOOK_RELAY_AVAILABLE); null until it has.
-   */
-  private webhookRelayAtStart: boolean | null = null
 
   constructor(
     readonly slug: string,
     private readonly host: RuntimeHost,
     private readonly agent: RuntimeAgent,
+    /**
+     * Whether this host has a webhook relay, fixed when the agent is created
+     * (WEBHOOK_RELAY_AVAILABLE). A change takes a restart, or a redeploy.
+     */
+    private readonly webhookRelayAvailable: boolean,
   ) {}
 
   /**
@@ -419,23 +418,12 @@ export class ContainerRuntime {
       this.agent.containerWatch.startHealth()
     } else {
       this.stale = false
-      this.webhookRelayAtStart = null
       this.agent.containerWatch.stopHealth()
     }
   }
 
   markStale(): void {
     this.stale = true
-  }
-
-  /**
-   * Goes stale when the container's webhook tools no longer match whether
-   * webhooks can be received. A container this process didn't start is
-   * assumed to match the first availability it sees.
-   */
-  reconcileWebhookRelay(available: boolean): void {
-    if (this.webhookRelayAtStart === null) this.webhookRelayAtStart = available
-    else if (this.webhookRelayAtStart !== available) this.stale = true
   }
 
   isStale(): boolean {
@@ -796,8 +784,7 @@ export class ContainerRuntime {
     // above) follow the relay, not Composio mode: a personal Composio key
     // must not take the endpoint tools away.
     // Always set, so a container can tell "unavailable" from a host too old to say.
-    this.webhookRelayAtStart = getWebhookRelay().snapshot().available
-    envVars['WEBHOOK_RELAY_AVAILABLE'] = String(this.webhookRelayAtStart)
+    envVars['WEBHOOK_RELAY_AVAILABLE'] = String(this.webhookRelayAvailable)
 
     // Platform services (media, enrichment, search) only need the token.
     if (platformAccessTokenFrom(settings)) {
@@ -844,9 +831,6 @@ export class ContainerRuntime {
     const info = startedInfo ?? await client.getInfoFromRuntime()
     this.assertCurrent(lifecycle)
     this.updateCachedStatus(info.status, info.port)
-    // Availability may have moved while the container started; the watcher
-    // only sees running agents, so this one checks itself.
-    if (info.status === 'running') this.reconcileWebhookRelay(getWebhookRelay().snapshot().available)
 
     // The start is the first mark on the idle clock: it floors stale session
     // timestamps from before the previous sleep. The alarm is armed by
@@ -982,7 +966,6 @@ export class ContainerRuntime {
     this.stopping = false
     this.starting = null
     this.stale = false
-    this.webhookRelayAtStart = null
   }
 
   /**
