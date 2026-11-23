@@ -87,7 +87,7 @@ async function start() {
   // Then the state the API's processes share; this one process keeps it in memory.
   await initializeLocalAppState()
   // Then the agents: each one's actor runs in this process.
-  initializeAgentRegistry(createLocalAgentRegistry())
+  initializeAgentRegistry(createLocalAgentRegistry)
   // Then key custody: the vault seals and opens through it, and it checks a
   // key against the sealed data, so after the database and before any request.
   await installServerKeyManager()
