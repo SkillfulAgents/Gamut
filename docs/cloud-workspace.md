@@ -535,6 +535,7 @@ above.
 | The wizard's runtime step (`stepsForPath` in `getting-started-wizard.tsx`) | Self-hosted web onboarding has to set up its own runtime |
 | The container-setup modal (`container-setup-handler.tsx`) | Same, outside the wizard |
 | Firewall detection (`use-firewall-status.ts`) | A web deployment can be behind its own firewall |
+| The MCP Server page's "Who can connect" choice (`mcp-server-tab.tsx`, through `offersMcpReachChoice()`, a server fact: the API runs inside the desktop app) | Not `canUseHostFeatures()` either way: it is about the server checking request sources, which only the desktop app's API does (`checksLoopbackSource()`); a web deployment's network setup decides instead, so it is withheld there |
 | The login form (`hasInteractiveLogin()` in `auth-mode.ts`) | A web auth-mode deployment has a password to type; a cloud workspace's credential is the proxy's bearer, held by main |
 
 What disqualifies these in cloud mode is that the machine is out of reach — its

@@ -1,11 +1,11 @@
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Check, Copy, RefreshCw } from 'lucide-react'
 import { toast } from 'sonner'
 import { apiFetch } from '@renderer/lib/api'
 import { copyTextToClipboard } from '@renderer/lib/clipboard'
 import { useUser } from '@renderer/context/user-context'
-import { mcpServerRunsOnThisComputer } from '@renderer/lib/capabilities'
+import { mcpServerRunsOnThisComputer, offersMcpReachChoice } from '@renderer/lib/capabilities'
 import { Button } from '@renderer/components/ui/button'
 import { Switch } from '@renderer/components/ui/switch'
 import {
@@ -20,13 +20,28 @@ import {
   AlertDialogTrigger,
 } from '@renderer/components/ui/alert-dialog'
 import { mcpClientSetups, mcpOAuthClientSetups, type McpClientSetup } from '@shared/lib/mcp-server/client-setup'
-import type { McpServerStatusResponse } from '@shared/lib/mcp-server/mcp-server-settings-schema'
+import type { McpServerReach, McpServerStatusResponse } from '@shared/lib/mcp-server/mcp-server-settings-schema'
 import type { ConnectedMcpClient } from '@shared/lib/mcp-server/oauth/connected-clients'
+import { cn } from '@shared/lib/utils'
 
 const CARD_CLASS = 'rounded-card border bg-background divide-y divide-border/50 overflow-hidden'
 const SECTION_HEADING = 'text-xs font-medium text-muted-foreground px-1'
 const QUERY_KEY = ['mcp-server'] as const
 const CLIENTS_QUERY_KEY = ['mcp-server', 'oauth-clients'] as const
+
+const REACH_OPTIONS: Array<{ value: McpServerReach; label: string }> = [
+  { value: 'this-computer', label: 'This computer only' },
+  { value: 'network', label: 'Other devices on your network' },
+]
+
+/** The endpoint's port, as other devices must use it too. */
+function portOf(url: string): string {
+  try {
+    return new URL(url).port
+  } catch {
+    return ''
+  }
+}
 
 async function readStatus(): Promise<McpServerStatusResponse> {
   const response = await apiFetch('/api/mcp-server')
@@ -110,7 +125,8 @@ function useToggle() {
   })
 }
 
-function ServerRows({ status, canManage, onText, offText }: { status: McpServerStatusResponse; canManage: boolean; onText: string; offText: string }) {
+/** The switch and the endpoint; `children` go between them (the desktop app's reach choice). */
+function ServerRows({ status, canManage, onText, offText, children }: { status: McpServerStatusResponse; canManage: boolean; onText: string; offText: string; children?: ReactNode }) {
   const toggle = useToggle()
   return (
     <>
@@ -129,6 +145,7 @@ function ServerRows({ status, canManage, onText, offText }: { status: McpServerS
           data-testid="mcp-server-enabled-switch"
         />
       </div>
+      {children}
       <div className="flex items-center gap-3 px-4 py-3">
         <div className="min-w-0 flex-1">
           <div className="text-xs font-medium">Endpoint</div>
@@ -274,6 +291,16 @@ export function McpServerTab() {
   const queryClient = useQueryClient()
   const { data: status, isLoading, error } = useQuery({ queryKey: QUERY_KEY, queryFn: readStatus })
 
+  const changeReach = useMutation({
+    mutationFn: (reach: McpServerReach) => send('/api/mcp-server/reach', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reach }),
+    }),
+    onSuccess: (next) => queryClient.setQueryData(QUERY_KEY, next),
+    onError: (err) => toast.error(err instanceof Error ? err.message : 'The change did not save'),
+  })
+
   const regenerate = useMutation({
     mutationFn: () => send('/api/mcp-server/token/regenerate', { method: 'POST' }),
     onSuccess: (next) => {
@@ -297,12 +324,17 @@ export function McpServerTab() {
   const setups = status.token ? mcpClientSetups(status.endpointUrl, status.token) : []
   // Where the server is decides what the page can promise about reaching it.
   const local = mcpServerRunsOnThisComputer()
+  // Only the desktop app checks where a request comes from; elsewhere the network setup decides.
+  const reachChoice = offersMcpReachChoice() && status.reach.applies
+  const network = reachChoice && status.reach.value === 'network'
+  const port = portOf(status.endpointUrl)
+  const networkUrls = status.reach.networkAddresses.map((address) => `http://${address}${port ? `:${port}` : ''}/mcp`)
 
   return (
     <div className="space-y-6" data-testid="mcp-server-tab">
       <p className="px-1 text-[11px] leading-relaxed text-muted-foreground" data-testid="mcp-server-intro">
         {local
-          ? 'Let other AI tools on this computer, like Claude Code, Codex and Cursor, work with your Gamut agents through MCP: read your drives and sessions, ask the Team Brain, and run agents, sending and receiving files.'
+          ? 'Let AI tools like Claude Code, Codex and Cursor work with your Gamut agents through MCP: read your drives and sessions, ask the Team Brain, and run agents, sending and receiving files.'
           : 'Let AI tools like Claude Code, Codex and Cursor work with this workspace\'s agents through MCP: read its drives and sessions, ask the Team Brain, and run agents, sending and receiving files.'}{' '}
         They connect with the token below and can do what you can do here. A tool that runs an agent makes it act with that agent&apos;s connected accounts.
       </p>
@@ -310,7 +342,40 @@ export function McpServerTab() {
       <div className="space-y-2">
         <h3 className={SECTION_HEADING}>Server</h3>
         <div className={CARD_CLASS}>
-          <ServerRows status={status} canManage={canManage} onText="On: clients with the token can connect." offText="Off: the endpoint does not answer." />
+          <ServerRows status={status} canManage={canManage} onText="On: clients with the token can connect." offText="Off: the endpoint does not answer.">
+            {reachChoice && (
+              <div className="space-y-2 px-4 py-3" data-testid="mcp-server-reach-choice">
+                <div className="text-xs font-medium" id="mcp-server-reach-label">Who can connect</div>
+                <div role="radiogroup" aria-labelledby="mcp-server-reach-label" className="inline-flex rounded-md border p-0.5">
+                  {REACH_OPTIONS.map((option) => (
+                    <button
+                      key={option.value}
+                      type="button"
+                      role="radio"
+                      aria-checked={status.reach.value === option.value}
+                      disabled={!canManage || changeReach.isPending}
+                      onClick={() => { if (status.reach.value !== option.value) changeReach.mutate(option.value) }}
+                      className={cn(
+                        'rounded px-3 py-1 text-xs transition-colors disabled:cursor-not-allowed',
+                        status.reach.value === option.value ? 'bg-muted font-medium text-foreground' : 'text-muted-foreground hover:text-foreground',
+                      )}
+                      data-testid={`mcp-server-reach-${option.value}`}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+                <div className="text-[11px] text-muted-foreground">
+                  A tool in WSL, or in a container on some setups, connects as another device.
+                </div>
+                {network && (
+                  <div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[11px] leading-relaxed" data-testid="mcp-server-reach-warning">
+                    Requests travel over plain http, so anyone on the network who can see the traffic can read the token. Use this on networks you trust.
+                  </div>
+                )}
+              </div>
+            )}
+          </ServerRows>
           <div className="flex items-center gap-3 px-4 py-3">
             <div className="min-w-0 flex-1">
               <div className="text-xs font-medium">Token</div>
@@ -351,9 +416,16 @@ export function McpServerTab() {
         <h3 className={SECTION_HEADING}>Connect a client</h3>
         <SetupList setups={setups} />
         <p className="px-1 text-[11px] leading-relaxed text-muted-foreground" data-testid="mcp-server-reach">
-          {local
-            ? 'The address is this computer\'s, so tools running here can reach it. Web apps such as claude.ai cannot.'
-            : 'The address is this workspace\'s server. A tool can connect from any computer that can reach it.'}
+          {!local
+            ? 'The address is this workspace\'s server. A tool can connect from any computer that can reach it.'
+            : network
+              ? <>
+                  The setup above is for tools on this computer. Other devices use this computer&apos;s network address and the same port
+                  {networkUrls.length > 0 ? <>, such as <span className="font-mono">{networkUrls.join(', ')}</span></> : null}. Web apps such as claude.ai cannot reach it.
+                </>
+              : reachChoice
+                ? 'The address is this computer\'s, and only tools running on this computer can connect. Web apps such as claude.ai cannot.'
+                : 'The address is this computer\'s, so tools running here can reach it. Web apps such as claude.ai cannot.'}
         </p>
       </div>
     </div>

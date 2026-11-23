@@ -9,8 +9,11 @@ import { McpServerTab } from './mcp-server-tab'
 vi.mock('@renderer/lib/api', () => ({ apiFetch: vi.fn() }))
 const user = vi.hoisted(() => ({ isAdmin: false, isAuthMode: false }))
 vi.mock('@renderer/context/user-context', () => ({ useUser: () => user }))
-const where = vi.hoisted(() => ({ local: true }))
-vi.mock('@renderer/lib/capabilities', () => ({ mcpServerRunsOnThisComputer: () => where.local }))
+const where = vi.hoisted(() => ({ local: true, desktopServer: false }))
+vi.mock('@renderer/lib/capabilities', () => ({
+  mcpServerRunsOnThisComputer: () => where.local,
+  offersMcpReachChoice: () => where.desktopServer,
+}))
 
 const mockApiFetch = vi.mocked(apiFetch)
 const ENDPOINT = 'http://localhost:47891/mcp'
@@ -25,14 +28,16 @@ function renderTab() {
 }
 
 describe('McpServerTab', () => {
-  let state: { available: boolean; unavailableReason: string | null; auth: 'installation-token' | 'oauth'; enabled: boolean; endpointUrl: string; token: string | null }
+  type Reach = { applies: boolean; value: 'this-computer' | 'network'; networkAddresses: string[] }
+  let state: { available: boolean; unavailableReason: string | null; auth: 'installation-token' | 'oauth'; enabled: boolean; endpointUrl: string; token: string | null; reach: Reach }
   let clients: Array<Record<string, unknown>>
 
   beforeEach(() => {
     where.local = true
+    where.desktopServer = false
     user.isAdmin = false
     user.isAuthMode = false
-    state = { available: true, unavailableReason: null, auth: 'installation-token', enabled: true, endpointUrl: ENDPOINT, token: 'gamut_mcp_first' }
+    state = { available: true, unavailableReason: null, auth: 'installation-token', enabled: true, endpointUrl: ENDPOINT, token: 'gamut_mcp_first', reach: { applies: false, value: 'this-computer', networkAddresses: [] } }
     clients = []
     mockApiFetch.mockReset()
     mockApiFetch.mockImplementation(async (path, init) => {
@@ -46,6 +51,10 @@ describe('McpServerTab', () => {
         const { clientId } = JSON.parse(String(init.body)) as { clientId: string }
         clients = clients.filter((client) => client.clientId !== clientId)
         return json({ revoked: true })
+      }
+      if (path === '/api/mcp-server/reach' && init?.method === 'PUT') {
+        state = { ...state, reach: { ...state.reach, value: JSON.parse(String(init.body)).reach } }
+        return json(state)
       }
       if (path === '/api/mcp-server/token/regenerate' && init?.method === 'POST') {
         state = { ...state, token: 'gamut_mcp_second' }
@@ -75,7 +84,7 @@ describe('McpServerTab', () => {
 
   it('says the server is this computer\'s in the desktop app driving its own API', async () => {
     renderTab()
-    expect(await screen.findByTestId('mcp-server-intro')).toHaveTextContent('other AI tools on this computer')
+    expect(await screen.findByTestId('mcp-server-intro')).toHaveTextContent('work with your Gamut agents')
     expect(screen.getByTestId('mcp-server-reach')).toHaveTextContent('Web apps such as claude.ai cannot')
   })
 
@@ -86,6 +95,36 @@ describe('McpServerTab', () => {
     expect(screen.getByTestId('mcp-server-intro')).not.toHaveTextContent('this computer')
     expect(screen.getByTestId('mcp-server-reach')).toHaveTextContent('any computer that can reach it')
     expect(screen.getByTestId('mcp-server-reach')).not.toHaveTextContent('claude.ai')
+  })
+
+  it('offers no reach choice where the server does not check request sources', async () => {
+    renderTab()
+    await screen.findByTestId('mcp-server-tab')
+    expect(screen.queryByTestId('mcp-server-reach-choice')).toBeNull()
+  })
+
+  it('in the desktop app, offers this computer only (chosen) or the network, and warns about plain http on the network', async () => {
+    where.desktopServer = true
+    state = { ...state, reach: { applies: true, value: 'this-computer', networkAddresses: ['192.168.0.65'] } }
+    renderTab()
+    expect(await screen.findByTestId('mcp-server-reach-this-computer')).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByTestId('mcp-server-reach-network')).toHaveAttribute('aria-checked', 'false')
+    expect(screen.queryByTestId('mcp-server-reach-warning')).toBeNull()
+    expect(screen.getByTestId('mcp-server-reach')).toHaveTextContent('only tools running on this computer can connect')
+    expect(screen.getByTestId('mcp-server-reach-choice')).toHaveTextContent('A tool in WSL, or in a container on some setups, connects as another device.')
+
+    fireEvent.click(screen.getByTestId('mcp-server-reach-network'))
+    await waitFor(() => expect(screen.getByTestId('mcp-server-reach-network')).toHaveAttribute('aria-checked', 'true'))
+    expect(mockApiFetch).toHaveBeenCalledWith('/api/mcp-server/reach', expect.objectContaining({ method: 'PUT', body: JSON.stringify({ reach: 'network' }) }))
+    expect(screen.getByTestId('mcp-server-reach-warning')).toHaveTextContent('plain http')
+    expect(screen.getByTestId('mcp-server-reach')).toHaveTextContent('http://192.168.0.65:47891/mcp')
+  })
+
+  it('hides the choice when the server says it does not apply, whatever the facts say', async () => {
+    where.desktopServer = true
+    renderTab()
+    await screen.findByTestId('mcp-server-tab')
+    expect(screen.queryByTestId('mcp-server-reach-choice')).toBeNull()
   })
 
   it('says so where the server is not available', async () => {
@@ -100,7 +139,7 @@ describe('McpServerTab', () => {
     beforeEach(() => {
       user.isAuthMode = true
       where.local = false
-      state = { available: true, unavailableReason: null, auth: 'oauth', enabled: false, endpointUrl: OAUTH_ENDPOINT, token: null }
+      state = { available: true, unavailableReason: null, auth: 'oauth', enabled: false, endpointUrl: OAUTH_ENDPOINT, token: null, reach: { applies: false, value: 'this-computer', networkAddresses: [] } }
       clients = [{
         clientId: 'c1', name: 'Claude Code (gamut)', registration: 'dynamic', documentHost: null,
         redirectHosts: ['localhost (this computer)'], scopes: ['gamut:read', 'gamut:run'],
