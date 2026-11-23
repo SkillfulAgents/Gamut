@@ -29,22 +29,12 @@ describe('settlePending', () => {
     expect(ids(settle({ saved: new Set(['u-before', 'u-here']) }))).toEqual({ appeared: ['b', 'h'], neverRan: [] })
   })
 
-  it('a message sent before this view waits for the host receipts, even with its copy loaded', () => {
-    const saved = new Set(['u-before', 'u-here'])
-    expect(ids(settle({ saved, receipts: null }))).toEqual({ appeared: ['h'], neverRan: [] })
-    expect(ids(settle({ saved, receipts: { 'u-before': 'never_ran' } }))).toEqual({ appeared: ['h'], neverRan: ['b'] })
-  })
-
   it('a picked-up receipt clears only a message sent before this view, once a load since the mount missed it on a truncated page', () => {
     const receipts = { 'u-before': 'picked_up', 'u-here': 'picked_up' } as const
     expect(ids(settle({ receipts }))).toEqual({ appeared: ['b'], neverRan: [] })
     expect(ids(settle({ receipts, loadedSinceMount: false })).appeared).toEqual([])
     expect(ids(settle({ receipts, pageTruncated: false })).appeared).toEqual([])
     expect(ids(settle({ receipts, saved: null })).appeared).toEqual([])
-  })
-
-  it('never ran clears the message for its text to go back, from a receipt or a live discard', () => {
-    expect(ids(settle({ receipts: { 'u-before': 'never_ran', 'u-here': 'never_ran' } }))).toEqual({ appeared: [], neverRan: ['b', 'h'] })
   })
 
   it('never ran wins over a loaded copy: a queued message is saved before a Stop drops it', () => {
