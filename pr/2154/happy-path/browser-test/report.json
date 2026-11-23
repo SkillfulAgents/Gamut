@@ -1,23 +1,25 @@
 {
   "storyId": "browser-test",
-  "passed": true,
-  "reason": "Sent a browser task to agent QA-20261123-221205-y3ob and checked that the reply reports the page title \"Example Domain\".",
+  "passed": false,
+  "reason": "Sent \"Open a browser and go to https://example.com. Tell me the page title.\" to agent QA-20261123-233318-rdts and verified the reply mentions \"Example Domain\".\n  Bugs found:\n    - Pressing Enter in the new-agent home composer did not submit the message. Action: typed the prompt into the home message box and pressed Enter. Expected: the message is sent and a session starts. Actual: the text stayed in the composer and the Send button became enabled. The message only went out after I clicked the Send button. Possibly a timing issue in the snapshot, not confirmed as a repeatable bug.",
   "steps": [
-    "Navigated to http://localhost:47891 — Gamut home loaded with the sidebar listing QA-20261123-221205-y3ob and QA-20261123-221204-zt3g. No errors.",
-    "Clicked QA-20261123-221205-y3ob in the sidebar — agent page opened at /agents/qa-20261123-221205-y3ob-jooasavrq1 with an empty chat input and status \"idle\".",
-    "Typed \"Open a browser and go to https://example.com. Tell me the page title.\" and clicked Send — the message was posted, a session \"Check Example.com Page Title\" was created, and the status changed to \"working\".",
-    "Waited for the response (up to 3 minutes) — the reply appeared within seconds (\"Worked for 4s · 3 tool calls\"), the status returned to \"idle\", and the send button was disabled again.",
-    "Verified the response and took a screenshot — the reply reads: 'The page title is \"Example Domain\". The page loaded normally, and I closed the browser afterwards.' Screenshot step5-response-example-domain.png shows this."
+    "Step 1: navigated to http://localhost:47891 — Gamut home loaded with the sidebar listing QA-20261123-233318-rdts and QA-20261123-233317-6s4j.",
+    "Step 2: clicked QA-20261123-233318-rdts in the sidebar — agent page opened showing an empty message composer.",
+    "Step 3: typed the required message and pressed Enter — the text stayed in the composer and nothing was sent (see BUG_FOUND). Clicked Send — message posted, a new session \"Browser Page Title Check\" was created, and the agent went to Working.",
+    "Step 4: waited up to 180 seconds for \"Example Domain\" — the text appeared and the agent went back to idle.",
+    "Step 5: the reply reads 'The page title is \"Example Domain\". I closed the browser afterwards.' The tool-activity summary shows \"Worked for 4s · 3 tool calls · 163,832 tokens\". Screenshot taken and saved as step5-response.png."
   ],
-  "bugs": [],
-  "durationMs": 67414,
-  "sessionId": "a92840a7-05fb-4145-97af-c7b480d65328",
+  "bugs": [
+    "Pressing Enter in the new-agent home composer did not submit the message. Action: typed the prompt into the home message box and pressed Enter. Expected: the message is sent and a session starts. Actual: the text stayed in the composer and the Send button became enabled. The message only went out after I clicked the Send button. Possibly a timing issue in the snapshot, not confirmed as a repeatable bug."
+  ],
+  "durationMs": 62360,
+  "sessionId": "6d004e10-68b5-4353-942a-5a6e5404aea8",
   "cost": {
-    "inputTokens": 8184,
-    "outputTokens": 5057,
-    "cacheCreationTokens": 63781,
-    "cacheReadTokens": 621792,
+    "inputTokens": 7493,
+    "outputTokens": 5298,
+    "cacheCreationTokens": 43047,
+    "cacheReadTokens": 518074,
     "model": "claude-haiku-5-5",
-    "totalCostUsd": 0.175374
+    "totalCostUsd": 0.139599
   }
 }
