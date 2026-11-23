@@ -1,8 +1,0 @@
-[TEST_PASS]
-[REASON] Opened agent QA-20261123-183128-c1t8, confirmed it was idle, sent "Hello! What is 2+2?", and verified the reply mentions 4.
-[STEP] Step 1: Navigated to http://localhost:47891 — the Gamut app loaded with the sidebar listing QA-20261123-183129-rvkr and QA-20261123-183128-c1t8. PASS.
-[STEP] Step 2: Clicked the QA-20261123-183128-c1t8 agent in the sidebar — the agent page opened at /agents/qa-20261123-183128-c1t8-332aapvrea. PASS.
-[STEP] Step 3: Checked the agent status — the status indicator in the top-right reads "idle", and the sidebar shows "idle" too. PASS.
-[STEP] Step 4: Typed "Hello! What is 2+2?" into the message input and clicked the enabled Send button — the view navigated to a new session titled "Basic Arithmetic Question Check" and the message appeared in the message list. PASS.
-[STEP] Step 5: Waited for a response — the assistant reply "2 + 2 = 4." was already in the message list on my first check after sending, so no wait was needed. PASS.
-[STEP] Step 6: Verified the response mentions "4" — the screenshot shows "2 + 2 = 4." below the user message, and the status is idle. PASS.
