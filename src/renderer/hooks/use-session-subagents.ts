@@ -82,7 +82,7 @@ export function reconcileSubagents(files: SubagentRef[], snapshot?: SubagentSnap
 const subagentKey = (sessionId: string | null) => ['session-subagents', sessionId] as const
 
 export function sessionSubagentOptions(agentSlug: string, sessionId: string | null) {
-  return queryOptions({
+  return queryOptions<SubagentCollection>({
     queryKey: subagentKey(sessionId),
     enabled: !!sessionId && !!agentSlug,
     staleTime: query => query.state.data?.filesLoaded ? 60_000 : 0,
