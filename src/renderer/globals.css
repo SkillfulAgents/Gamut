@@ -44,6 +44,9 @@
 @layer base {
   :root {
     --background: 0 0% 100%;
+    /* The page under Agent Home and a session (ContentCanvas): the lightest grey a white panel on it still reads
+       against, so the composer, the drawer's card and the home cards lift off it. Dark mode keeps its page. */
+    --canvas: 0 0% 98%;
     --foreground: 0 0% 3.9%;
     --card: 0 0% 100%;
     --card-foreground: 0 0% 3.9%;
@@ -101,6 +104,7 @@
 
   .dark {
     --background: 0 0% 10%;
+    --canvas: 0 0% 10%;
     --foreground: 0 0% 98%;
     --card: 0 0% 13%;
     --card-foreground: 0 0% 98%;
@@ -1154,6 +1158,16 @@ html[data-keyboard-open] [data-composer-footer] {
 */
 .file-preview-container {
   container-type: inline-size;
+}
+
+/* A session's floating header (content-shell.tsx): the transcript reaches up behind it by the header's height, so
+   it scrolls under the glass. A banner or the search bar between the header and the chat takes that place instead,
+   and the chat stops at it. */
+.floating-header-shell {
+  --header-overlap: var(--floating-header);
+}
+.floating-header-shell:has([data-top-banner]) {
+  --header-overlap: 0px;
 }
 
 .file-preview-wide-overlay {
