@@ -50,6 +50,9 @@ vi.mock('@shared/lib/tools/requests/use-pending-requests', () => ({
 const mockStream = {
   isActive: false,
   browserActive: false,
+  activeSubagents: [],
+  completedSubagents: null,
+  backgroundTasks: [],
   error: null as string | null,
   apiErrorCode: null as string | null,
   errorPresentation: null as ProviderErrorPresentation | null,
