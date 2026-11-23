@@ -9,8 +9,25 @@ export const listAgentsResultSchema = z.object({
     slug: z.string(),
     name: z.string(),
     description: z.string().optional(),
+    createdAt: z.string(),
+    members: z.array(z.object({
+      name: z.string(),
+      role: z.string(),
+      kind: z.enum(['person', 'agent']),
+      invited: z.literal(true).optional(),
+    })),
+    memberCount: z.number().int().nonnegative(),
+    running: z.boolean(),
+    needsInput: z.boolean(),
+    lastActivityAt: z.string().nullable(),
+    sessionCount: z.number().int().nonnegative(),
+    automatedSessionCount: z.number().int().nonnegative(),
+    dashboards: z.array(z.string()),
+    accountServices: z.array(z.string()),
   })),
 })
+
+export type ListedAgent = z.infer<typeof listAgentsResultSchema>['agents'][number]
 
 export const listAgentMembersResultSchema = z.object({
   truncated: z.boolean(),

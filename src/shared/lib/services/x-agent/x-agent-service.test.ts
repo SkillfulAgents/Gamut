@@ -87,6 +87,11 @@ const fakeActor = {
     readSized: vi.fn(async () => ({ size: 4, stream: new Blob(['data']).stream() })),
   },
   live: async () => ({ activeSessionIds: [] as string[] }),
+  listing: async () => ({
+    live: { activeSessionIds: [], awaitingSessionIds: [], pendingReviews: [] },
+    sessions: { sessionIds: [], sessionCount: 0, lastActivityAt: null, metadata: {} },
+    artifacts: { dashboards: [], widgets: [] },
+  }),
   inputs: { reviews: { requestXAgent: (...args: unknown[]) => mockRequestXAgent(...args) } },
   sessions: {
     isKnown: vi.fn(async () => true),
@@ -115,7 +120,7 @@ vi.mock('@shared/lib/agent-actor', () => ({
 }))
 
 import { userXAgentCaller, agentXAgentCaller, type XAgentCaller } from './caller'
-import { getTargetSessions, getTargetTranscript, listVisibleAgents, openDeliveredFile } from './operations'
+import { getTargetSessions, getTargetTranscript, listVisibleAgents, openDeliveredFile, toListedAgent } from './operations'
 import { invokeAgent } from './invoke'
 import { effectiveSyncWaitMs, readLastAssistantMessage, readLastAssistantReply } from './sync-wait'
 
@@ -499,5 +504,28 @@ describe('the last assistant reply after a boundary', () => {
     findLastEntry.mockImplementation(async () => ({ type: 'system', uuid: 'sys', subtype: 'compact_boundary' }))
     expect(await readLastAssistantMessage(TARGET, SESSION_ID)).toEqual({ role: 'system', content: '[context compacted]' })
     expect(await readLastAssistantReply(TARGET, SESSION_ID, { attempts: 1, includeSystem: false })).toBeNull()
+  })
+})
+
+describe('toListedAgent', () => {
+  it('caps the roster at 25 with people first, counts automated sessions, and treats a pending review as needing input', () => {
+    const people = Array.from({ length: 26 }, (_, i) => ({ id: `u${i}`, name: `Person ${i}`, email: `p${i}@test`, image: null, role: 'user' as const, ...(i === 0 && { invited: true as const }) }))
+    const agent = toListedAgent(
+      { slug: TARGET, name: 'Target', avatar: { color: 'tonal-red', shape: 'squircle' }, createdAt: new Date(0), placement: { runtime: 'local', workspaceHandle: null } },
+      {
+        live: { container: { status: 'stopped', port: null, healthWarnings: [], stale: false, idleSince: null }, activeSessionIds: [], awaitingSessionIds: [], openRequests: [], pendingReviews: [{ id: 'r1', displayText: 'GET /x' }] },
+        sessions: { sessionIds: ['s1', 's2'], sessionCount: 2, lastActivityAt: new Date(5), metadata: { s2: { isScheduledExecution: true } } },
+        artifacts: { dashboards: [{ slug: 'pipeline', name: '', description: '', status: 'stopped', port: 0 }], widgets: [] },
+        refreshingWidgets: [],
+      },
+      people,
+      [{ slug: OTHER, name: 'Other', avatar: { color: 'tonal-red', shape: 'squircle' }, role: 'user', canMessage: true, readDecision: 'allow' }],
+      ['gmail'],
+    )
+    expect(agent.members).toHaveLength(25)
+    expect(agent.members.every((m) => m.kind === 'person')).toBe(true)
+    expect(agent.members[0]).toEqual({ name: 'Person 0', role: 'user', invited: true, kind: 'person' })
+    expect(agent).toMatchObject({ memberCount: 27, needsInput: true, running: false, sessionCount: 2, automatedSessionCount: 1, dashboards: ['pipeline'] })
+    expect(JSON.stringify(agent)).not.toContain('@test')
   })
 })

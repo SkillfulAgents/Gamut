@@ -26,6 +26,11 @@ vi.mock('@shared/lib/agent-actor/registry', () => ({
   agentRegistry: {
     get: (slug: string) => ({
       live: async () => ({ container: { status: 'stopped', port: null, healthWarnings: [], stale: false, idleSince: null }, activeSessionIds: [] }),
+      listing: async () => ({
+        live: { activeSessionIds: [], awaitingSessionIds: [], pendingReviews: [] },
+        sessions: { sessionIds: [], sessionCount: 0, lastActivityAt: null, metadata: {} },
+        artifacts: { dashboards: [], widgets: [] },
+      }),
       sessions: {
         list: async () => [{ id: 's1', agentSlug: slug, name: 'One', createdAt: new Date(1), lastActivityAt: new Date(2) }],
         readMetadata: async () => ({}),

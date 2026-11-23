@@ -34,6 +34,11 @@ vi.mock('@shared/lib/agent-actor/registry', () => ({
         container: { status: slug === 'alpha' ? 'running' : 'stopped', port: null, healthWarnings: [], stale: false, idleSince: null },
         activeSessionIds: [],
       }),
+      listing: async () => ({
+        live: { activeSessionIds: [], awaitingSessionIds: [], pendingReviews: [] },
+        sessions: { sessionIds: [], sessionCount: 0, lastActivityAt: null, metadata: {} },
+        artifacts: { dashboards: [], widgets: [] },
+      }),
       sessions: {
         list: async (options?: { excludeAutomated?: boolean }) => (actors.sessions[slug] ?? [])
           .filter((session) => !(options?.excludeAutomated && session.hidden))
