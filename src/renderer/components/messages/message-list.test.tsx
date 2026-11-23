@@ -222,7 +222,7 @@ describe('MessageList', () => {
     expect(container.querySelector('.animate-spin')).toBeTruthy()
   })
 
-  it('re-renders only rows with subagent calls when subagent state changes', () => {
+  it('keeps message rows memoized when subagent state changes', () => {
     mockToolRenders.length = 0
     mockStreamState.isActive = true
     mockMessagesData.data = [
@@ -250,7 +250,7 @@ describe('MessageList', () => {
     }]
     act(() => rerenderList())
 
-    expect(mockToolRenders).toContain('Agent')
+    expect(mockToolRenders).not.toContain('Agent')
     expect(mockToolRenders).not.toContain('Bash')
   })
 

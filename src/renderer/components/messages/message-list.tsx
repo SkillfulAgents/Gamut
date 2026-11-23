@@ -12,7 +12,7 @@ import {
 } from '@renderer/hooks/use-message-stream'
 import { isTurnStartingUserMessage, type PendingMessage } from './pending-message'
 import { classifyUserMessage, classifyUserText } from './user-message-kinds'
-import { MessageItem, readsSubagentState } from './message-item'
+import { MessageItem, hasWorkflowCall } from './message-item'
 import { currentRoutedProviderError } from '@renderer/components/provider-error/provider-error-placement'
 import { ToolCallItem, StreamingToolCallItem } from './tool-call-item'
 import { ThinkingBlockItem } from './thinking-block-item'
@@ -1130,8 +1130,8 @@ export function MessageList({ sessionId, agentSlug, pendingUserMessages, pending
                       isSessionActive={canHaveRunningToolCalls.has(item.id)}
                       // Subagent state changes identity on every subagent event; passing it only
                       // to rows that read it keeps the other rows' memo.
-                      activeSubagents={readsSubagentState(displayedMessage) ? activeSubagents : undefined}
-                      completedSubagents={readsSubagentState(displayedMessage) ? completedSubagents : undefined}
+                      activeSubagents={hasWorkflowCall(displayedMessage) ? activeSubagents : undefined}
+                      completedSubagents={hasWorkflowCall(displayedMessage) ? completedSubagents : undefined}
                       onRemoveMessage={readOnly ? undefined : handleRemoveMessage}
                       onRemoveToolCall={readOnly ? undefined : handleRemoveToolCall}
                       workDetailClassName={
@@ -1283,8 +1283,6 @@ export function MessageList({ sessionId, agentSlug, pendingUserMessages, pending
                   sessionId={sessionId}
                   agentSlug={agentSlug}
                   isSessionActive={isActive}
-                  activeSubagent={activeSubagents?.find(s => s.parentToolId === tool.id) ?? null}
-                  isCompleted={completedSubagents?.has(tool.id) ?? false}
                 />
               )
             } else if (tool.name === 'Workflow') {

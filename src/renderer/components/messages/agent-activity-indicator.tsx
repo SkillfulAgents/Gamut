@@ -1,3 +1,4 @@
+import { useSessionTray } from '@renderer/context/session-tray-context'
 import { useSessionSubagents } from '@renderer/hooks/use-session-subagents'
 
 import { useIsVoiceModeActive } from '@renderer/lib/voice-mode-handoff'
@@ -72,6 +73,7 @@ export function AgentActivityIndicator({ sessionId, agentSlug }: AgentActivityIn
   // disagree with the sidebar/header. It also covers the kinds the old
   // per-type list silently omitted: script_run, computer_use, and
   // capability_review used to read as "Working…" while a card was parked.
+  const tray = useSessionTray()
   const voiceModeActive = useIsVoiceModeActive(sessionId)
   const isAwaitingInput = isActive &&
     (pendingUserRequests ?? []).some((r) => r.blocking && !r.autoApproved)
@@ -170,6 +172,7 @@ export function AgentActivityIndicator({ sessionId, agentSlug }: AgentActivityIn
         onRevoke: handleRevokeComputerUse,
       } : null}
       subagents={subagentRows}
+      onOpenSubagent={tray ? item => tray.openUtility('subagents', item.id) : undefined}
       backgroundTasks={labeledBackgroundTasks}
       todos={todos}
       onStopTask={handleStopTask}
