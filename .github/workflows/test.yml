@@ -32,7 +32,11 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # A full check needs just over Node's default 4 GB heap (it ran out on
+      # the MCP branches, at ~1.6M types); the runner has the memory.
       - name: Run typecheck
+        env:
+          NODE_OPTIONS: --max-old-space-size=8192
         run: npm run typecheck
 
   lint:
