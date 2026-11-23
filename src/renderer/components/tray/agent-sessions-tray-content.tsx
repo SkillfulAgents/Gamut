@@ -1,7 +1,8 @@
 import { useMemo, type CSSProperties } from 'react'
 import { useQueries } from '@tanstack/react-query'
 import { ArrowLeft, ArrowUpRight, ChevronRight } from 'lucide-react'
-import { CalledSessionTranscript } from './called-session-transcript'
+import { MessageList } from '@renderer/components/messages/message-list'
+import { WithoutSessionTray } from '@renderer/context/session-tray-context'
 import { CalledAgentAvatar, calledSessionState, calledStateLabel, type CalledSessionState } from '@renderer/components/agents/called-agent-avatar'
 import { AppLink } from '@renderer/components/ui/app-link'
 import { useAgents, resolveRouteAgentId } from '@renderer/hooks/use-agents'
@@ -169,9 +170,11 @@ function AgentSessionDetail({ entry, onBack }: { entry: CalledSession; onBack: (
           <ArrowUpRight className="h-3 w-3" />
         </AppLink>}
       </div>
-      <div className="flex flex-1 min-h-0 flex-col">
+      <div className="flex flex-1 min-h-0 flex-col" data-testid="called-transcript">
         {entry.session ? (
-          <CalledSessionTranscript sessionId={entry.call.sessionId} agentSlug={entry.call.slug} />
+          <WithoutSessionTray>
+            <MessageList sessionId={entry.call.sessionId} agentSlug={entry.call.slug} readOnly />
+          </WithoutSessionTray>
         ) : <p className="px-4 py-2 text-xs text-muted-foreground">{entry.unavailable ? 'This session is unavailable or you do not have access.' : 'Loading conversation…'}</p>}
       </div>
     </div>

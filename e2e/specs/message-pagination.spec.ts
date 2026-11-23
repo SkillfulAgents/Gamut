@@ -209,6 +209,27 @@ test.describe('transcript pagination', () => {
     })
     fs.writeFileSync(file, entries.join('\n') + '\n' + fs.readFileSync(file, 'utf-8'))
 
+    // The target called back into the original session. Its tool rows should be
+    // inspectable in the tray without changing the caller's selected session.
+    const childFile = sessionJsonlPath(target.slug, child.id)
+    await expect.poll(() => fs.existsSync(childFile)).toBe(true)
+    const childBlocks = [
+      { role: 'user', content: 'Check the worksheet' },
+      { role: 'assistant', content: [
+        { type: 'tool_use', id: 'child-bash', name: 'Bash', input: { command: 'pwd', description: 'Check the directory' } },
+        { ...call, id: 'call-back', input: { slug: caller.slug, session_id: session.id, prompt: 'Send the result' } },
+      ] },
+      { role: 'user', content: [
+        { type: 'tool_result', tool_use_id: 'child-bash', content: '/workspace' },
+        { ...result, tool_use_id: 'call-back', content: `session_id: ${session.id}\nstatus: completed` },
+      ] },
+      { role: 'assistant', content: [{ type: 'text', text: 'Checked [worksheet](/workspace/worksheet.md).' }] },
+    ]
+    fs.appendFileSync(childFile, childBlocks.map((message, i) => JSON.stringify({
+      type: message.role, uuid: `worksheet-${i}`, parentUuid: i ? `worksheet-${i - 1}` : null,
+      sessionId: child.id, timestamp: new Date(Date.now() + i).toISOString(), message,
+    })).join('\n') + '\n')
+
     await page.goto(`/agents/${caller.slug}/sessions/${session.id}`)
     await expect(page.getByText(NEWEST, { exact: true })).toBeVisible({ timeout: 30_000 })
     await expect(page.getByText('Review the archived worksheet')).toHaveCount(0)
@@ -216,7 +237,18 @@ test.describe('transcript pagination', () => {
     await page.getByTestId('tray-empty-invoked-agents').click()
     const row = page.getByTestId('agent-sessions-list-row').filter({ hasText: 'Review the archived worksheet' })
     await row.click()
-    await expect(page.getByTestId('called-transcript')).toContainText('Review the archived worksheet')
+    const transcript = page.getByTestId('called-transcript').getByTestId('message-list')
+    await expect(transcript).toContainText('Review the archived worksheet')
+    await expect(transcript.getByRole('link', { name: 'worksheet' })).toHaveAttribute('href', new RegExp(target.slug))
+    const bash = transcript.getByTestId('tool-call-toggle-Bash')
+    if (!await bash.isVisible()) await transcript.getByTestId('turn-summary').last().click()
+    await bash.click()
+    await expect(transcript.getByTestId('bash-terminal')).toContainText('/workspace')
+    const nested = transcript.getByTestId('invoke-agent-row')
+    await nested.click()
+    await expect(nested).toHaveAttribute('aria-expanded', 'true')
+    await expect(transcript.getByTestId('invoke-agent-open-panel')).toHaveCount(0)
+    await expect(page.getByTestId('agent-call-open-session')).toHaveAttribute('href', `/agents/${target.slug}/sessions/${child.id}`)
     await page.getByTestId('agent-call-back').click()
     await row.click()
     await page.getByTestId('agent-call-open-session').click()

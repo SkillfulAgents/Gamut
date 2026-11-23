@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { FileIconTile } from '@renderer/components/ui/file-icon-tile'
-import { useFilePreview } from '@renderer/context/file-preview-context'
+import { useAgentFileOpener } from '@renderer/context/agent-file-opener-context'
 import { useFileSize } from '@renderer/hooks/use-file-size'
 import { openableProps } from '@renderer/lib/openable'
 import { describeWorkspaceFile } from '@renderer/lib/workspace-file'
@@ -47,7 +47,7 @@ export function imageSizeForCount(count: number): ImageSize {
  * preview drawer. Unlike the composer chip there is no remove control.
  */
 export function SentAttachmentChip({ filePath, agentSlug, imageSize = 'single', description, sizeBytes, version }: SentAttachmentChipProps) {
-  const { openFile, openFolder } = useFilePreview()
+  const opener = useAgentFileOpener()
   // A picture that will not load is worse than no picture: an alt-text box, or
   // a blank square in a grid. Falling back to the chip still names the file and
   // still opens it, which is everything the row is for.
@@ -60,17 +60,17 @@ export function SentAttachmentChip({ filePath, agentSlug, imageSize = 'single', 
   const size = sizeBytes ?? fetchedSize
   const sizeText = typeof size === 'number' ? formatFileSize(size) : null
 
-  const open = () => {
-    if (file.isFolder) openFolder(file.path, file.agentSlug)
-    else openFile(file.path, file.agentSlug, description)
-  }
+  const open = opener && (() => {
+    if (file.isFolder) opener.openFolder(file.path, file.agentSlug)
+    else opener.openFile(file.path, file.agentSlug, description)
+  })
 
   return (
     <div
-      {...openableProps(open)}
+      {...(open && openableProps(open))}
       className={cn(
-        'relative cursor-pointer rounded-card border bg-background text-xs text-left transition-colors',
-        'hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+        'relative rounded-card border bg-background text-xs text-left transition-colors',
+        open && 'cursor-pointer hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
         // Sent images show at their own aspect ratio, capped in height so a
         // tall screenshot doesn't take over the thread; width is bounded by the
         // message column.

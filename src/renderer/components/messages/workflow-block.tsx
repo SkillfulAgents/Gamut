@@ -2,7 +2,7 @@ import { WorkflowIcon } from '@renderer/components/workflow/workflow-icon'
 import { cn } from '@shared/lib/utils/cn'
 import { StatusIndicator } from './tool-call-item'
 import { formatElapsed } from '@renderer/hooks/use-elapsed-timer'
-import { useWorkflow } from '@renderer/context/workflow-context'
+import { useOpenWorkflow } from '@renderer/context/workflow-context'
 import type { ApiToolCall } from '@shared/lib/types/api'
 import type { SubagentInfo } from '@renderer/hooks/use-message-stream'
 
@@ -84,7 +84,7 @@ export function WorkflowBlock({
   isCompleted,
   runId,
 }: WorkflowBlockProps) {
-  const { openWorkflow } = useWorkflow()
+  const openWorkflow = useOpenWorkflow()
   const isActive = activeSubagent?.parentToolId === toolCall.id
 
   // A workflow is a BACKGROUND task that outlives the turn: the agent launches it
@@ -133,7 +133,7 @@ export function WorkflowBlock({
 
   return (
     <div className="text-sm border border-border/70 rounded-md overflow-hidden">
-      {resolvedRunId ? (
+      {resolvedRunId && openWorkflow ? (
         <button
           type="button"
           onClick={() => openWorkflow(resolvedRunId, label)}

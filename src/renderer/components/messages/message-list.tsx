@@ -36,7 +36,7 @@ import { appendToSessionDraft, useDraftsStore } from '@renderer/context/drafts-c
 import { useQueryClient } from '@tanstack/react-query'
 import { resolveRouteAgentId, type ApiAgent } from '@renderer/hooks/use-agents'
 import { draftFromAgentText } from './composer-chips'
-import { useWorkflow } from '@renderer/context/workflow-context'
+import { useOpenWorkflow } from '@renderer/context/workflow-context'
 import { useRenderTracker } from '@renderer/lib/perf'
 import {
   useEffect,
@@ -263,9 +263,10 @@ export function MessageList({ sessionId, agentSlug, pendingUserMessages, pending
   // Auto-open the drawer to a workflow the moment it launches (once per run, only while
   // still active). On reload there's no workflow_started replay, so completed runs won't
   // re-pop — the user opens those from the inline block.
-  const { openWorkflow } = useWorkflow()
+  const openWorkflow = useOpenWorkflow()
   const autoOpenedWorkflowsRef = useRef<Set<string>>(new Set())
   useEffect(() => {
+    if (!openWorkflow) return
     for (const w of workflows ?? []) {
       if (!w.completedAt && w.runId && !autoOpenedWorkflowsRef.current.has(w.runId)) {
         autoOpenedWorkflowsRef.current.add(w.runId)
@@ -429,10 +430,10 @@ export function MessageList({ sessionId, agentSlug, pendingUserMessages, pending
     }
   }, [isCompacting, boundaryCount, sessionId])
 
-  // The one row (streaming or persisted) whose provider error a ProviderErrorPlacement shows right now.
+  // Read-only transcripts have no composer or banner to take over a provider error.
   const currentRoutedError = useMemo(
-    () => currentRoutedProviderError({ isActive, error: streamError, apiErrorCode, errorPresentation }, messages),
-    [isActive, streamError, apiErrorCode, errorPresentation, messages],
+    () => readOnly ? null : currentRoutedProviderError({ isActive, error: streamError, apiErrorCode, errorPresentation }, messages),
+    [readOnly, isActive, streamError, apiErrorCode, errorPresentation, messages],
   )
 
   // Voice mode reading this session: subscribed once here and handed to
@@ -1004,6 +1005,10 @@ export function MessageList({ sessionId, agentSlug, pendingUserMessages, pending
     )
   }
 
+  if (error && !(error instanceof TranscriptNotFoundError) && !messages && !isActive && !hasPendingMessages) {
+    return <p role="alert" className="p-4 text-sm text-muted-foreground">Could not load this conversation.</p>
+  }
+
   // The transcript file is gone (e.g. removed by the CLI's retention cleanup)
   // while the session still appears in the nav. Don't show this during the
   // new-session window: the composer's client has a pendingUserMessage then,
@@ -1107,7 +1112,7 @@ export function MessageList({ sessionId, agentSlug, pendingUserMessages, pending
             } else if (item.type === 'compact_boundary') {
               renderedItem = <CompactBoundaryItem boundary={item as ApiCompactBoundary} />
             } else if (item.type === 'informational') {
-              renderedItem = <InformationalItem item={item as ApiInformational} />
+              renderedItem = <InformationalItem item={item as ApiInformational} agentSlug={agentSlug} />
             } else if (item.type === 'monitor_event') {
               renderedItem = <MonitorEventItem item={item as ApiMonitorEvent} />
             } else {
