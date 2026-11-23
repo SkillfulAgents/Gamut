@@ -17,6 +17,8 @@
  */
 import { agentCatalog, agentRegistry } from '@shared/lib/agent-actor'
 import { background } from '@shared/lib/background'
+import { trackServerEvent } from '@shared/lib/analytics/server-analytics'
+import { getTeamBrain } from '@shared/lib/config/settings'
 import { resolveAppLinkContext, withSessionUrl } from '@shared/lib/agent-integrations/app-link'
 import { callerHasRoleOnTarget, userXAgentCaller } from '@shared/lib/services/x-agent/caller'
 import { invokeAgent } from '@shared/lib/services/x-agent/invoke'
@@ -521,6 +523,15 @@ async function runInvoke(ctx: McpCallContext, call: McpToolCall, request: Invoke
   }
   const sessionId = invoked.value.sessionId
   call.setAuditTarget({ sessionId })
+  if (!request.sessionId) {
+    trackServerEvent('mcp_session_started', {
+      client_name: call.clientName,
+      credential: ctx.credential.kind,
+      // A failed read must not fail a call whose session already exists.
+      is_team_brain: (await getTeamBrain().catch(() => null))?.agentSlug === target.slug,
+      has_attachments: paths.length > 0,
+    })
+  }
   const outcome = await waitForSettle(target.slug, sessionId, waitDeadline, call, { boundaryUuid: boundary?.uuid })
   return describe(ctx, target, sessionId, outcome, boundary?.uuid)
 }

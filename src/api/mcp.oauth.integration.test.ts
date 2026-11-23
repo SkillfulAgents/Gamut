@@ -40,6 +40,7 @@ import { DCR_LIMITS } from '@shared/lib/mcp-server/oauth/oauth-config'
 import { deleteUnusedClientRegistrations, STALE_REGISTRATION_MS } from '@shared/lib/mcp-server/oauth/client-cleanup'
 import { oauthClient } from '@shared/lib/db/schema'
 import * as flow from '@shared/lib/mcp-server/oauth/testing/oauth-flow'
+import { trackServerEvent } from '@shared/lib/analytics/server-analytics'
 
 const options: flow.FlowOptions = { base: BASE, fetch: async (path, init) => app.request(`${BASE}${path}`, init) }
 
@@ -196,6 +197,8 @@ describe('a connected client', () => {
     const rows = await handle.db.select().from(auditLog).where(eq(auditLog.object, 'mcp_tool')).all()
     const row = rows.at(-1)
     expect(JSON.parse(row?.details ?? '{}')).toMatchObject({ tool: 'get_guide', client: 'Flow Test Client', credential: 'oauth' })
+    // The analytics event names the registered client and the OAuth credential too.
+    expect(vi.mocked(trackServerEvent)).toHaveBeenCalledWith('mcp_tool_called', expect.objectContaining({ tool: 'get_guide', client_name: 'Flow Test Client', credential: 'oauth', outcome: 'ok' }))
   })
 })
 

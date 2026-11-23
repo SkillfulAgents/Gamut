@@ -21,6 +21,7 @@ vi.mock('../middleware/auth', async (original) => ({
 }))
 
 import routes from './mcp-server-settings'
+import { trackServerEvent } from '@shared/lib/analytics/server-analytics'
 
 const app = new Hono().route('/api/mcp-server', routes)
 
@@ -52,5 +53,81 @@ describe('MCP server settings routes in auth mode', () => {
     expect((await put('/enabled', { enabled: true })).status).toBe(200)
     const status = await (await app.request('/api/mcp-server')).json()
     expect(status).toMatchObject({ available: true, auth: 'oauth', enabled: true, token: null, reach: { applies: false, value: 'this-computer', networkAddresses: [] } })
+  })
+})
+
+describe('analytics events of the settings routes (desktop app, no auth mode)', () => {
+  // The test setup mocks trackServerEvent for every test file.
+  const track = vi.mocked(trackServerEvent)
+
+  beforeEach(() => {
+    vi.stubEnv('AUTH_MODE', 'false')
+    Object.defineProperty(process, 'type', { value: 'browser', configurable: true, writable: true })
+    track.mockClear()
+  })
+
+  afterEach(() => {
+    Object.defineProperty(process, 'type', { value: undefined, configurable: true, writable: true })
+  })
+
+  it('mcp_server_toggled with enabled and auth_mode, only when the switch changed', async () => {
+    expect((await put('/enabled', { enabled: true })).status).toBe(200) // already on by default
+    expect(track).not.toHaveBeenCalled()
+    expect((await put('/enabled', { enabled: false })).status).toBe(200)
+    expect(track).toHaveBeenCalledTimes(1)
+    expect(track).toHaveBeenLastCalledWith('mcp_server_toggled', { enabled: false, auth_mode: false })
+    await put('/enabled', { enabled: false })
+    expect(track).toHaveBeenCalledTimes(1)
+    await put('/enabled', { enabled: true })
+    expect(track).toHaveBeenLastCalledWith('mcp_server_toggled', { enabled: true, auth_mode: false })
+  })
+
+  it('mcp_reach_changed with the reach, only when it changed', async () => {
+    await put('/reach', { reach: 'this-computer' }) // the default
+    expect(track).not.toHaveBeenCalled()
+    await put('/reach', { reach: 'network' })
+    expect(track).toHaveBeenCalledTimes(1)
+    expect(track).toHaveBeenLastCalledWith('mcp_reach_changed', { reach: 'network' })
+    await put('/reach', { reach: 'network' })
+    expect(track).toHaveBeenCalledTimes(1)
+  })
+
+  it('mcp_token_regenerated with no properties, once per regenerate', async () => {
+    expect((await app.request('/api/mcp-server/token/regenerate', { method: 'POST' })).status).toBe(200)
+    expect(track).toHaveBeenCalledTimes(1)
+    expect(track).toHaveBeenLastCalledWith('mcp_token_regenerated')
+  })
+
+  it('no event carries the token, an address or a person', async () => {
+    const { token } = await (await app.request('/api/mcp-server/token/regenerate', { method: 'POST' })).json()
+    await put('/enabled', { enabled: false })
+    await put('/reach', { reach: 'network' })
+    const sent = JSON.stringify(track.mock.calls)
+    expect(sent).not.toContain(token)
+    expect(sent).not.toMatch(/gamut_mcp_|https?:\/\/|\d+\.\d+\.\d+\.\d+|a1|u1/)
+  })
+
+  it('mcp_server_toggled in auth mode too, with auth_mode true, only when the admin changed it', async () => {
+    Object.defineProperty(process, 'type', { value: undefined, configurable: true, writable: true })
+    vi.stubEnv('AUTH_MODE', 'true')
+    session.user = { id: 'a1', role: 'admin' }
+    await put('/enabled', { enabled: false }) // already off by default in auth mode
+    expect(track).not.toHaveBeenCalled()
+    expect((await put('/enabled', { enabled: true })).status).toBe(200)
+    expect(track).toHaveBeenCalledTimes(1)
+    expect(track).toHaveBeenLastCalledWith('mcp_server_toggled', { enabled: true, auth_mode: true })
+    await put('/enabled', { enabled: true })
+    expect(track).toHaveBeenCalledTimes(1)
+  })
+
+  it('a refused change sends nothing', async () => {
+    // Auth mode is a web deployment's (Electron ignores AUTH_MODE).
+    Object.defineProperty(process, 'type', { value: undefined, configurable: true, writable: true })
+    vi.stubEnv('AUTH_MODE', 'true')
+    session.user = { id: 'u1', role: 'user' }
+    await put('/enabled', { enabled: false })
+    await put('/reach', { reach: 'network' })
+    await app.request('/api/mcp-server/token/regenerate', { method: 'POST' })
+    expect(track).not.toHaveBeenCalled()
   })
 })

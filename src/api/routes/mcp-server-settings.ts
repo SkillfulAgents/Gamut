@@ -28,6 +28,7 @@ import { isMcpServerEnabledFrom, mcpServerReachFrom, setMcpServerEnabled, setMcp
 import { mcpServerReachSchema, revokeMcpClientRequestSchema, type McpServerStatusResponse } from '@shared/lib/mcp-server/mcp-server-settings-schema'
 import { canServeMcpOAuth, mcpResourceFor } from '@shared/lib/mcp-server/oauth/oauth-config'
 import { checksLoopbackSource } from '../middleware/local-mode-auth'
+import { trackServerEvent } from '@shared/lib/analytics/server-analytics'
 import { MCP_ROUTE_PATH } from './mcp'
 import { Authenticated, IsAdmin } from '../middleware/auth'
 
@@ -89,19 +90,23 @@ routes.get('/', async (c) => c.json(await status(c.req.raw)))
 routes.put('/enabled', IsAdmin(), zValidator('json', z.object({ enabled: z.boolean() }).strict()), async (c) => {
   const current = await status(c.req.raw)
   if (!current.available) return c.json({ error: current.unavailableReason ?? 'The MCP server is not available here' }, 409)
-  await setMcpServerEnabled(c.req.valid('json').enabled)
+  const { enabled, changed } = await setMcpServerEnabled(c.req.valid('json').enabled)
+  // Counted only when it changed, in either mode. No token, address or person in the properties.
+  if (changed) trackServerEvent('mcp_server_toggled', { enabled, auth_mode: isAuthMode() })
   return c.json(await status(c.req.raw))
 })
 
 routes.put('/reach', IsAdmin(), zValidator('json', z.object({ reach: mcpServerReachSchema }).strict()), async (c) => {
   if (!checksLoopbackSource()) return c.json({ error: 'This server does not check where requests come from; its network setup decides who reaches it' }, 409)
-  await setMcpServerReach(c.req.valid('json').reach)
+  const { reach, changed } = await setMcpServerReach(c.req.valid('json').reach)
+  if (changed) trackServerEvent('mcp_reach_changed', { reach })
   return c.json(await status(c.req.raw))
 })
 
 routes.post('/token/regenerate', IsAdmin(), async (c) => {
   if (isAuthMode()) return c.json({ error: 'This deployment has no installation token' }, 409)
   await regenerateMcpInstallationToken()
+  trackServerEvent('mcp_token_regenerated')
   return c.json(await status(c.req.raw))
 })
 

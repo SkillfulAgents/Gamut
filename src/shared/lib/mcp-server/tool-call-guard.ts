@@ -16,7 +16,13 @@
  * session) and whether it succeeded. Never the arguments themselves: no
  * prompt, question, file name or content, token or URL. A call refused by
  * the rate limit writes no row, so a flood cannot fill the audit log.
+ *
+ * Analytics: each audited call also sends `mcp_tool_called` (tool, client
+ * name, credential kind, protocol era, outcome). A refused call sends nothing,
+ * for the same reason it writes no row: analytics neither samples nor dedupes.
  */
+import type { ProtocolEra } from '@modelcontextprotocol/server'
+import { trackServerEvent } from '@shared/lib/analytics/server-analytics'
 import { defineFixedWindow } from '@shared/lib/app-state/fixed-window'
 import { logAuditEvent } from '@shared/lib/services/audit-log-service'
 import type { McpCallContext } from './context'
@@ -58,10 +64,21 @@ export function auditToolCall(params: {
   ctx: McpCallContext
   tool: string
   clientName: string | null
+  /** The protocol era the request was served in, when known. */
+  era?: ProtocolEra
   target: McpAuditTarget
   outcome: 'ok' | 'error'
 }): Promise<void> {
-  const { ctx, tool, clientName, target, outcome } = params
+  const { ctx, tool, clientName, era, target, outcome } = params
+  // One analytics event per audited call, like `api_called` per proxied call:
+  // fire-and-forget, consent read with the event. Never what was acted on.
+  trackServerEvent('mcp_tool_called', {
+    tool,
+    client_name: clientName,
+    credential: ctx.credential.kind,
+    ...(era ? { protocol_era: era } : {}),
+    outcome,
+  })
   // Written in the background (logAuditEvent): the row never holds the answer.
   return logAuditEvent({
     userId: ctx.userId,

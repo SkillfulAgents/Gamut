@@ -16,6 +16,10 @@ import { declareServerCapabilities } from '@shared/lib/facts/server-facts'
 
 let handle: TestDatabase
 vi.mock('@shared/lib/db', () => ({ get db() { return handle.db } }))
+const analytics = vi.hoisted(() => ({ track: vi.fn() }))
+vi.mock('@shared/lib/analytics/server-analytics', () => ({
+  trackServerEvent: (...args: unknown[]) => analytics.track(...args),
+}))
 vi.mock('@shared/lib/auth/config', async (original) => ({
   ...(await original<typeof import('@shared/lib/auth/config')>()),
   getAppBaseUrl: async () => 'https://gamut.test',
@@ -226,9 +230,9 @@ async function call(tool: McpToolDefinition<any, any>, args: Record<string, unkn
 }
 
 /** The tools as the server registers them, callable with a fake request context. */
-function registered(ctx: McpCallContext) {
+function registered(ctx: McpCallContext, era?: 'legacy' | 'modern') {
   const handlers = new Map<string, (args: unknown, context?: ServerContext) => Promise<any>>()
-  registerTools({ registerTool: (name: string, _config: unknown, handler: never) => { handlers.set(name, handler) } } as unknown as McpServer, ctx)
+  registerTools({ registerTool: (name: string, _config: unknown, handler: never) => { handlers.set(name, handler) } } as unknown as McpServer, ctx, undefined, { era })
   return (name: string, args: Record<string, unknown>, clientName: string | null = null) => handlers.get(name)!(args, {
     mcpReq: {
       signal: new AbortController().signal,
@@ -249,6 +253,7 @@ beforeEach(async () => {
   fake.state.sessions.clear()
   fake.state.files.clear()
   fake.state.answers.length = 0
+  analytics.track.mockClear()
   handle = await createTestDatabase()
   await handle.db.insert(user).values([
     { id: 'alice', name: 'Alice', email: 'alice@example.com' },
@@ -666,4 +671,60 @@ describe('progress', () => {
     await call(waitForSessionTool, { agent: 'alpha', session_id: value.session_id, wait_seconds: 6 }, person('alice'), { progress: async (elapsed: number) => { ticks.push(elapsed) } })
     expect(ticks).toEqual([5])
   }, 20_000)
+})
+
+describe('analytics', () => {
+  const events = (name: string) => analytics.track.mock.calls.filter(([event]) => event === name).map(([, properties]) => properties)
+  const SECRET = 'TOP SECRET PROMPT 4417'
+
+  it('mcp_tool_called: one per call that ran, with tool, client, credential, era and outcome, and nothing it acted on', async () => {
+    const tools = registered(person('alice'), 'modern')
+    const result = await tools('invoke_agent', { agent: 'alpha', prompt: SECRET }, 'Codex')
+    await tools('invoke_agent', { agent: 'nope', prompt: SECRET }, null)
+    expect(events('mcp_tool_called')).toEqual([
+      { tool: 'invoke_agent', client_name: 'Codex', credential: 'installation-token', protocol_era: 'modern', outcome: 'ok' },
+      { tool: 'invoke_agent', client_name: null, credential: 'installation-token', protocol_era: 'modern', outcome: 'error' },
+    ])
+    // No era known: the property is left out.
+    await registered(person('alice'))('get_guide', {}, null)
+    expect(events('mcp_tool_called').at(-1)).toEqual({ tool: 'get_guide', client_name: null, credential: 'installation-token', outcome: 'ok' })
+    const serialized = JSON.stringify(analytics.track.mock.calls)
+    for (const sensitive of [SECRET, 'alpha', 'alice', result.structuredContent.session_id, 'gamut.test']) expect(serialized).not.toContain(sensitive)
+  })
+
+  it('a call refused by the rate limit sends nothing', async () => {
+    const alice = registered(person('alice'))
+    for (let i = 0; i < MCP_TOOL_CALLS_PER_MINUTE; i++) await alice('get_guide', {})
+    analytics.track.mockClear()
+    expect((await alice('get_guide', {})).isError).toBe(true)
+    expect((await alice('invoke_agent', { agent: 'alpha', prompt: 'hi' })).isError).toBe(true)
+    expect(analytics.track).not.toHaveBeenCalled()
+  })
+
+  it('mcp_session_started: a new session only, with client, credential, Team Brain and attachments flags', async () => {
+    const tools = registered(person('alice'), 'legacy')
+    const first = await tools('invoke_agent', { agent: 'alpha', prompt: SECRET }, 'Claude Code')
+    expect(events('mcp_session_started')).toEqual([
+      { client_name: 'Claude Code', credential: 'installation-token', is_team_brain: false, has_attachments: false },
+    ])
+    // Continuing it starts nothing.
+    await tools('invoke_agent', { agent: 'alpha', prompt: 'again', session_id: first.structuredContent.session_id }, 'Claude Code')
+    expect(events('mcp_session_started')).toHaveLength(1)
+
+    // The Team Brain, and a session with an attachment.
+    await mutateSettings((settings) => { settings.teamBrain = { agentSlug: 'beta', volumeId: 'v1' } })
+    await tools('ask_team_brain', { question: SECRET }, null)
+    const prepared = (await call(prepareFileUpload, { agent: 'alpha', filename: 'secret-name.txt' }, person('alice'))).value
+    const grant = await authorizeSignedFileRequest(prepared.upload_url.split('/').pop()!, 'upload')
+    await storeSignedUpload(grant, new Response('x').body, 1)
+    await tools('invoke_agent', { agent: 'alpha', prompt: SECRET, attachments: [prepared.upload_id] }, null)
+    expect(events('mcp_session_started').slice(1)).toEqual([
+      { client_name: null, credential: 'installation-token', is_team_brain: true, has_attachments: false },
+      { client_name: null, credential: 'installation-token', is_team_brain: false, has_attachments: true },
+    ])
+    const serialized = JSON.stringify(analytics.track.mock.calls)
+    for (const sensitive of [SECRET, 'alpha', 'beta', 'alice', 'secret-name', first.structuredContent.session_id, prepared.upload_id]) {
+      expect(serialized).not.toContain(sensitive)
+    }
+  })
 })
