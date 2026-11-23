@@ -105,9 +105,14 @@ function lastActiveIso(value: unknown): string | null {
   return Number.isFinite(ms) && ms > 0 ? new Date(ms).toISOString() : null
 }
 
-/** Disconnects a client from this person. Returns whether there was a connection. */
-export async function revokeConnectedClient(userId: string, clientId: string): Promise<boolean> {
-  const existing = await db.select({ id: oauthConsent.id }).from(oauthConsent)
+/**
+ * Disconnects a client from this person. Returns what was disconnected (the
+ * client's display name and registration kind, for analytics), or null when
+ * the person had no connection to it.
+ */
+export async function revokeConnectedClient(userId: string, clientId: string): Promise<{ clientName: string; registration: ClientRegistrationKind } | null> {
+  const existing = await db.select({ id: oauthConsent.id, name: oauthClient.name, discoveryId: oauthClient.clientDiscoveryId }).from(oauthConsent)
+    .leftJoin(oauthClient, eq(oauthClient.clientId, oauthConsent.clientId))
     .where(and(eq(oauthConsent.userId, userId), eq(oauthConsent.clientId, clientId))).limit(1).get()
   // Access-token rows first: they reference refresh-token rows.
   await batch([
@@ -115,7 +120,8 @@ export async function revokeConnectedClient(userId: string, clientId: string): P
     db.delete(oauthRefreshToken).where(and(eq(oauthRefreshToken.userId, userId), eq(oauthRefreshToken.clientId, clientId))),
     db.delete(oauthConsent).where(and(eq(oauthConsent.userId, userId), eq(oauthConsent.clientId, clientId))),
   ])
-  return Boolean(existing)
+  if (!existing) return null
+  return { clientName: displayClientName(existing.name, clientId), registration: existing.discoveryId ? 'metadata-document' : 'dynamic' }
 }
 
 export interface ConsentClientInfo {

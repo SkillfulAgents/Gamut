@@ -558,6 +558,60 @@ describe('unused registration cleanup', () => {
   })
 })
 
+describe('analytics', () => {
+  const track = vi.mocked(trackServerEvent)
+  const oauthEvents = () => track.mock.calls.filter(([name]) => ['mcp_client_connected', 'mcp_consent_denied', 'mcp_client_disconnected'].includes(name))
+
+  beforeEach(() => track.mockClear())
+
+  it('mcp_client_connected once per accepted consent, first_connection only the first time; never on refresh or a call', async () => {
+    const who = email('analytics')
+    const person = await flow.signUp(options, who)
+    const clientId = await flow.registeredClientId(options)
+    const tokens = await flow.connectClient(options, person.cookie, clientId)
+    await backgroundSettled()
+    expect(oauthEvents()).toEqual([['mcp_client_connected', { client_name: 'Flow Test Client', registration: 'dynamic', scopes: ['gamut:read', 'gamut:run'], first_connection: true }]])
+
+    await flow.tokenRequest(options, { grant_type: 'refresh_token', refresh_token: tokens.refresh_token!, client_id: clientId, resource: RESOURCE })
+    await mcpPost(initialize, tokens.access_token)
+    await mcpPost(callTool('get_guide'), tokens.access_token)
+    await backgroundSettled()
+    expect(oauthEvents()).toHaveLength(1)
+
+    // Signing in again asks for consent again (prompt=consent); that is a connection, not the first.
+    await new Promise((resolve) => setTimeout(resolve, 1100))
+    await flow.connectClient(options, person.cookie, clientId, 'gamut:read')
+    await backgroundSettled()
+    expect(oauthEvents()[1]).toEqual(['mcp_client_connected', { client_name: 'Flow Test Client', registration: 'dynamic', scopes: ['gamut:read'], first_connection: false }])
+
+    const sent = JSON.stringify(track.mock.calls)
+    for (const secret of [clientId, flow.TEST_REDIRECT_URI, '127.0.0.1', person.userId, who, tokens.access_token, tokens.refresh_token!]) expect(sent).not.toContain(secret)
+  })
+
+  it('mcp_consent_denied alone when the person declines', async () => {
+    const person = await flow.signUp(options, email('analytics-deny'))
+    const clientId = await flow.registeredClientId(options)
+    const location = (await flow.authorize(options, person.cookie, { clientId })).headers.get('location')!
+    await flow.consent(options, person.cookie, location, false)
+    await backgroundSettled()
+    expect(oauthEvents()).toEqual([['mcp_consent_denied', { registration: 'dynamic' }]])
+  })
+
+  it('mcp_client_disconnected when something was revoked, nothing for an unknown client', async () => {
+    const { cookie, clientId } = await connected()
+    await backgroundSettled()
+    track.mockClear()
+    const revoke = (id: string) => options.fetch('/api/mcp-server/oauth/clients/revoke', {
+      method: 'POST', headers: { cookie, origin: BASE, 'content-type': 'application/json' }, body: JSON.stringify({ clientId: id }),
+    })
+    expect((await revoke('no-such-client')).status).toBe(404)
+    expect(oauthEvents()).toEqual([])
+    expect((await revoke(clientId)).status).toBe(200)
+    expect(oauthEvents()).toEqual([['mcp_client_disconnected', { client_name: 'Flow Test Client', registration: 'dynamic' }]])
+    expect(JSON.stringify(track.mock.calls)).not.toContain(clientId)
+  })
+})
+
 describe('open client registration', () => {
   it('registers a native client with a loopback redirect, and caps field sizes', async () => {
     expect((await flow.registerClient(options)).status).toBe(201)

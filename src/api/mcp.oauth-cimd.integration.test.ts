@@ -31,6 +31,7 @@ import { setMcpServerEnabled } from '@shared/lib/mcp-server/mcp-server-settings'
 import { mutateSettings } from '@shared/lib/config/settings'
 import { resetAuth } from '@shared/lib/auth'
 import * as flow from '@shared/lib/mcp-server/oauth/testing/oauth-flow'
+import { trackServerEvent } from '@shared/lib/analytics/server-analytics'
 
 const options: flow.FlowOptions = { base: BASE, fetch: async (path, init) => app.request(`${BASE}${path}`, init) }
 let server: Server
@@ -78,6 +79,10 @@ describe('a client ID metadata document client', () => {
     const tokens = await flow.connectClient(options, person.cookie, CLIENT_ID)
     expect(served).toBeGreaterThan(0)
     expect(decodeJwt(tokens.access_token).azp).toBe(CLIENT_ID)
+    await backgroundSettled()
+    expect(vi.mocked(trackServerEvent)).toHaveBeenCalledWith('mcp_client_connected', { client_name: 'Document Client', registration: 'metadata-document', scopes: ['gamut:read', 'gamut:run'], first_connection: true })
+    // The client id is a URL on the client's host: never in analytics.
+    expect(JSON.stringify(vi.mocked(trackServerEvent).mock.calls)).not.toContain(CIMD_HOST)
 
     const info = await (await options.fetch(`/api/mcp-server/oauth/consent-client?client_id=${encodeURIComponent(CLIENT_ID)}&redirect_uri=${encodeURIComponent(flow.TEST_REDIRECT_URI)}`, { headers: { cookie: person.cookie } })).json()
     expect(info).toMatchObject({ name: 'Document Client', registration: 'metadata-document', documentHost: CIMD_HOST, redirectHost: '127.0.0.1 (this computer)' })

@@ -126,7 +126,10 @@ routes.post('/oauth/clients/revoke', zValidator('json', revokeMcpClientRequestSc
   if (refused) return refused
   const { revokeConnectedClient } = await import('@shared/lib/mcp-server/oauth/connected-clients')
   const revoked = await revokeConnectedClient(getCurrentUserId(c), c.req.valid('json').clientId)
-  return revoked ? c.json({ revoked: true }) : c.json({ error: 'No such connected client' }, 404)
+  if (!revoked) return c.json({ error: 'No such connected client' }, 404)
+  // Never the client id (a CIMD one is a URL) or the person.
+  trackServerEvent('mcp_client_disconnected', { client_name: revoked.clientName, registration: revoked.registration })
+  return c.json({ revoked: true })
 })
 
 routes.get('/oauth/consent-client', zValidator('query', z.object({

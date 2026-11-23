@@ -114,6 +114,26 @@ function mcpAuthorizeDefaults(resource: string, issuer: string): BetterAuthPlugi
       // The provider says `invalid_token` for one it cannot even decode (no
       // prefix, garbage); clients key re-authorization on `invalid_grant`.
       after: [{
+        // Analytics of the person's answer: once per accepted consent the
+        // provider recorded (its answer sends the browser on with a code), and
+        // once per decline. Fire-and-forget; see oauth-analytics.ts.
+        matcher: (ctx) => ctx.path === '/oauth2/consent',
+        handler: createAuthMiddleware(async (ctx) => {
+          try {
+            const returned = ctx.context.returned as { url?: unknown } | undefined
+            if (!returned || isAPIError(returned) || typeof returned.url !== 'string') return
+            const body = ctx.body as { accept?: unknown; oauth_query?: unknown } | undefined
+            const clientId = typeof body?.oauth_query === 'string' ? new URLSearchParams(body.oauth_query).get('client_id') : null
+            if (!clientId) return
+            const answer = URL.parse(returned.url)?.searchParams
+            const { trackClientConnected, trackConsentDenied } = await import('./oauth-analytics')
+            if (body?.accept === true && answer?.get('code')) trackClientConnected(clientId, ctx.context.session?.user.id)
+            else if (body?.accept !== true && answer?.get('error') === 'access_denied') trackConsentDenied(clientId)
+          } catch {
+            // Analytics never breaks the answer.
+          }
+        }),
+      }, {
         matcher: (ctx) => ctx.path === '/oauth2/token',
         handler: createAuthMiddleware(async (ctx) => {
           const returned = ctx.context.returned
