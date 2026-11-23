@@ -1,7 +1,7 @@
 
 import { useRef, useMemo, useState } from 'react'
 import { cn } from '@shared/lib/utils/cn'
-import { ArrowLeft, ChevronRight } from 'lucide-react'
+import { ArrowLeft, ChevronRight, Workflow } from 'lucide-react'
 import { StreamingToolCallItem, StatusIndicator } from './tool-call-item'
 import { flattenAssistantMessages, TranscriptItems, TranscriptText, type FlatItem } from './agent-transcript'
 import { useSubagentMessages } from '@renderer/hooks/use-messages'
@@ -127,7 +127,7 @@ export function SubAgentBlock(input: SubAgentBlockProps) {
         'flex w-full items-center gap-2 rounded-md border border-border/70 pl-2 pr-2 py-1.5 text-left text-sm group hover:bg-muted/50 transition-colors',
       )}
     >
-      <SubagentAvatar seed={toolCall.id} size={16} state={isRunning ? 'working' : 'idle'} />
+      <Workflow aria-hidden className="h-3.5 w-3.5 shrink-0 text-foreground/45 group-hover:text-foreground transition-colors" />
       <span className={SUBAGENT_LABEL_CLASS}>Sub-agent:</span>
       <span className={SUBAGENT_LABEL_CLASS}>
         {subagentDisplayType}
