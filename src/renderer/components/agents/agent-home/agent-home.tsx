@@ -369,7 +369,7 @@ export function AgentHome({ agent, onSessionCreated }: AgentHomeProps) {
                       onImportComplete={handleImportComplete}
                     />
                   )}
-                  {/* Bookmarks get a panel of their own, when there are any. */}
+                  {/* Pinned files, folders and links get a panel of their own, when there are any. */}
                   <HomeBookmarks agentSlug={agent.slug} isOwner={isOwner} />
                   {/* Narrower than xl there is no room beside the page, so the side panel's cards follow its content. */}
                   {showSidePanel && !wide && <HomeSidePanel>{sidePanelContent}</HomeSidePanel>}

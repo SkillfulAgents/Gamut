@@ -35,7 +35,7 @@ interface HomeGlassPanelProps {
   testId?: string
 }
 
-/** A titled glass sheet in Agent Home's main column: Recent sessions, Bookmarks. */
+/** A titled glass sheet in Agent Home's main column: Recent sessions, Pinned Items. */
 export function HomeGlassPanel({ title, actions, children, className, testId }: HomeGlassPanelProps) {
   return (
     <section className={cn(HOME_GLASS_PANEL_CLASS, 'px-5 pb-4 pt-4', className)} aria-label={title} data-testid={testId}>
