@@ -33,9 +33,9 @@ export function usePendingUserRequests(agentSlug: string, sessionId?: string | n
   const refetchInterval = useStreamBackedPollMs(30_000)
   return useQuery<PendingUserInputRequest[]>({
     queryKey: ['pending-user-requests', resolvedSlug, sessionId ?? null],
-    queryFn: async () => {
+    queryFn: async ({ signal }) => {
       const query = sessionId ? `?sessionId=${encodeURIComponent(sessionId)}` : ''
-      const res = await apiFetch(`/api/agents/${resolvedSlug}/pending-requests${query}`)
+      const res = await apiFetch(`/api/agents/${resolvedSlug}/pending-requests${query}`, { signal })
       if (!res.ok) {
         // A failed fetch must be an ERROR, not an empty success: returning []
         // would overwrite good cached data — every card vanishes and the

@@ -20,6 +20,23 @@ export function ContentBackdrop({ children }: { children: React.ReactNode }) {
   return backdrop?.slot ? createPortal(children, backdrop.slot) : null
 }
 
+const HeaderTraySlotContext = createContext<{ slot: HTMLElement | null; setSlot: (slot: HTMLElement | null) => void } | null>(null)
+
+/**
+ * Where the header keeps the side drawer's toggle. The header decides whether
+ * the view has one (a session does); the drawer, which lives in the body and
+ * knows whether it is open, draws the button into it.
+ */
+export function HeaderTraySlot() {
+  const tray = useContext(HeaderTraySlotContext)
+  return <div ref={tray?.setSlot} className="flex items-center empty:hidden" data-testid="header-tray-slot" />
+}
+
+/** The header's place for the drawer toggle, or null where the header has none. */
+export function useHeaderTraySlot(): HTMLElement | null {
+  return useContext(HeaderTraySlotContext)?.slot ?? null
+}
+
 /**
  * The header + body frame shared by the agent view and the notifications route.
  */
@@ -41,9 +58,12 @@ export function ContentShell({
   const backdrop = useMemo(() => ({ slot: backdropSlot, mount }), [backdropSlot, mount])
   // Glass only over a backdrop: over the plain canvas it shows nothing, yet a
   // backdrop-filter still re-samples whatever is behind it on every frame.
+  const [traySlot, setTraySlot] = useState<HTMLElement | null>(null)
+  const headerTray = useMemo(() => ({ slot: traySlot, setSlot: setTraySlot }), [traySlot])
   const glass = backdrops > 0
   return (
     <ScrollAwareTitleProvider>
+      <HeaderTraySlotContext.Provider value={headerTray}>
       {/* Its own stacking context, so the backdrop below the header and view stays above the page. */}
       <div className="relative isolate h-full flex flex-col" data-testid="main-content" data-backdrop={glass ? '' : undefined}>
         <div ref={setBackdropSlot} className="pointer-events-none absolute inset-0 -z-10 overflow-hidden" />
@@ -60,6 +80,7 @@ export function ContentShell({
         </header>
         <BackdropSlot.Provider value={backdrop}>{children}</BackdropSlot.Provider>
       </div>
+    </HeaderTraySlotContext.Provider>
     </ScrollAwareTitleProvider>
   )
 }

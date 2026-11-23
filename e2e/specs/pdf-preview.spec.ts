@@ -67,7 +67,10 @@ async function expectAlignedText(page: Page) {
     return count > 50
       && Math.abs(layer.width - box.width) < 1 && Math.abs(layer.height - box.height) < 1
       && Math.abs(text.left - ink.left) < 3 && Math.abs(text.right - ink.right) < 4
-      && text.top <= ink.top + 1 && text.bottom >= ink.bottom - 1
+      && text.top <= ink.top + 1
+      // WebKit rounds the font's line box to a CSS pixel. The last painted
+      // descender pixel also occupies one device pixel (sy CSS pixels).
+      && ink.bottom - text.bottom <= 1 + sy
       && ink.top - text.top < text.height * 0.5
   }, title)).toBe(true)
 }
@@ -172,7 +175,7 @@ test.describe('PDF preview with the real PDF.js worker', () => {
     await fileTab(page, 'report.pdf').getByTestId('file-tab-select').click()
     await expectPage(page, 2)
     await expect(page.getByTestId('file-preview-tray')).toContainText('Clarify this forecast')
-    await page.getByRole('button', { name: 'Hide files panel' }).click()
+    await page.getByRole('button', { name: 'Hide panel' }).click()
     await expect(page.getByTestId('pdf-renderer')).not.toBeVisible()
     await filePill(page, 'report.pdf').click()
     await expectPage(page, 2)
