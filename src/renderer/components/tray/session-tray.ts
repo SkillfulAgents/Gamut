@@ -131,8 +131,10 @@ export class SessionTray {
     if (!pages.length) return
     const next: BrowserEntry[] = pages.map(page => ({ kind: 'browser', key: `browser:${page.targetId}`, page }))
     const viewed = viewingTargetId ?? pages.find(page => page.active)?.targetId ?? pages[0].targetId
-    const follows = this.viewedBrowserPage !== viewed
-    this.viewedBrowserPage = viewed
+    // tab_switched can arrive before the tab_list that adds its target. Only
+    // acknowledge a switch once there is a tab we can actually select.
+    const follows = this.viewedBrowserPage !== viewed && pages.some(page => page.targetId === viewed)
+    if (follows) this.viewedBrowserPage = viewed
     this.replaceBrowserPages(next, follows ? `browser:${viewed}` : undefined)
   }
   private replaceBrowserPages(pages: BrowserEntry[], followed?: string) {

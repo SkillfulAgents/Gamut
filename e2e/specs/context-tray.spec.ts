@@ -42,7 +42,8 @@ test('the composer meter opens, selects and restores the session’s Context tab
   const agent = new AgentPage(page)
   await agent.createAgent(`Composer context ${Date.now()}`)
   const session = new SessionPage(page)
-  await session.sendMessage('Summarize the workspace')
+  const longPrompt = Array.from({ length: 80 }, (_, i) => `Checkpoint ${i} in the release checklist.`).join(' ')
+  await session.sendMessage(longPrompt)
   await expect(session.getAssistantMessages().first()).toBeVisible()
 
   // A sleeping session from an older image can carry only the last usage.
@@ -76,4 +77,13 @@ test('the composer meter opens, selects and restores the session’s Context tab
   await meter.press('Space')
   await expect(selected).toBeVisible()
   await expect(page.getByTestId('utility-tab')).toHaveCount(1)
+
+  await page.getByTestId('tray-hide').click()
+  await page.setViewportSize({ width: 390, height: 844 })
+  await meter.click()
+  const close = page.getByRole('button', { name: 'Close panel' })
+  await expect(close).toBeInViewport({ ratio: 1 })
+  await expect(page.getByTestId('context-percent')).toBeInViewport({ ratio: 1 })
+  await close.click()
+  await expect(meter).toBeInViewport({ ratio: 1 })
 })

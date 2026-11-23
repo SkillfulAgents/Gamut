@@ -47,6 +47,21 @@ describe('SubagentTranscript', () => {
     mockSubMessages = []
   })
 
+  it('uses the SDK report in the row and displays it just once in the trajectory', () => {
+    const report = 'The audit found 21 entries.'
+    const props = {
+      toolCall: createToolCall({ name: 'Agent', result: '[Subagent hand-back] instructions',
+        subagent: { agentId: 'audit', status: 'completed', report } }),
+      sessionId: 's-1', agentSlug: 'agent-1',
+    }
+    const view = render(<SubAgentBlock {...props} />)
+    expect(screen.getByTestId('subagent-row-progress')).toHaveTextContent(report)
+    mockSubMessages = [createAssistantMessage({ content: { text: report } })]
+    view.rerender(<SubagentTranscript {...props} />)
+    expect(screen.getAllByText(report)).toHaveLength(1)
+    expect(screen.queryByText(/Subagent hand-back/)).toBeNull()
+  })
+
   it('renders completed subagent with stats', () => {
     const tc = createToolCall({
       name: 'Task',

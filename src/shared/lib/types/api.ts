@@ -208,6 +208,8 @@ export interface ApiToolCall {
   subagent?: {
     agentId: string
     status: string
+    /** Report authored by the subagent, when available from the SDK. */
+    report?: string
     totalDurationMs?: number
     totalTokens?: number
     totalToolUseCount?: number
