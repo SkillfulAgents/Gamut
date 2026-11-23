@@ -1166,9 +1166,30 @@ html[data-keyboard-open] [data-composer-footer] {
 /* The leading selected tab continues the panel's outline through its top-left corner. */
 .tray-drawer-floating {
   --tray-edge-color: rgb(0 0 0 / 5%);
+  --tray-panel-shadow: 0 1px 2px rgb(15 23 42 / 4%), 0 2px 6px -1px rgb(15 23 42 / 4%);
 }
 .dark .tray-drawer-floating {
   --tray-edge-color: rgb(255 255 255 / 5%);
+  --tray-panel-shadow: 0 1px 2px rgb(0 0 0 / 20%);
+}
+.tray-panel {
+  box-shadow: var(--tray-panel-shadow);
+}
+/* The tab scroller clips its left gutter. Paint that gutter once for the whole
+   joined edge so the panel's shadow continues past the seam and around the corner. */
+.tray-joined-edge::before {
+  content: '';
+  pointer-events: none;
+  position: absolute;
+  /* The strip's top padding plus the selected tab's 1px overhang. */
+  inset: calc(0.375rem + 1px) 0 0;
+  border-radius: var(--radius-card);
+  box-shadow: var(--tray-panel-shadow);
+  clip-path: inset(-0.5rem 100% -0.5rem -0.5rem);
+}
+.tray-joined-edge > .tray-panel {
+  border-top-left-radius: 0;
+  clip-path: inset(-0.5rem -0.5rem -0.5rem 0);
 }
 .tray-leading-tab::before {
   content: '';

@@ -211,7 +211,7 @@ export function TrayManager({
       >
         {/* 8px in from the drawer's sides and bottom: the tabs standing on the page, Chrome-style, and under them
             one card holding the front tab's body, which the front tab joins. */}
-        <div ref={drawerRef} className="flex min-h-0 min-w-0 flex-1 flex-col px-2 pb-2">
+        <div ref={drawerRef} className={cn('relative mx-2 mb-2 flex min-h-0 min-w-0 flex-1 flex-col', leadingTabFlush && 'tray-joined-edge')}>
         <TrayTabs
           tabs={orderedTabs}
           frontKey={front}
@@ -270,7 +270,7 @@ export function TrayManager({
             </div>
           }
         />
-        <div id={panelId} role="region" aria-label={orderedTabs.find(tab => tab.key === front)?.label} className={cn(TRAY_PANEL_CLASS, leadingTabFlush && 'rounded-tl-none')} data-testid="tray-panel">
+        <div id={panelId} role="region" aria-label={orderedTabs.find(tab => tab.key === front)?.label} className={TRAY_PANEL_CLASS} data-testid="tray-panel">
         <div className="flex flex-1 flex-col min-w-0 min-h-0">
           {/* The browser stays mounted behind other tabs: its stream, its pages
               and its log would otherwise start over on every visit. */}
