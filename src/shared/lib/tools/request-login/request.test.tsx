@@ -378,6 +378,21 @@ describe('LoginRequestItem', () => {
     expect(mockToast.warning).toHaveBeenCalledWith('The browser had closed', expect.objectContaining({ description: expect.stringContaining('asks you') }))
   })
 
+  it('confirms the save and dismisses the password form when the browser never confirmed the fill', async () => {
+    const user = userEvent.setup()
+    const onComplete = vi.fn()
+    routes[`${BASE}/fill-login`] = () => json(200, { success: true, fillUnconfirmed: true, saved: { site: 'github.com', username: 'octocat' } })
+    render(<LoginRequestItem {...props({ onComplete })} />)
+    await user.type(await ready(), 'octocat')
+    await user.type(screen.getByLabelText('Password'), 'synthetic-password')
+    await user.type(screen.getByLabelText('Authentication code'), '482913')
+    await user.click(screen.getByTestId('login-submit'))
+    await waitFor(() => expect(onComplete).toHaveBeenCalled())
+    expect(screen.getByTestId('login-request-completed')).toHaveTextContent('Saved for the agent')
+    expect(screen.queryByLabelText('Password')).toBeNull()
+    expect(mockToast.success).toHaveBeenCalledWith('octocat is saved', expect.objectContaining({ description: expect.stringContaining('reopen it if needed') }))
+  })
+
   it('keeps every digit of a code pasted with separators, applying the page\'s limit to the code', async () => {
     const user = userEvent.setup()
     contextIs({ fields: [{ kind: 'otp', label: 'Verification code', inputType: 'text', inputMode: 'numeric', autocomplete: 'one-time-code', maxLength: 6 }] })

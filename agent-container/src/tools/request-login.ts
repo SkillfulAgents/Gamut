@@ -242,6 +242,10 @@ function formatAuthenticator(resolution: Extract<LoginResolution, { type: 'authe
   ].join('\n')
 }
 
+function retrySavedFill(site: string, account: string): string {
+  return `Check whether the browser is already signed in to ${site} as ${account} or has advanced to the next step. If the sign-in page is gone, reopen it. For any remaining sign-in fields, map their current refs and call request_login with username "${account}" to use the saved account.`
+}
+
 function formatAccounts(resolution: Extract<LoginResolution, { type: 'accounts' }>, named: Name): string {
   const mapFields = 'Map the page\'s sign-in fields by ref and call request_login again: the user fills them in the form. On a page that offers only buttons like "Continue with Google", list them in providers.'
   if (resolution.accounts.length === 0) {
@@ -259,6 +263,10 @@ function formatAccounts(resolution: Extract<LoginResolution, { type: 'accounts' 
     ].join('\n')
   }
   if (resolution.named) {
+    if (resolution.fillUnconfirmed) {
+      const account = named(resolution.accounts[0].username)
+      return `The browser did not confirm the fill. The account ${account} is saved in the vault for you to use.\n${retrySavedFill(resolution.site, account)}`
+    }
     return [
       'Nothing was filled: this call mapped no field.',
       `- ${describeAccount(resolution.accounts[0], named)}`,
@@ -402,6 +410,12 @@ export function formatLoginResolution(resolution: LoginResolution, named: Name =
   else if (changedSecrets?.length) lines.push(`Just before the submit, ${changedSecrets.join(', ')} still held a different value than the user entered; ${nothing}`)
   else if (submitError) lines.push(sentence(submitError))
   else lines.push(`Nothing was clicked or pressed.`)
+
+  const pageUnavailable = pageActivity?.kind === 'gone' || pageActivity?.kind === 'unreadable' || pageActivity?.kind === 'detached'
+  const needsNewFields = unconfirmed || outcomes.some((field) => field.status === 'failed') || lost.length > 0 || submitError || pageUnavailable
+  if (account?.username && (account.saved || account.source === 'vault') && !submitted && needsNewFields) {
+    lines.push(retrySavedFill(account.site, named(account.username)))
+  }
 
   const text = lines.join('\n') + formatObservation(observation, submitted?.via === 'enter' ? 'press' : 'click')
   return {
