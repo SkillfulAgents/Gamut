@@ -1,8 +1,8 @@
 [TEST_PASS]
-[REASON] Sent "Hello! What is 2+2?" to agent QA-20261122-060535-wun5 and verified the reply contains 4.
-[STEP] Navigated to http://localhost:47891 — the Gamut home page loaded with the sidebar listing agents QA-20261122-060536-z1uq and QA-20261122-060535-wun5.
-[STEP] Clicked the QA-20261122-060535-wun5 agent in the sidebar — its agent page opened at /agents/qa-20261122-060535-wun5-or4d24z5vj with the new-session composer.
-[STEP] Verified agent status — the status indicator in the top bar reads "idle", which is an allowed state.
-[STEP] Typed "Hello! What is 2+2?" into the message composer and sent it — the session opened as "Basic Arithmetic Greeting Check", the status changed to "working", and the message appeared in the message list.
-[STEP] Waited up to 3 minutes for a response — the reply appeared well within the limit, and the status returned to "idle".
-[STEP] Verified the response and took a screenshot — the assistant replied "2 + 2 = 4.", which contains "4". The message list shows the user message followed by this reply.
+[REASON] Sent "Hello! What is 2+2?" to agent QA-20261123-182100-8j4g and verified the reply contains 4.
+[STEP] Step 1: Navigated to http://localhost:47891 — the Gamut home page loaded with the sidebar listing agents QA-20261123-182101-nkvd and QA-20261123-182100-8j4g.
+[STEP] Step 2: Clicked QA-20261123-182100-8j4g in the sidebar — its agent page opened (URL /agents/qa-20261123-182100-8j4g-2ponln91ht).
+[STEP] Step 3: Checked agent status — the header status indicator reads "idle", which is an accepted status.
+[STEP] Step 4: Typed "Hello! What is 2+2?" in the message composer and clicked Send — the session "Basic Arithmetic Question" opened and the user message appeared in the chat.
+[STEP] Step 5: Waited for the response — the activity indicator changed from "Working..." to done within the 180-second wait. A partial "2" appeared mid-stream, and the final reply completed as "2 + 2 = 4." with no timeout.
+[STEP] Step 6: Verified the response mentions "4" — the final assistant message is "2 + 2 = 4.", so the check passes. Screenshot taken of the completed response.

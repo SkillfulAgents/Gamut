@@ -1,7 +1,9 @@
 [TEST_PASS]
-[REASON] Sent the browser-task prompt to agent QA-20261122-060536-z1uq and verified the reply reports the page title "Example Domain".
-[STEP] Step 1: Navigated to http://localhost:47891 — Gamut home loaded with the sidebar listing "QA-20261122-060536-z1uq" and "QA-20261122-060535-wun5" under Your Agents. No errors.
-[STEP] Step 2: Clicked the "QA-20261122-060536-z1uq" agent in the sidebar — the agent page opened at /agents/qa-20261122-060536-z1uq-f4ga7h1a5n with status "idle" and an empty message box. Screenshot taken (step2-agent-selected.png).
-[STEP] Step 3: Typed "Open a browser and go to https://example.com. Tell me the page title." and clicked Send — the message appeared in a new session "Browser Page Title Check", with the agent status changing to "working".
-[STEP] Step 4: Waited for the response, using wait-for-text "Example Domain" with a 180s limit. The text was already present when the wait returned, and the agent had finished (status "idle", "Worked for 7s · 3 tool calls"). The wait returned well inside the 3-minute window.
-[STEP] Step 5: Verified the reply reads "The page title is "Example Domain". I've closed the browser." — matches the expected title. Screenshot taken (step5-response-example-domain.png).
+[REASON] Sent the "Open a browser and go to https://example.com. Tell me the page title." prompt to agent QA-20261123-182101-nkvd and verified the reply reports "Example Domain".
+[STEP] Step 1, navigated to http://localhost:47891 — the Gamut home page loaded with the sidebar listing "QA-20261123-182101-nkvd" and "QA-20261123-182100-8j4g". Screenshot taken.
+[STEP] Step 2, clicked "QA-20261123-182101-nkvd" in the sidebar — the agent page opened at /agents/qa-20261123-182101-nkvd-4mw2j1k49j with an empty "How can I help?" input. Screenshot taken.
+[STEP] Step 3, typed the prompt and clicked Send — the first attempt was my error: I clicked the "Set up voice input" button instead of Send, which opened Settings > Voice. I navigated back to the agent page, re-entered the prompt (the draft was lost on reload), and clicked the enabled Send button. The message was sent and the session "Check Example.com Page Title" started, showing "Working..." and an "Open Browser → https://example.com" tool card. Screenshots taken.
+[STEP] Step 4, waited up to 3 minutes for a response — the reply appeared within seconds ("Worked for 4s · 3 tool calls"), and the status changed to idle.
+[STEP] Step 5, verified the response — the assistant replied: "The page title at https://example.com is "Example Domain". The page loaded normally, and I've closed the browser." The text "Example Domain" is visible on screen. Screenshot taken.
+
+No application bugs were found. The only failure in the run was my mis-click in step 3, which I corrected.
