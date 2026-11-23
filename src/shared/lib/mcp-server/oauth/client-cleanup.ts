@@ -2,7 +2,8 @@
  * Open Dynamic Client Registration lets anyone add a client row (bounded per
  * hour, dcr-limits). A registration nobody ever connected is removed after a
  * day: a client registered dynamically (no Client ID Metadata Document) with
- * no consent and no refresh token, older than `STALE_REGISTRATION_MS`. One
+ * no consent and no refresh token, older than `STALE_REGISTRATION_MS`, that
+ * nobody ever connected (`everConnectedAt`, set when a person disconnects it). One
  * conditional DELETE, safe to repeat. A client someone connected stays until
  * its last consent and refresh token go; a metadata-document client is
  * re-created from its document whenever it is used, so it is left alone.
@@ -23,6 +24,9 @@ const INTERVAL_MS = 6 * 60 * 60 * 1000
 export async function deleteUnusedClientRegistrations(now = Date.now()): Promise<number> {
   const result = await db.delete(oauthClient).where(and(
     isNull(oauthClient.clientDiscoveryId),
+    // Never a registration someone connected and later disconnected: the
+    // client may still hold its id and sign in again with it.
+    isNull(oauthClient.everConnectedAt),
     lt(oauthClient.createdAt, new Date(now - STALE_REGISTRATION_MS)),
     notExists(db.select({ id: oauthConsent.id }).from(oauthConsent).where(eq(oauthConsent.clientId, oauthClient.clientId))),
     notExists(db.select({ id: oauthRefreshToken.id }).from(oauthRefreshToken).where(eq(oauthRefreshToken.clientId, oauthClient.clientId))),

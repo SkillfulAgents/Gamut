@@ -12,7 +12,7 @@
  * refresh rotation and reuse), consent, open registration limits, CIMD
  * fetch refusals, and the settings routes.
  */
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { and, eq } from 'drizzle-orm'
 import { SignJWT, base64url, decodeJwt, decodeProtectedHeader } from 'jose'
 import { createTestDatabase, type TestDatabase } from '@shared/lib/db/testing/create-test-database'
@@ -555,6 +555,83 @@ describe('unused registration cleanup', () => {
     expect(left.has(used)).toBe(true)
     expect(left.has('https://example.com/c.json')).toBe(true)
     expect(await deleteUnusedClientRegistrations()).toBe(0)
+  })
+})
+
+describe('a narrowed consent narrows tokens already issued', () => {
+  it('a token approved for read+run loses run when the person re-approves the client with read only', async () => {
+    const person = await flow.signUp(options, email('narrowed'))
+    const clientId = await flow.registeredClientId(options)
+    // Device A: read and run.
+    const deviceA = await flow.connectClient(options, person.cookie, clientId)
+    expect(deviceA.scope).toContain('gamut:run')
+    // Device B, same client: the person unticks run. The provider updates the consent row in place.
+    const { verifier, challenge } = flow.pkcePair()
+    const location = (await flow.authorize(options, person.cookie, { clientId, challenge })).headers.get('location')!
+    const answered = await flow.consent(options, person.cookie, location, true, 'gamut:read offline_access')
+    const code = new URL((await answered.json() as { url: string }).url).searchParams.get('code')!
+    const deviceB = await (await flow.tokenRequest(options, { grant_type: 'authorization_code', code, redirect_uri: flow.TEST_REDIRECT_URI, client_id: clientId, code_verifier: verifier, resource: RESOURCE })).json() as flow.IssuedTokens
+    expect(deviceB.scope).not.toContain('gamut:run')
+
+    // Device A's token still says run; the consent no longer does.
+    expect(String(decodeJwt(deviceA.access_token).scope)).toContain('gamut:run')
+    const run = await mcpPost(callTool('invoke_agent', { agent: 'x', prompt: 'hi' }), deviceA.access_token)
+    expect(run.status).toBe(403)
+    expect(wwwAuthenticate(run)).toContain('error="insufficient_scope"')
+    const read = await rpcResult(await mcpPost(callTool('get_guide'), deviceA.access_token))
+    expect((read.result as { isError?: boolean }).isError).toBeFalsy()
+
+    // A refresh of device A's token keeps the scopes its refresh token carries (the provider
+    // does not consult the consent), and the resource server still cuts run off.
+    const refreshed = await (await flow.tokenRequest(options, { grant_type: 'refresh_token', refresh_token: deviceA.refresh_token!, client_id: clientId, resource: RESOURCE })).json() as flow.IssuedTokens
+    expect(refreshed.scope).toContain('gamut:run')
+    expect((await mcpPost(callTool('invoke_agent', { agent: 'x', prompt: 'hi' }), refreshed.access_token)).status).toBe(403)
+  })
+})
+
+describe('a disconnected client can reconnect', () => {
+  it('keeps the registration through the cleanup after a revoke; still deletes a never-connected one of the same age', async () => {
+    const person = await flow.signUp(options, email('reconnect'))
+    const connectedOnce = await flow.registeredClientId(options, { client_name: 'Reconnects' })
+    const neverUsed = await flow.registeredClientId(options, { client_name: 'Never used' })
+    await flow.connectClient(options, person.cookie, connectedOnce)
+    const revoked = await options.fetch('/api/mcp-server/oauth/clients/revoke', {
+      method: 'POST', headers: { cookie: person.cookie, origin: BASE, 'content-type': 'application/json' }, body: JSON.stringify({ clientId: connectedOnce }),
+    })
+    expect(revoked.status).toBe(200)
+
+    // Two days on.
+    await deleteUnusedClientRegistrations(Date.now() + 2 * 24 * 60 * 60 * 1000)
+    const left = new Set((await handle.db.select({ clientId: oauthClient.clientId }).from(oauthClient).all()).map((row) => row.clientId))
+    expect(left.has(connectedOnce)).toBe(true)
+    expect(left.has(neverUsed)).toBe(false)
+    // The client signs in again with the id it cached.
+    const again = await flow.authorize(options, person.cookie, { clientId: connectedOnce })
+    expect(again.headers.get('location')).toMatch(/^\/oauth\/consent\?/)
+    const tokens = await flow.connectClient(options, person.cookie, connectedOnce)
+    expect((await mcpPost(initialize, tokens.access_token)).status).toBe(200)
+  })
+})
+
+describe('a base URL with a trailing slash', () => {
+  afterEach(() => {
+    vi.stubEnv('TRUSTED_ORIGINS', 'http://localhost:47891')
+    resetAuth()
+  })
+
+  it('issues tokens /mcp accepts, whose issuer is the one the metadata documents show', async () => {
+    vi.stubEnv('TRUSTED_ORIGINS', 'http://localhost:47891/')
+    resetAuth()
+    const { tokens } = await connected()
+    expect((await mcpPost(initialize, tokens.access_token)).status).toBe(200)
+    const as = await (await options.fetch('/.well-known/oauth-authorization-server')).json() as { issuer: string }
+    const prm = await (await options.fetch('/.well-known/oauth-protected-resource/mcp')).json() as { resource: string; authorization_servers: string[] }
+    const claims = decodeJwt(tokens.access_token)
+    expect(claims.iss).toBe(BASE)
+    expect(as.issuer).toBe(claims.iss)
+    expect(prm.authorization_servers).toEqual([claims.iss])
+    expect(prm.resource).toBe(RESOURCE)
+    expect(claims.aud).toBe(RESOURCE)
   })
 })
 

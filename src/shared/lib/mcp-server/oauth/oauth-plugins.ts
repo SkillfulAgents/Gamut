@@ -152,13 +152,17 @@ function mcpAuthorizeDefaults(resource: string, issuer: string): BetterAuthPlugi
  */
 export function mcpOAuthPlugins(baseUrl: string) {
   if (!canServeMcpOAuth(baseUrl)) return []
+  // One normalized issuer everywhere: issued tokens, discovery and
+  // verification (mcpIssuerFor). A trusted origin written with a trailing
+  // slash must not make every token's `iss` differ from what /mcp expects.
+  const issuer = mcpIssuerFor(baseUrl)
   const resource = mcpResourceFor(baseUrl)
   return [
     jwt({
       // The issuer is the deployment, so clients find the server metadata at
       // the root (`/.well-known/oauth-authorization-server`), RFC 8414's
       // simplest form.
-      jwt: { issuer: baseUrl },
+      jwt: { issuer },
       // No JWT in a `set-auth-jwt` header on session reads: nothing here uses it.
       disableSettingJwtHeader: true,
       jwks: {
@@ -167,7 +171,7 @@ export function mcpOAuthPlugins(baseUrl: string) {
         gracePeriod: KEY_GRACE_SECONDS,
       },
     }),
-    mcpAuthorizeDefaults(resource, baseUrl.replace(/\/+$/, '')),
+    mcpAuthorizeDefaults(resource, issuer),
     mcp({
       resource,
       scopes: SCOPES,

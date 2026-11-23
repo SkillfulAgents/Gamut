@@ -24,6 +24,7 @@
  * query), the price of revocation taking effect immediately.
  */
 import { and, desc, eq } from 'drizzle-orm'
+import { z } from 'zod'
 import { isAPIError } from 'better-auth/api'
 import { createDpopReplayStore, requestToResourceInput, verifyAccessTokenRequest } from 'better-auth/oauth2'
 import type { JWTPayload } from 'jose'
@@ -94,6 +95,8 @@ interface GrantRow {
   banned: boolean | null
   banExpires: Date | null
   consentCreatedAt: Date | null
+  /** The consent's scopes as Better Auth stores `string[]` on SQLite: JSON text. */
+  consentScopes: string | null
   clientId: string | null
   clientName: string | null
   clientDisabled: boolean | null
@@ -106,6 +109,7 @@ async function grantOf(userId: string, clientId: string): Promise<GrantRow | und
     banned: user.banned,
     banExpires: user.banExpires,
     consentCreatedAt: oauthConsent.createdAt,
+    consentScopes: oauthConsent.scopes,
     clientId: oauthClient.clientId,
     clientName: oauthClient.name,
     clientDisabled: oauthClient.disabled,
@@ -117,6 +121,29 @@ async function grantOf(userId: string, clientId: string): Promise<GrantRow | und
     .orderBy(desc(oauthConsent.createdAt))
     .limit(1)
     .get()
+}
+
+const consentScopesSchema = z.array(z.string())
+
+/**
+ * What the call may do: the token's scopes, cut down to what the person's
+ * consent for this client grants now. A re-consent updates the consent row in
+ * place (its `createdAt` stays), and neither a refresh nor an issued token
+ * looks at it again: a token issued for read+run on one device keeps both
+ * after the person re-approves the same client with read only elsewhere,
+ * unless this intersection drops run. A wider re-consent cannot widen an old
+ * token either: the token's own scopes are the ceiling.
+ */
+export function effectiveScopes(tokenScope: unknown, consentScopes: string | null): McpToolScope[] {
+  let granted: string[] = []
+  try {
+    const parsed = consentScopesSchema.safeParse(JSON.parse(consentScopes ?? '[]'))
+    if (parsed.success) granted = parsed.data
+  } catch {
+    granted = []
+  }
+  const consented = new Set(toolScopesOf(granted.join(' ')))
+  return toolScopesOf(tokenScope).filter((scope) => consented.has(scope))
 }
 
 function isBanned(row: GrantRow, now: number): boolean {
@@ -167,7 +194,7 @@ export async function authenticateOAuthMcpRequest(request: Request): Promise<OAu
       isAdmin: grant.role === 'admin',
       publicBaseUrl: baseUrl,
       credential: { kind: 'oauth', clientId, clientName: displayClientName(grant.clientName, clientId) },
-      scopes: toolScopesOf(claims.scope),
+      scopes: effectiveScopes(claims.scope, grant.consentScopes),
     },
   }
 }

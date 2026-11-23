@@ -274,6 +274,13 @@ export const oauthClient = sqliteTable('oauth_client', {
   dpopBoundAccessTokens: integer('dpop_bound_access_tokens', { mode: 'boolean' }).default(false),
   referenceId: text('reference_id'),
   metadata: text('metadata'),
+  /**
+   * Ours, not the provider's: set when a person disconnects the client in
+   * Settings, so the unused-registration cleanup (client-cleanup.ts) keeps a
+   * registration someone once connected and the client can sign in again with
+   * the id it cached. Null for a registration never connected.
+   */
+  everConnectedAt: integer('ever_connected_at', { mode: 'timestamp_ms' }),
 }, (table) => ({
   userIdIdx: index('oauth_client_user_id_idx').on(table.userId),
 }))

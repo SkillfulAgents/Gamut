@@ -900,5 +900,13 @@ export const migrationBundle: readonly MigrationMeta[] = [
     "bps": true,
     "folderMillis": 1795320513430,
     "hash": "ccf41ca1afaa60a4115603b852632e1925880f0689117848b6e4a7af2def1947"
+  },
+  {
+    "sql": [
+      "ALTER TABLE `oauth_client` ADD `ever_connected_at` integer;"
+    ],
+    "bps": true,
+    "folderMillis": 1795470844856,
+    "hash": "02692a940bfefc5984bde41b3ba5bf785a74621e622fbbbb6b492b4661ab140c"
   }
 ]

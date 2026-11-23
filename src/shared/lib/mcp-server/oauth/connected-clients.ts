@@ -13,7 +13,7 @@
  * Only the person's own rows are ever read or touched: every query is keyed
  * by the user id of the session asking.
  */
-import { and, desc, eq, max } from 'drizzle-orm'
+import { and, desc, eq, max, sql } from 'drizzle-orm'
 import { z } from 'zod'
 import { db } from '@shared/lib/db'
 import { batch } from '@shared/lib/db/batch'
@@ -114,8 +114,12 @@ export async function revokeConnectedClient(userId: string, clientId: string): P
   const existing = await db.select({ id: oauthConsent.id, name: oauthClient.name, discoveryId: oauthClient.clientDiscoveryId }).from(oauthConsent)
     .leftJoin(oauthClient, eq(oauthClient.clientId, oauthConsent.clientId))
     .where(and(eq(oauthConsent.userId, userId), eq(oauthConsent.clientId, clientId))).limit(1).get()
-  // Access-token rows first: they reference refresh-token rows.
+  // Access-token rows first: they reference refresh-token rows. The client
+  // row is marked as once connected, so the unused-registration cleanup keeps
+  // it and the client can reconnect with the id it cached.
   await batch([
+    db.update(oauthClient).set({ everConnectedAt: sql`coalesce(${oauthClient.everConnectedAt}, ${Date.now()})` })
+      .where(and(eq(oauthClient.clientId, clientId), sql`exists (select 1 from ${oauthConsent} where ${oauthConsent.userId} = ${userId} and ${oauthConsent.clientId} = ${clientId})`)),
     db.delete(oauthAccessToken).where(and(eq(oauthAccessToken.userId, userId), eq(oauthAccessToken.clientId, clientId))),
     db.delete(oauthRefreshToken).where(and(eq(oauthRefreshToken.userId, userId), eq(oauthRefreshToken.clientId, clientId))),
     db.delete(oauthConsent).where(and(eq(oauthConsent.userId, userId), eq(oauthConsent.clientId, clientId))),
