@@ -327,27 +327,6 @@ describe('ContainerRuntime webhook relay env', () => {
     await runtime.ensureRunning()
     expect(mockStart.mock.calls.at(-1)![0].envVars.WEBHOOK_RELAY_AVAILABLE).toBe('true')
   })
-
-  describe('on a host whose relay runs in another process', () => {
-    afterEach(() => containerHost.useWebhookRelayStatus(null))
-
-    it('builds the env from that relay, not from the stopped relay of this process', async () => {
-      containerHost.useWebhookRelayStatus(async () => true)
-
-      expect((await start(false)).WEBHOOK_RELAY_AVAILABLE).toBe('true')
-      expect(agents.runtime('test-agent').isStale()).toBe(false)
-    })
-
-    it('goes stale when that relay changed while the container was starting', async () => {
-      const read = vi.fn<() => Promise<boolean>>().mockResolvedValueOnce(false).mockResolvedValueOnce(true)
-      containerHost.useWebhookRelayStatus(read)
-
-      expect((await start(false)).WEBHOOK_RELAY_AVAILABLE).toBe('false')
-
-      await vi.waitFor(() => expect(agents.runtime('test-agent').isStale()).toBe(true))
-      expect(read).toHaveBeenCalledTimes(2)
-    })
-  })
 })
 
 describe('ContainerRuntime drives during a start', () => {

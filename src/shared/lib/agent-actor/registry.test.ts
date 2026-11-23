@@ -358,14 +358,6 @@ describe('createAgentRegistry', () => {
       }
     })
 
-    it('container.syncStatus reads the status through the agent\'s runtime', async () => {
-      const registry = createAgentRegistry(fake.deps)
-      await firstRead(registry)
-      fake.containerHost.runtime('a').syncAgentStatus.mockClear()
-      await registry.get('a').container.syncStatus()
-      expect(fake.containerHost.runtime('a').syncAgentStatus).toHaveBeenCalledTimes(1)
-    })
-
     it('an evicted agent\'s watch stops', async () => {
       const registry = createAgentRegistry(fake.deps)
       const watch = watchOf(registry)

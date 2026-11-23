@@ -24,19 +24,20 @@ import { initializeServices, prepareDeployment, prepareProcess, registerBackgrou
 import { captureException } from '@shared/lib/error-reporting'
 import { initializeBackgroundWork, isBackgroundWorkInitialized, taskManager } from '@shared/lib/background-work'
 import { getErrorReporter, initErrorReporting } from '@shared/lib/error-reporting'
-import { agentRegistry } from '@shared/lib/agent-actor'
-import { setActorDeps } from '@shared/lib/agent-actor/registry'
+import { initializeAgentRegistry, localActorDeps } from '@shared/lib/agent-actor/registry'
 import { setWorkspaceRemoval } from '@shared/lib/agent-actor/workspace-removal'
-import { createProcessHostPort } from '@shared/lib/host/local-host-port'
+import { createLocalHostPort, type HostPort } from '@shared/lib/agent-actor/host-port'
+import { localHostCalls, localHostEvents } from '@shared/lib/host/local-host-port'
+import { globalFeed } from '@shared/lib/notifications/global-feed'
 import { createConfigOps } from '@shared/lib/agent-actor/config-ops'
 import { CLI_TRANSCRIPTS_DIR, type SessionStore } from '@shared/lib/agent-actor/session-store'
-import type { AgentSlug } from '@shared/lib/agent-actor/types'
-import { LocalAgentActor, type SessionStoreHooks } from '@shared/lib/agent-actor/local-agent-actor'
+import type { AgentActor, AgentRegistry, AgentSlug } from '@shared/lib/agent-actor/types'
+import type { LocalActorDeps, SessionStoreHooks } from '@shared/lib/agent-actor/local-agent-actor'
 import { SessionIndex } from '@shared/lib/agent-actor/session-index'
 import { ingestSessionMetadataFile } from '@shared/lib/services/session-metadata-file'
 // eslint-disable-next-line local-rules/no-agent-internals-outside-actor -- the agent's object sets its container's inactivity timeout from the same timeout the alarm reads
 import { autoSleepTimeoutMsFrom } from '@shared/lib/container/idle-alarm'
-import type { ExecutionContext, SqlStorage } from 'cloudflare:workers'
+import type { ExecutionContext } from 'cloudflare:workers'
 import { CloudflareAppState } from './objects/cloudflare-app-state'
 import { CloudflareBlobStore, CloudflareUploadByteStore } from './cloudflare-host-files'
 import { CloudflareImageService } from './cloudflare-image-service'
@@ -46,7 +47,9 @@ import { CloudflareTaskManager, announceSessionStart, runHostToolInTaskManager }
 import { agentContainers, withAgentObject, sleepingStore } from './cloudflare-container-control'
 import { installCloudflareContainers } from '@shared/lib/container/cloudflare-container-runtime'
 import { createCloudflareFileOps } from './cloudflare-file-ops'
-import { cloudflareAgentActor, ownedHere, runActorOp, servingAgentObject, type ActorOutcome, type ReachActorObject } from './objects/cloudflare-agent-actor'
+import { cloudflareAgentActor, servingAgentObject, type ActorOutcome, type ReachActorObject } from './objects/cloudflare-agent-actor'
+import { CloudflareAgentActor, evictObjectActor, evictObjectActors, heldObjectActor, objectActor } from './objects/object-actors'
+import type { AgentDurableObject } from './objects/cloudflare-agent'
 import { createObjectSessionIndexStorage } from './lib/object-session-index-storage'
 import { callOnCurrentCode } from './lib/object-version'
 import { seedSettings } from './lib/seed-settings'
@@ -100,21 +103,11 @@ export function serve(request: Request, env: Env, ctx: ExecutionContext): Promis
   return response
 }
 
-/** An op on the agent's actor, in the agent's own object (cloudflare-agent.ts). */
-export function runAgentActorOp(slug: AgentSlug, path: string, args: unknown[], actingUserId?: string): Promise<ActorOutcome> {
-  return runActorOp(agentRegistry.get(slug), path, args, actingUserId)
-}
-
-/** The agent's actor reads its container's status: the container outlives the object's memory, and its exits are not polled. */
-export async function syncAgentStatus(slug: AgentSlug): Promise<void> {
-  await agentRegistry.get(slug).container.syncStatus()
-}
-
-/** The agent's actor object, used directly only inside the agent's own object (cloudflare-agent.ts). */
-export function ownAgentActor(slug: AgentSlug): LocalAgentActor {
-  const actor = agentRegistry.get(slug)
-  if (!servingAgentObject(slug) || !(actor instanceof LocalAgentActor)) throw new Error(`The actor of agent ${slug} is used directly only inside its own object`)
-  return actor
+/** The agent's actor, for its own object only (cloudflare-agent.ts): made there on the object's first call in this isolate. */
+export function ownAgentActor(slug: AgentSlug, object: AgentDurableObject): CloudflareAgentActor {
+  if (servingAgentObject(slug) !== object || !wired) throw new Error(`The actor of agent ${slug} is used directly only inside its own object`)
+  const { env, deps } = wired
+  return objectActor(slug, object, () => new CloudflareAgentActor(slug, deps, object, (hooks) => cloudflareSessionStore(env, slug, object, hooks)))
 }
 
 /** The agent auto-sleep timeout in the org's settings; 0 when auto-sleep is off. */
@@ -231,18 +224,14 @@ const reachAgentActor: (env: Env, slug: AgentSlug, run: Parameters<ReachActorObj
   return callOnCurrentCode(env.AGENT, slug, env.VERSION?.timestamp, (agent, callerVersion) => run(agent, callerVersion))
 }
 
+/** What this isolate's agent actors are made with. */
+let wired: { env: Env; deps: LocalActorDeps } | undefined
+
 /** Where each agent runs: its actor in its own object, its files in its container or, asleep, in R2. */
 function wireAgents(env: Env): void {
-  setActorDeps({
-    // A new stub for each call: a Worker request may not use a stub another request made, and the registry keeps the handle.
-    transport: (local) => ownedHere(local.slug, local, cloudflareAgentActor(local.slug, (run) => reachAgentActor(env, local.slug, run))),
-    createSessionStore: (slug, hooks) => cloudflareSessionStore(env, slug, hooks),
-    // A session runs in its agent's object; the chat connections, the webhook relay and the trigger manager are in the task manager object.
-    host: createProcessHostPort({
-      announceSessionStart: (slug, sessionId) => announceSessionStart(env, slug, sessionId),
-      runHostTool: (request) => runHostToolInTaskManager(env, request),
-    }),
-  })
+  // The local actor's dependencies, with this deployment's host.
+  wired ??= { env, deps: Object.create(localActorDeps, { host: { value: cloudflareHostPort(env) } }) as LocalActorDeps }
+  initializeAgentRegistry(() => cloudflareAgentRegistry(env))
   // A deleted agent's saved files are in its object and R2, not in a directory here. They are removed
   // after the answer, by a task that is tried again if it fails: the purge lists and deletes every
   // object the agent saved. A removal that cannot be scheduled fails, and the agent is kept.
@@ -251,20 +240,55 @@ function wireAgents(env: Env): void {
   })
 }
 
-/** The SQLite of the agent's object, where its session index is kept. The actor that uses the index runs only in that object. */
-function agentObjectSql(slug: AgentSlug): SqlStorage {
-  const own = servingAgentObject(slug)
-  if (!own) throw new Error(`The session index of agent ${slug} is read only in the agent's own object`)
-  return own.sessionIndexSql()
+/**
+ * The agents as this isolate reaches them. Each agent's actor runs in its own object; anywhere
+ * else a stand-in reaches it there. The stand-in makes a new object stub for each call: a Worker
+ * request may not use a stub another request made.
+ */
+function cloudflareAgentRegistry(env: Env): AgentRegistry {
+  const standIns = new Map<AgentSlug, AgentActor>()
+  return {
+    get: (slug) => {
+      let standIn = standIns.get(slug)
+      if (!standIn) standIns.set(slug, (standIn = cloudflareAgentActor(slug, (run) => reachAgentActor(env, slug, run), () => heldObjectActor(slug))))
+      return standIn
+    },
+    evict: async (slug) => {
+      standIns.delete(slug)
+      evictObjectActor(slug)
+    },
+    evictAll: async () => {
+      standIns.clear()
+      await evictObjectActors()
+    },
+  }
 }
 
-function cloudflareSessionStore(env: Env, slug: AgentSlug, hooks: SessionStoreHooks): SessionStore {
-  // Through the agent's object, which knows whether its container runs and answers asleep when it does not:
-  // the container status this isolate caches is only ever set in that object.
+/**
+ * The host as an agent's actor reaches it here: a session runs in its agent's object, while the
+ * chat connections, the webhook relay and the trigger manager are in the task manager object.
+ */
+function cloudflareHostPort(env: Env): HostPort {
+  return createLocalHostPort({
+    calls: { ...localHostCalls, hostTool: (request) => runHostToolInTaskManager(env, request) },
+    events: {
+      ...localHostEvents,
+      global: (event) => {
+        if (event.type !== 'session_active' || typeof event.agentSlug !== 'string' || typeof event.sessionId !== 'string') return localHostEvents.global(event)
+        // The chat the session belongs to follows it from the task manager object, which holds its connection.
+        globalFeed.publish(event)
+        return announceSessionStart(env, event.agentSlug, event.sessionId)
+      },
+    },
+  })
+}
+
+/** Where the actor in the agent's own object keeps the agent's files, config documents and transcripts. */
+function cloudflareSessionStore(env: Env, slug: AgentSlug, object: AgentDurableObject, hooks: SessionStoreHooks): SessionStore {
+  // Through the agent's object, which knows whether its container runs and answers asleep when it does not.
   const files = createCloudflareFileOps(async (path, init) => {
-    // Asleep in its own object: the saved workspace answers, and no container request is built (its client reads the settings).
-    const own = servingAgentObject(slug)
-    if (own && !(await own.agentRunning())) return null
+    // Asleep: the saved workspace answers, and no container request is built (its client reads the settings).
+    if (!(await object.agentRunning())) return null
     // The container's API takes the agent's host token, as the container client sends it.
     const auth = await (await hooks.client()).getHostAuthHeaders()
     const headers = new Headers(init?.headers)
@@ -285,7 +309,7 @@ function cloudflareSessionStore(env: Env, slug: AgentSlug, hooks: SessionStoreHo
       transcriptsDir: CLI_TRANSCRIPTS_DIR,
       key: () => key,
       // In the agent's own object, not the org's database: the actor runs only there, and a read costs no round trip.
-      storage: createObjectSessionIndexStorage(() => agentObjectSql(slug)),
+      storage: createObjectSessionIndexStorage(() => object.sessionIndexSql()),
       beforeFirstUse: () => ingestSessionMetadataFile(store).catch((error: unknown) => {
         console.warn(`Could not take in the session metadata file of agent ${slug}:`, error)
         captureException(error, { tags: { component: 'session-store', operation: 'ingest-session-metadata' }, extra: { agent: slug }, level: 'warning' })

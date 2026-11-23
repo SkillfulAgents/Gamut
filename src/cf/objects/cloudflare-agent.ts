@@ -22,9 +22,8 @@ import { DurableObject, type Container, type DurableObjectState, type SqlStorage
 import { ASLEEP_HEADER, sleepingStoreOn, type AgentCalls, type ByteRange, type StoredEntry, type StoredRefusal } from '../cloudflare-container-control'
 import { WorkspaceFileError } from '@shared/lib/agent-actor/workspace-path'
 import type { AgentListing, AgentLiveSummary } from '@shared/lib/agent-actor/types'
-import { runAsAgentObject, type ActorOutcome } from './cloudflare-agent-actor'
-import type { LocalAgentActor } from '@shared/lib/agent-actor/local-agent-actor'
-import type { IdleTimer } from '@shared/lib/container/idle-alarm'
+import { runActorOp, runAsAgentObject, type ActorOutcome } from './cloudflare-agent-actor'
+import type { CloudflareAgentActor } from './object-actors'
 import { checkedCall, restartIfOlder, type Checked, type Restarting } from '../lib/object-version'
 import { needsLiveConnections, serveInTaskManager } from './cloudflare-task-manager'
 import { captureException } from '@shared/lib/error-reporting'
@@ -189,13 +188,6 @@ export class AgentDurableObject extends DurableObject<Env> {
   private idleCheckFailures = 0
   /** When this instance last set the object's alarm for; null when it set none, or it went off. */
   private idleCheckAt: number | null = null
-  /** What the actor's idle alarm waits with: this object's alarm, which outlives the isolate. */
-  private readonly idleWait: IdleTimer = {
-    set: (ms) => this.scheduleIdleCheckBy(Date.now() + ms),
-    clear: () => {
-      this.cancelIdleCheck().catch((error: unknown) => console.error(`[AgentDurableObject ${this.agentName()}] cancelling the idle check failed:`, error))
-    },
-  }
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, nearStorage(env))
@@ -221,9 +213,9 @@ export class AgentDurableObject extends DurableObject<Env> {
       await runAsAgentObject(slug, this, async () => {
         const app = await import('../boot')
         await app.boot(this.env)
-        const actor = this.ownActor(app, slug)
-        await this.syncStatus(app, slug)
-        return actor.idleWaitEnded()
+        const actor = app.ownAgentActor(slug, this)
+        await this.syncStatus(actor)
+        return actor.checkIdle()
       })
       this.idleCheckFailures = 0
     } catch (error) {
@@ -286,17 +278,10 @@ export class AgentDurableObject extends DurableObject<Env> {
     return runAsAgentObject(slug, this, async () => {
       const app = await import('../boot')
       await app.boot(this.env)
-      this.ownActor(app, slug)
-      await this.syncStatus(app, slug)
-      return app.runAgentActorOp(slug, path, args, actingUserId)
+      const actor = app.ownAgentActor(slug, this)
+      await this.syncStatus(actor)
+      return runActorOp(actor, path, args, actingUserId)
     })
-  }
-
-  /** The agent's actor object here, told to wait with this object's alarm before it sets one. */
-  private ownActor(app: typeof import('../boot'), slug: string): LocalAgentActor {
-    const actor = app.ownAgentActor(slug)
-    actor.waitIdleWith(this.idleWait)
-    return actor
   }
 
   /**
@@ -334,11 +319,11 @@ export class AgentDurableObject extends DurableObject<Env> {
     return this.ctx.storage.sql
   }
 
-  private syncStatus(app: typeof import('../boot'), slug: string): Promise<void> {
-    return (this.statusSynced ??= app.syncAgentStatus(slug).catch((error: unknown) => {
+  private syncStatus(actor: CloudflareAgentActor): Promise<void> {
+    return (this.statusSynced ??= actor.syncContainerStatus().catch((error: unknown) => {
       this.statusSynced = undefined
-      console.error(`[AgentDurableObject ${slug}] syncing the container status failed:`, error)
-      captureException(error, { tags: { component: 'agent-object', operation: 'sync-status' }, extra: { agent: slug } })
+      console.error(`[AgentDurableObject ${actor.slug}] syncing the container status failed:`, error)
+      captureException(error, { tags: { component: 'agent-object', operation: 'sync-status' }, extra: { agent: actor.slug } })
     }))
   }
 
@@ -357,8 +342,7 @@ export class AgentDurableObject extends DurableObject<Env> {
       await runAsAgentObject(slug, this, async () => {
         const app = await import('../boot')
         await app.boot(this.env)
-        this.ownActor(app, slug)
-        await this.syncStatus(app, slug)
+        await this.syncStatus(app.ownAgentActor(slug, this))
       })
     } catch (error) {
       console.error(`[AgentDurableObject ${slug}] reading the status after the container exited failed:`, error)

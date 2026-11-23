@@ -282,12 +282,6 @@ export interface ContainerOps {
   stop(options?: StopOptions): Promise<void>
   /** `containerManager.keepAlive` */
   keepAlive(): Promise<void>
-  /**
-   * Read now whether the container runs, and update what the app shows. For a
-   * deployment that hears the container exit instead of polling it: it calls
-   * this when the container exits, and when a new process first serves the agent.
-   */
-  syncStatus(): Promise<void>
   /** `containerManager.getCachedInfo` — the cached status; no runtime is queried. */
   status(): Promise<ContainerInfo>
   /**

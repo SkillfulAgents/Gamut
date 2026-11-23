@@ -79,15 +79,13 @@ function notify(notification: SessionNotification): Promise<void> {
  * hint that may never reach them. Work the host must do because of it is
  * started here, directly, so it never waits on a hint reaching a listener.
  */
-function feedEvent(event: GlobalFeedEvent, announceSessionStart?: SessionStartAnnouncer): Promise<void> {
+function feedEvent(event: GlobalFeedEvent): Promise<void> {
   globalFeed.publish(event)
-  return hostWorkFor(event, announceSessionStart)
+  return hostWorkFor(event)
 }
 
-type SessionStartAnnouncer = (agentSlug: string, sessionId: string) => Promise<void>
-
 /** Loaded on first use, as the tools are: both services reach back to the agent registry. */
-async function hostWorkFor(event: GlobalFeedEvent, announceSessionStart?: SessionStartAnnouncer): Promise<void> {
+async function hostWorkFor(event: GlobalFeedEvent): Promise<void> {
   // A session settled: the agent's stale and opted-in widgets re-run.
   if (event.type === 'session_idle' && typeof event.agentSlug === 'string') {
     const { widgetRefreshService } = await import('@shared/lib/services/widget-refresh-service')
@@ -95,7 +93,6 @@ async function hostWorkFor(event: GlobalFeedEvent, announceSessionStart?: Sessio
   }
   // A session started a turn: the chat it belongs to, if any, follows it.
   if (event.type === 'session_active' && typeof event.agentSlug === 'string' && typeof event.sessionId === 'string') {
-    if (announceSessionStart) return announceSessionStart(event.agentSlug, event.sessionId)
     const { agentIntegrationManager } = await import('@shared/lib/agent-integrations/agent-integration-manager')
     await agentIntegrationManager.sessionStarted(event.agentSlug, event.sessionId)
   }

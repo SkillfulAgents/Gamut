@@ -4,7 +4,7 @@ import type { AgentActor } from '@shared/lib/agent-actor/types'
 import { requestScopedSettings } from '@shared/lib/config/settings-request-memo'
 import { getRequestUserId, runOutsideRequestUser, runWithRequestUser } from '@shared/lib/platform-attribution/request-context'
 import type { AgentDurableObject } from './cloudflare-agent'
-import { cloudflareAgentActor, ownedHere, runActorOp, runAsAgentObject, servingAgentObject, type ActorObject, type ActorOutcome } from './cloudflare-agent-actor'
+import { cloudflareAgentActor, runActorOp, runAsAgentObject, servingAgentObject, type ActorObject, type ActorOutcome } from './cloudflare-agent-actor'
 
 /** The actor in the agent's object, reached the way RPC reaches it: arguments and results are cloned, and the caller's async context stays behind. */
 function overRpc(actor: Partial<Record<string, unknown>>) {
@@ -127,12 +127,14 @@ describe('cloudflareAgentActor', () => {
   })
 })
 
-describe('ownedHere', () => {
-  const actor = (where: string) => ({ slug: 'sales-agent', files: { getDoc: async () => where } }) as unknown as AgentActor
+describe("the stand-in inside the agent's own object", () => {
   const object = {} as AgentDurableObject
 
-  it("uses the actor in this isolate only inside the agent's own object, and the remote one everywhere else", async () => {
-    const reached = ownedHere('sales-agent', actor('local'), actor('remote'))
+  it("uses the actor in this isolate only inside the agent's own object, and its object everywhere else", async () => {
+    const remote = { slug: 'sales-agent', files: { getDoc: async () => 'remote' } } as unknown as AgentActor
+    const agentObject: ActorObject = { actorCall: async (path, args) => runActorOp(remote, path, args) }
+    const local = { slug: 'sales-agent', files: { getDoc: async () => 'local' } } as unknown as AgentActor
+    const reached = cloudflareAgentActor('sales-agent', async (run) => (await run(agentObject)) as ActorOutcome, () => local)
 
     expect(await reached.files.getDoc('AGENTS.md')).toBe('remote')
     expect(await runAsAgentObject('sales-agent', object, () => reached.files.getDoc('AGENTS.md'))).toBe('local')

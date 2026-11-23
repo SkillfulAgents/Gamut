@@ -11,12 +11,16 @@ import { sleepingStoreOn } from '../cloudflare-container-control'
 
 vi.mock('@shared/lib/error-reporting', () => ({ captureException: vi.fn() }))
 // The app must not boot to list a sleeping agent: its session index is in the object's own SQLite.
-const { boot, syncAgentStatus } = vi.hoisted(() => ({ boot: vi.fn(), syncAgentStatus: vi.fn(async () => {}) }))
+const { boot, syncContainerStatus } = vi.hoisted(() => ({ boot: vi.fn(), syncContainerStatus: vi.fn(async () => {}) }))
 vi.mock('../boot', () => ({
   boot,
-  syncAgentStatus,
-  runAgentActorOp: async () => ({ value: 'from the actor' }),
-  ownAgentActor: () => ({ waitIdleWith: vi.fn(), idleWaitEnded: vi.fn(async () => {}) }),
+  ownAgentActor: (slug: string) => ({
+    slug,
+    live: async () => 'from the actor',
+    listing: async () => 'from the actor',
+    syncContainerStatus,
+    checkIdle: vi.fn(async () => {}),
+  }),
   autoSleepTimeoutMs: async () => 30 * 60_000,
 }))
 
@@ -759,16 +763,16 @@ describe('AgentDurableObject listing its agent', () => {
     const exit = (object: unknown) => (object as { onContainerExit(outcome: string): void }).onContainerExit('code 137')
 
     const asleep = sleepingAgent()
-    syncAgentStatus.mockClear()
+    syncContainerStatus.mockClear()
     exit(asleep.object)
     await vi.waitFor(() => expect(log).toHaveBeenCalled())
-    expect(syncAgentStatus).not.toHaveBeenCalled()
+    expect(syncContainerStatus).not.toHaveBeenCalled()
 
     const booted = sleepingAgent()
     await booted.object.actorCall('live', [])
-    expect(syncAgentStatus).toHaveBeenCalledTimes(1)
+    expect(syncContainerStatus).toHaveBeenCalledTimes(1)
     exit(booted.object)
-    await vi.waitFor(() => expect(syncAgentStatus).toHaveBeenCalledTimes(2))
+    await vi.waitFor(() => expect(syncContainerStatus).toHaveBeenCalledTimes(2))
     log.mockRestore()
   })
 

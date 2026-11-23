@@ -5,8 +5,6 @@ import { autoSleepTimeoutMsFrom } from '@shared/lib/container/idle-alarm'
 import { processTimer } from '@shared/lib/container/process-timer'
 import { getSettings } from '@shared/lib/config/settings'
 import type { ContainerRuntime } from '@shared/lib/container/container-runtime'
-import { autoSleepTimeoutMsFrom, processIdleTimer, type IdleTimer } from '@shared/lib/container/idle-alarm'
-import { getSettings } from '@shared/lib/config/settings'
 import type { ContainerClient } from '@shared/lib/container/types'
 import type { userInputRequestManager } from '@shared/lib/tools/requests/request-manager'
 import type { reviewManager } from '@shared/lib/proxy/review-manager'
@@ -63,9 +61,8 @@ import type {
   WidgetOps,
 } from './types'
 
-/** What the actor hands the session store a deployment makes: where activity is marked, and the agent's container client. */
+/** What the actor hands the session store it makes: where activity is marked, and the agent's container client. */
 export interface SessionStoreHooks extends Pick<SessionStore, 'onActivity'> {
-  /** The agent's container client, from the actor's own runtime. */
   client(): Promise<ContainerClient>
 }
 
@@ -165,7 +162,7 @@ export class LocalAgentActor implements AgentActor {
     readonly slug: AgentSlug,
     deps: LocalActorDeps,
     state?: AgentState,
-    createSessionStore: (hooks: Pick<SessionStore, 'onActivity'>) => SessionStore = (hooks) => createLocalSessionStore(slug, deps, hooks),
+    createSessionStore: (hooks: SessionStoreHooks) => SessionStore = (hooks) => createLocalSessionStore(slug, deps, hooks),
   ) {
     // Every write to a session goes through the store, so this is where the
     // container's idle clock learns of session activity — the live sessions'
@@ -333,9 +330,6 @@ function createContainerOps(slug: AgentSlug, runtime: () => ContainerRuntime, de
     },
     stop: (...args) => runtime().stopContainer(...args),
     keepAlive: async () => runtime().keepAlive(),
-    syncStatus: async () => {
-      await runtime().syncAgentStatus()
-    },
     status: async () => runtime().getCachedInfo(),
     invalidate: async (options) => {
       if (!runtime().holdsDrives()) return 'not-running'

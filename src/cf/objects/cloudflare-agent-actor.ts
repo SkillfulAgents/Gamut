@@ -84,8 +84,12 @@ function withoutSignal(arg: unknown): unknown {
   return Object.fromEntries(Object.entries(arg).filter(([, value]) => !(value instanceof AbortSignal)))
 }
 
-/** The agent's actor, in its object: `reach` runs a call on that object. */
-export function cloudflareAgentActor(slug: AgentSlug, reach: ReachActorObject): AgentActor {
+/**
+ * The stand-in for the agent's actor everywhere but its object: `reach` runs a call on that
+ * object. Inside the agent's own object it is the actor there (`own`), with no call to itself.
+ * Chosen at each use, not once: an isolate can serve the agent's object and other callers.
+ */
+export function cloudflareAgentActor(slug: AgentSlug, reach: ReachActorObject, own?: () => AgentActor | undefined): AgentActor {
   const call = async (path: string, args: unknown[]): Promise<unknown> => {
     // Read here, in the caller's own context: `reach` may run the call later, and the object never sees this context.
     const actingUserId = getRequestUserId()
@@ -108,7 +112,11 @@ export function cloudflareAgentActor(slug: AgentSlug, reach: ReachActorObject): 
       : Reflect.get(target, key, receiver),
   })
   const calls = Object.fromEntries(Object.keys(ACTOR_CALLS).map((name) => [name, () => call(name, [])]))
-  return { slug, ...groups, ...calls } as unknown as AgentActor
+  const remote = { slug, ...groups, ...calls } as unknown as AgentActor
+  if (!own) return remote
+  return new Proxy(remote, {
+    get: (target, key) => Reflect.get((servingAgentObject(slug) && own()) || target, key),
+  })
 }
 
 /**
@@ -171,17 +179,4 @@ export function runAsAgentObject<T>(slug: AgentSlug, object: AgentDurableObject,
 export function servingAgentObject(slug: AgentSlug): AgentDurableObject | null {
   const current = serving.getStore()
   return current?.slug === slug ? current.object : null
-}
-
-/**
- * The agent's actor, chosen at each use: inside the agent's own object it is the actor in this
- * isolate, and anywhere else the actor in that object, reached through `remote`. Chosen per use,
- * not once: an isolate can serve the agent's object and other callers.
- */
-export function ownedHere(slug: AgentSlug, local: AgentActor, remote: AgentActor): AgentActor {
-  return new Proxy(local, {
-    get(_target, key) {
-      return Reflect.get(servingAgentObject(slug) ? local : remote, key)
-    },
-  })
 }
