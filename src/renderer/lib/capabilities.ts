@@ -177,3 +177,15 @@ export function signsInWithApple(): boolean {
 export function mcpServerRunsOnThisComputer(): boolean {
   return canUseHostFeatures()
 }
+
+/**
+ * Whether Settings offers who can reach the MCP server (this computer only, or
+ * other devices on the network): the API runs inside the desktop app, the one
+ * server that checks where a request comes from (`checksLoopbackSource()`). A
+ * web deployment's network setup decides that instead. A question about the
+ * server: unknown server facts read as no.
+ */
+export function offersMcpReachChoice(): boolean {
+  const distribution = serverFacts()?.distribution
+  return !!distribution && distribution !== 'deployment'
+}

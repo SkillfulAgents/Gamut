@@ -1,8 +1,30 @@
-import type { MiddlewareHandler } from 'hono'
+import type { Context, MiddlewareHandler } from 'hono'
 import { getConnInfo } from '@hono/node-server/conninfo'
 import { isAuthMode } from '@shared/lib/auth/mode'
 
-const LOCALHOST_ADDRS = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1'])
+/** The socket source addresses that are this machine: IPv4 and IPv6 loopback, and IPv4 loopback mapped into IPv6. */
+export const LOCALHOST_ADDRS: ReadonlySet<string> = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1'])
+
+/**
+ * Whether this server restricts requests by their source address: the desktop
+ * app without auth mode (Electron main hosts the API, bound to 0.0.0.0 for the
+ * agents' containers). Docker and web deployments leave reach to their
+ * infrastructure, where every request arrives from a non-loopback source.
+ * `/api/*` (`LocalModeAuth`) and `/mcp` (its reach setting) both ask this.
+ */
+export function checksLoopbackSource(): boolean {
+  return !isAuthMode() && process.type === 'browser'
+}
+
+/**
+ * Whether the request's TCP peer is this machine, read from the socket. Never
+ * from X-Forwarded-For or any header: a header is whatever the sender wrote.
+ * Only called where `checksLoopbackSource()` holds, so on @hono/node-server.
+ */
+export function isLoopbackSource(c: Context): boolean {
+  const addr = getConnInfo(c).remote.address
+  return !!addr && LOCALHOST_ADDRS.has(addr)
+}
 
 /**
  * API path prefixes hit by the agent container, NOT a browser. These
@@ -40,14 +62,11 @@ export function isContainerFacingPath(path: string): boolean {
 
 export function LocalModeAuth(): MiddlewareHandler {
   return async (c, next) => {
-    if (isAuthMode()) return next()
-
     // Only restrict to localhost in Electron — Docker/web deployments
     // handle network security at the infrastructure level.
-    if (process.type !== 'browser') return next()
+    if (!checksLoopbackSource()) return next()
 
-    const addr = getConnInfo(c).remote.address
-    if (!addr || !LOCALHOST_ADDRS.has(addr)) {
+    if (!isLoopbackSource(c)) {
       return c.json({ error: 'Forbidden' }, 403)
     }
 

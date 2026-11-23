@@ -7,8 +7,11 @@
  *   URL as this request reached the server (the Electron port can move), and
  *   the installation token (non-auth mode).
  * - PUT /enabled: the admin switch.
+ * - PUT /reach: who can reach `/mcp` (this computer, or the network too),
+ *   where the server checks request sources (the desktop app).
  * - POST /token/regenerate: replace the token; the old one stops at once.
  */
+import * as os from 'node:os'
 import { Hono } from 'hono'
 import { zValidator } from '@hono/zod-validator'
 import { z } from 'zod'
@@ -16,10 +19,19 @@ import { isAuthMode } from '@shared/lib/auth/mode'
 import { resolvePublicAppBaseUrl } from '@shared/lib/agent-integrations/app-link'
 import { getSettings } from '@shared/lib/config/settings'
 import { getOrCreateMcpInstallationToken, regenerateMcpInstallationToken } from '@shared/lib/mcp-server/installation-token'
-import { isMcpServerEnabledFrom, setMcpServerEnabled } from '@shared/lib/mcp-server/mcp-server-settings'
-import type { McpServerStatusResponse } from '@shared/lib/mcp-server/mcp-server-settings-schema'
+import { isMcpServerEnabledFrom, mcpServerReachFrom, setMcpServerEnabled, setMcpServerReach } from '@shared/lib/mcp-server/mcp-server-settings'
+import { mcpServerReachSchema, type McpServerStatusResponse } from '@shared/lib/mcp-server/mcp-server-settings-schema'
+import { checksLoopbackSource } from '../middleware/local-mode-auth'
 import { MCP_ROUTE_PATH } from './mcp'
 import { Authenticated, IsAdmin } from '../middleware/auth'
+
+/** This machine's non-internal IPv4 addresses: where other devices on the network reach it. */
+function networkAddresses(): string[] {
+  return Object.values(os.networkInterfaces())
+    .flatMap((addresses) => addresses ?? [])
+    .filter((address) => address.family === 'IPv4' && !address.internal)
+    .map((address) => address.address)
+}
 
 const routes = new Hono()
 routes.use('*', Authenticated())
@@ -33,11 +45,17 @@ async function endpointUrlOf(request: Request): Promise<string> {
 async function status(request: Request): Promise<McpServerStatusResponse> {
   const settings = await getSettings()
   const available = !isAuthMode()
+  const reachApplies = checksLoopbackSource()
   return {
     available,
     enabled: available && isMcpServerEnabledFrom(settings),
     endpointUrl: await endpointUrlOf(request),
     token: available ? await getOrCreateMcpInstallationToken() : null,
+    reach: {
+      applies: reachApplies,
+      value: mcpServerReachFrom(settings),
+      networkAddresses: reachApplies ? networkAddresses() : [],
+    },
   }
 }
 
@@ -46,6 +64,12 @@ routes.get('/', async (c) => c.json(await status(c.req.raw)))
 routes.put('/enabled', IsAdmin(), zValidator('json', z.object({ enabled: z.boolean() }).strict()), async (c) => {
   if (isAuthMode()) return c.json({ error: 'The MCP server is not available in this deployment yet' }, 409)
   await setMcpServerEnabled(c.req.valid('json').enabled)
+  return c.json(await status(c.req.raw))
+})
+
+routes.put('/reach', IsAdmin(), zValidator('json', z.object({ reach: mcpServerReachSchema }).strict()), async (c) => {
+  if (!checksLoopbackSource()) return c.json({ error: 'This server does not check where requests come from; its network setup decides who reaches it' }, 409)
+  await setMcpServerReach(c.req.valid('json').reach)
   return c.json(await status(c.req.raw))
 })
 

@@ -156,3 +156,6 @@ src/api/mcp.auth-mode.test.ts
 src/shared/lib/mcp-server/installation-token.test.ts
 src/shared/lib/mcp-server/tools/access.test.ts
 src/shared/lib/mcp-server/tools/run-tools.test.ts
+src/api/mcp.reach.test.ts
+src/api/routes/mcp-server-settings.test.ts
+src/shared/lib/mcp-server/mcp-server-settings.test.ts
