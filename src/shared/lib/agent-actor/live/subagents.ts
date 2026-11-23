@@ -8,6 +8,7 @@
  * lifecycle arrives on the main stream (`task_started`, `task_progress`, the
  * terminal task frames) and through the launching call's tool result.
  */
+import { subagentReport } from '@shared/lib/utils/subagent-report'
 import { redactStreamedToolInput } from './redaction'
 import type { SessionEvent } from './session-channel'
 import { ToolInputThrottle } from './tool-input-throttle'
@@ -335,7 +336,7 @@ export class Subagents {
         if (backgroundAgentId) this.sink.registerBackground(backgroundAgentId, block.tool_use_id)
         continue
       }
-      this.complete(block.tool_use_id, resultTextOf(block.content))
+      this.complete(block.tool_use_id, subagentReport(result) ?? resultTextOf(block.content))
     }
   }
 

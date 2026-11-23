@@ -73,6 +73,7 @@ export function useSubagentRun({
   // agent launched successfully…"), not what the agent reported.
   const isLaunchAck = toolCall.subagent?.status === 'async_launched'
   const resultText = useMemo(() => {
+    if (toolCall.subagent?.report !== undefined) return toolCall.subagent.report
     if (toolCall.result != null && !isLaunchAck) {
       const parsed = parseToolResult(toolCall.result)
       return parsed.text
@@ -81,7 +82,7 @@ export function useSubagentRun({
       return activeSubagent.resultText
     }
     return null
-  }, [toolCall.result, isLaunchAck, activeSubagent?.resultText])
+  }, [toolCall.subagent?.report, toolCall.result, isLaunchAck, activeSubagent?.resultText])
 
   return {
     subagentId,

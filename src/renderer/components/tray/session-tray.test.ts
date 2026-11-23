@@ -43,6 +43,23 @@ describe('session tray navigation', () => {
     expect(tray.snapshot().tabs).toHaveLength(3)
   })
 
+  it('follows a target announced before its tab, without taking focus from another resident', () => {
+    const tray = new SessionTray()
+    const second = { ...page, targetId: 'q', index: 1 }
+    const third = { ...page, targetId: 'r', index: 2 }
+    tray.browserAvailable(true)
+    tray.syncBrowser([page], 'p')
+    tray.syncBrowser([page], 'q')
+    expect(tray.snapshot().selected).toBe('browser:p')
+    tray.syncBrowser([page, second], 'q')
+    expect(tray.snapshot().selected).toBe('browser:q')
+    tray.syncBrowser([page, second], 'r')
+    tray.openFileTab(file('notes.md'))
+    const fileKey = tray.snapshot().selected
+    tray.syncBrowser([page, second, third], 'r')
+    expect(tray.snapshot().selected).toBe(fileKey)
+  })
+
   it('replaces a launcher in place and remembers the selection through renames', () => {
     const tray = new SessionTray()
     tray.openNew()
