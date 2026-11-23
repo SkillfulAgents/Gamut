@@ -16,6 +16,10 @@ import type { AgentMember } from '@shared/lib/agent-members-schema'
 import type { MemberAgent } from '@shared/lib/types/agent-sharing'
 import type { AgentListing, AgentRecord } from '@shared/lib/agent-actor/types'
 import { isHiddenAutomatedSession } from '@shared/lib/services/session-visibility'
+import { getUserSettings, getUserSettingsForUsers, type UserSettingsData } from '@shared/lib/services/user-settings-service'
+import { getUserSummaries } from '@shared/lib/services/user-profile-service'
+import { applyAgentOrder } from '@shared/lib/utils/agent-order'
+import { buildFolderSections } from '@shared/lib/utils/agent-folders'
 import { displaySlug } from '@shared/lib/utils/file-storage'
 import { agentCatalog, agentRegistry } from '@shared/lib/agent-actor'
 import {
@@ -30,6 +34,7 @@ import {
   callerHasRoleOnTarget,
   callerVisibleAgentSlugs,
   checkCallerPolicy,
+  personBehindCall,
   startPolicyRead,
   startRead,
   type XAgentCaller,
@@ -79,10 +84,19 @@ export interface ListedAgent {
   accountServices: string[]
 }
 
+/** A person's left-nav sections over the listed agents, in their sidebar's order. */
+export interface ListedSections {
+  /** Whose sections these are; null without sign-in, where there is one person. */
+  personName: string | null
+  sections: { name: string; agents: string[] }[]
+}
+
 // Bounds each entry's roster; the full one stays a list_agent_members call away for the caller's own agent.
 const MAX_RESUME_MEMBERS = 25
 
-export async function listVisibleAgents(caller: XAgentCaller): Promise<XAgentResult<{ agents: ListedAgent[] }>> {
+export async function listVisibleAgents(
+  caller: XAgentCaller,
+): Promise<XAgentResult<{ agents: ListedAgent[]; sections?: ListedSections }>> {
   const policy = await checkCallerPolicy(caller, 'list', null, 'all agents')
   if (!policy.allowed) return fail(403, policy.reason ?? 'Forbidden')
 
@@ -92,20 +106,63 @@ export async function listVisibleAgents(caller: XAgentCaller): Promise<XAgentRes
     .filter((a) => caller.kind !== 'agent' || a.slug !== caller.agentSlug)
     .filter((a) => (visible ? visible.has(a.slug) : true))
   const slugs = records.map((a) => a.slug)
-  const [people, shares, services, listings] = await Promise.all([
+  const [people, shares, services, listings, person] = await Promise.all([
     // People are members only with sign-in on, as list_agent_members.
     listAgentMembersByAgent(isAuthMode() ? slugs : []),
     listAgentShares(slugs, null),
     accountServicesByAgent(slugs),
     // The Home list's per-agent read: cached state, no container is woken.
     Promise.all(slugs.map((slug) => agentRegistry.get(slug).listing())),
+    sidebarOf(caller),
   ])
   const agents = records.map((a, i) =>
     toListedAgent(a, listings[i], people[a.slug] ?? [],
       // As the app's member stack: only member agents the caller could list itself.
       (shares[a.slug]?.direct ?? []).filter((m) => !visible || visible.has(m.slug)),
       services.get(a.slug) ?? []))
-  return ok({ agents })
+  return ok({ agents, ...(person && { sections: toListedSections(records, agents.map((a) => a.slug), person) }) })
+}
+
+export interface PersonSidebar {
+  name: string | null
+  settings: UserSettingsData
+}
+
+/** The sidebar of the person behind the call. Best-effort: the list goes out flat rather than failing. */
+async function sidebarOf(caller: XAgentCaller): Promise<PersonSidebar | undefined> {
+  try {
+    const userId = await personBehindCall(caller)
+    if (!userId) return undefined
+    if (!isAuthMode()) return { name: null, settings: await getUserSettings(userId) }
+    // Read only: listing must not create a settings row for the person.
+    const [stored, profiles] = await Promise.all([getUserSettingsForUsers([userId]), getUserSummaries([userId])])
+    const settings = stored.get(userId)
+    return settings && { name: profiles.get(userId)?.name ?? null, settings }
+  } catch (error) {
+    console.warn('[x-agent] failed to read the sidebar sections; listing flat', {
+      error: error instanceof Error ? error.message : String(error),
+    })
+    return undefined
+  }
+}
+
+/** The sidebar's own steps (app-sidebar's orderedAgents, then its sections), over the listed agents. */
+export function toListedSections(records: AgentRecord[], listedSlugs: string[], { name, settings }: PersonSidebar): ListedSections {
+  // Sections key on the stored slug; the list shows the display slug.
+  const listed = records.map((r, i) => ({ slug: r.slug, createdAt: r.createdAt, listedSlug: listedSlugs[i] }))
+  return {
+    personName: name,
+    sections: buildFolderSections(
+      applyAgentOrder(listed, settings.agentOrder),
+      settings.agentFolders,
+      settings.agentFolderAssignments,
+      settings.agentListOrder,
+    ).map(({ folder, agents: members }) => ({
+      // One line per heading, whatever the stored name holds.
+      name: folder.name.replace(/\s+/g, ' ').trim(),
+      agents: members.map((m) => m.listedSlug),
+    })),
+  }
 }
 
 export function toListedAgent(
