@@ -1,0 +1,23 @@
+{
+  "storyId": "browser-test",
+  "passed": true,
+  "reason": "Opened agent QA-20261123-093400-9fkn, sent the example.com page-title prompt, and confirmed the reply says \"Example Domain\".",
+  "steps": [
+    "Step 1: navigated to http://localhost:47891 — the Gamut home page loaded with the \"Your Agents\" sidebar listing QA-20261123-093400-9fkn and QA-20261123-093400-qrz5. The screenshot was not taken at this point.",
+    "Step 2: clicked QA-20261123-093400-9fkn in the sidebar — the agent page opened at /agents/qa-20261123-093400-9fkn-q3dc2hv1r8 with an empty message box (status \"idle\"). Screenshot: step2-agent-opened.png.",
+    "Step 3: typed \"Open a browser and go to https://example.com. Tell me the page title.\" and pressed Enter — the text stayed in the input and was not sent. I then clicked the Send button, which sent it. The session \"Check Example.com Page Title\" started, showing the user message, an \"Open Browser\" tool card, and a \"Working...\" indicator. Screenshots: step3-message-sent.png, step3-after-send-click.png. Note: the input's placeholder says \"Press cmd+enter to send\", so Enter not sending may be intended. The footer shows \"↵ Send\" while the agent is working, which is inconsistent with that.",
+    "Step 4: waited up to 180 seconds for \"Example Domain\" — the text appeared within the wait. The agent finished with status \"idle\" and showed \"Worked for 4s · 3 tool calls · 163,078 tokens\".",
+    "Step 5: the agent's reply reads \"The page title is **Example Domain**. The page at https://example.com loaded normally, and I've closed the browser.\" The reply mentions \"Example Domain\", so the check passes. Screenshot: step5-response-verified.png."
+  ],
+  "bugs": [],
+  "durationMs": 70709,
+  "sessionId": "58891085-11ab-4a3e-9033-d4817e80fbfa",
+  "cost": {
+    "inputTokens": 8454,
+    "outputTokens": 9104,
+    "cacheCreationTokens": 77574,
+    "cacheReadTokens": 796420,
+    "model": "claude-haiku-5-5",
+    "totalCostUsd": 0.230584
+  }
+}
