@@ -1,10 +1,8 @@
 [TEST_PASS]
-[REASON] Opened the QA-20261123-210100-yvg3 agent, confirmed it was idle, sent "Hello! What is 2+2?", and verified the reply contains "4".
-[STEP] 1. Navigated to http://localhost:47891 — the Gamut home page loaded with the sidebar listing both QA-20261123-210101-sh5a and QA-20261123-210100-yvg3.
-[STEP] 2. Clicked QA-20261123-210100-yvg3 in the sidebar — the URL changed to /agents/qa-20261123-210100-yvg3-s61x3rsxqu and the agent page opened. Screenshot: step2-agent-selected.png.
-[STEP] 3. Verified agent status — the status indicator in the top-right shows "idle", which satisfies the running-or-idle requirement.
-[STEP] 4. Sent "Hello! What is 2+2?" — typed into the message box and clicked Send. The app navigated to a new session, and the user message appeared in the message list.
-[STEP] 5. Waited for a response — the assistant reply "2 + 2 = 4." appeared within the wait window, with no timeout.
-[STEP] 6. Verified the response mentions "4" — "2 + 2 = 4." is shown in the message list. Screenshot taken: step6-response.png.
-
-Observation, not a confirmed bug: the chat header still reads "New Session" while the sidebar lists the session as "Basic Arithmetic Question Check". This may be a title-refresh timing issue, but I did not re-check it after a reload.
+[REASON] Opened agent QA-20261123-224252-zjzx, sent "Hello! What is 2+2?", and confirmed the reply contains "4".
+[STEP] Step 1 (navigate to http://localhost:47891) — Gamut app loaded with the sidebar and the "Your Agents" list. Screenshot not taken for this step.
+[STEP] Step 2 (click the QA-20261123-224252-zjzx agent in the sidebar) — Agent page opened at /agents/qa-20261123-224252-zjzx-p0579u69df with the composer visible. Screenshot step2-agent-selected.png taken.
+[STEP] Step 3 (verify status is "running" or "idle") — Header status reads "idle". Passed.
+[STEP] Step 4 (send "Hello! What is 2+2?") — Text entered in the composer and sent with the send button. The app navigated to a new session (/sessions/f1a72434-...) and the user message appears in the chat. Screenshots step4-message-typed.png and step4-message-sent.png taken.
+[STEP] Step 5 (wait up to 3 minutes for a response) — The assistant reply "2 + 2 = 4." was already rendered in the message list when first checked, so no waiting was needed. The activity indicator was not observed.
+[STEP] Step 6 (verify the response mentions "4" and take a screenshot) — The reply "2 + 2 = 4." is visible in the chat. Screenshot step4-message-sent.png taken, which shows the reply.

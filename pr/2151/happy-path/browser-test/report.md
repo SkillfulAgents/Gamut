@@ -1,7 +1,11 @@
 [TEST_PASS]
-[REASON] Ran the 5-step QA check: opened the QA-20261123-210101-sh5a agent, sent the example.com page-title request, waited for the reply, and confirmed it says "Example Domain".
-[STEP] Step 1: Navigated to http://localhost:47891 — the Gamut app loaded and the sidebar lists QA-20261123-210101-sh5a. PASS.
-[STEP] Step 2: Clicked QA-20261123-210101-sh5a in the sidebar — the agent chat view opened with an empty message box. PASS.
-[STEP] Step 3: Typed "Open a browser and go to https://example.com. Tell me the page title." and clicked Send — the message appeared in the chat, the session was created as "Browser Page Title Check", the agent showed "Working...", and the browser preview panel appeared on the right showing the example.com tab. PASS.
-[STEP] Step 4: Waited up to 3 minutes for the agent to finish — "Working..." disappeared within the window (about 3 seconds of work, 3 tool calls). PASS.
-[STEP] Step 5: Verified the reply — the agent answered "The page title at https://example.com is "Example Domain". The page loaded normally and I've closed the browser." The text was confirmed on screen and a screenshot was taken. PASS.
+[REASON] Browser-use smoke test: open the agent, ask it to open example.com and report the page title, and verify the reply says "Example Domain".
+[STEP] Step 1, navigated to http://localhost:47891 — Gamut home loaded with the sidebar listing agents QA-20261123-224253-x53l and QA-20261123-224252-zjzx. No errors.
+[STEP] Step 2, clicked the QA-20261123-224253-x53l agent in the sidebar — agent session view opened at /agents/qa-20261123-224253-x53l-70jdejr6zw with an empty message composer.
+[STEP] Step 3, typed "Open a browser and go to https://example.com. Tell me the page title." and clicked Send — message appeared in the chat, the session switched to "Working..." and the sidebar showed the new session "Check Example.com Page Title" as working.
+[STEP] Step 4, waited for the response (wait-for on "Example Domain", 180s limit) — the text appeared and the agent went idle. It finished in about 3s with 2 tool calls.
+[STEP] Step 5, verified the response and took a screenshot — the reply reads 'The page title is "Example Domain". The browser is still open on https://example.com if you want to do anything else there.' The live browser preview panel opened on the right showing the example.com page, with an "Open Browser https://example.com" action listed under "Browser agent actions".
+
+Observations (not counted as bugs):
+- During the run the chat showed a "ToolSearch" tool-call card with a search bar. It is an internal tool name exposed in the UI, which may be unintended.
+- The browser tool calls were collapsed under "Worked for 3s · 2 tool calls", so the individual browser_open/browser_snapshot cards were not visible without expanding.

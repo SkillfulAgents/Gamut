@@ -1,23 +1,23 @@
 {
   "storyId": "browser-test",
   "passed": true,
-  "reason": "Ran the 5-step QA check: opened the QA-20261123-210101-sh5a agent, sent the example.com page-title request, waited for the reply, and confirmed it says \"Example Domain\".",
+  "reason": "Browser-use smoke test: open the agent, ask it to open example.com and report the page title, and verify the reply says \"Example Domain\".",
   "steps": [
-    "Step 1: Navigated to http://localhost:47891 — the Gamut app loaded and the sidebar lists QA-20261123-210101-sh5a. PASS.",
-    "Step 2: Clicked QA-20261123-210101-sh5a in the sidebar — the agent chat view opened with an empty message box. PASS.",
-    "Step 3: Typed \"Open a browser and go to https://example.com. Tell me the page title.\" and clicked Send — the message appeared in the chat, the session was created as \"Browser Page Title Check\", the agent showed \"Working...\", and the browser preview panel appeared on the right showing the example.com tab. PASS.",
-    "Step 4: Waited up to 3 minutes for the agent to finish — \"Working...\" disappeared within the window (about 3 seconds of work, 3 tool calls). PASS.",
-    "Step 5: Verified the reply — the agent answered \"The page title at https://example.com is \"Example Domain\". The page loaded normally and I've closed the browser.\" The text was confirmed on screen and a screenshot was taken. PASS."
+    "Step 1, navigated to http://localhost:47891 — Gamut home loaded with the sidebar listing agents QA-20261123-224253-x53l and QA-20261123-224252-zjzx. No errors.",
+    "Step 2, clicked the QA-20261123-224253-x53l agent in the sidebar — agent session view opened at /agents/qa-20261123-224253-x53l-70jdejr6zw with an empty message composer.",
+    "Step 3, typed \"Open a browser and go to https://example.com. Tell me the page title.\" and clicked Send — message appeared in the chat, the session switched to \"Working...\" and the sidebar showed the new session \"Check Example.com Page Title\" as working.",
+    "Step 4, waited for the response (wait-for on \"Example Domain\", 180s limit) — the text appeared and the agent went idle. It finished in about 3s with 2 tool calls.",
+    "Step 5, verified the response and took a screenshot — the reply reads 'The page title is \"Example Domain\". The browser is still open on https://example.com if you want to do anything else there.' The live browser preview panel opened on the right showing the example.com page, with an \"Open Browser https://example.com\" action listed under \"Browser agent actions\"."
   ],
   "bugs": [],
-  "durationMs": 73118,
-  "sessionId": "5d916ee1-3bd5-4604-8372-7211fd80db6d",
+  "durationMs": 76261,
+  "sessionId": "880a40ad-1648-4a29-90b5-b826cc14fad8",
   "cost": {
-    "inputTokens": 8974,
-    "outputTokens": 8182,
-    "cacheCreationTokens": 104895,
-    "cacheReadTokens": 861911,
+    "inputTokens": 7716,
+    "outputTokens": 5800,
+    "cacheCreationTokens": 105726,
+    "cacheReadTokens": 672731,
     "model": "claude-haiku-5-5",
-    "totalCostUsd": 0.267194
+    "totalCostUsd": 0.236147
   }
 }
