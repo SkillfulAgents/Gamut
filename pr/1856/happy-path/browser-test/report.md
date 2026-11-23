@@ -1,8 +1,9 @@
-[TEST_FAIL]
-[REASON] Ran the 5-step agent chat check: open QA-20261123-185054-553j, send the example.com title request, wait for the reply, and verify it mentions "Example Domain". The reply did mention it, but the first send attempt did not submit.
-[BUG_FOUND] Pressing Enter in the agent's message box did not send the message. The text stayed in the input and the Send button stayed enabled. The message only sent after clicking the Send button. Expected: Enter sends the message (the placeholder says "Press cmd+enter to send"). Actual: Enter left the text in the input; a click on Send was needed.
-[STEP] Step 1: Navigated to http://localhost:47891 — the Gamut home page loaded with the sidebar listing QA-20261123-185054-553j and QA-20261123-185053-el6n. Page title "Gamut", no errors.
-[STEP] Step 2: Clicked the "QA-20261123-185054-553j" agent card — the agent page opened (URL /agents/qa-20261123-185054-553j-0exc8vf4h8) with the message input and status "idle".
-[STEP] Step 3: Typed "Open a browser and go to https://example.com. Tell me the page title." and pressed Enter — the text stayed in the input and was not sent (see bug above). Clicked Send — the message was sent, a new session "Browser Page Title Check" was created, and the agent status changed to "working".
-[STEP] Step 4: Waited up to 3 minutes for the response — the reply appeared within seconds ("Worked for 4s · 3 tool calls · 163,065 tokens"). Agent status returned to "idle".
-[STEP] Step 5: Verified the response text — it reads 'The page title is "Example Domain". The browser has been closed.' The text "Example Domain" is present. Screenshot taken of the viewport showing the reply.
+[TEST_PASS]
+[REASON] Sent a browser task to agent QA-20261123-211717-px3f and verified the reply reports the example.com page title as "Example Domain".
+[STEP] Step 1: Navigated to http://localhost:47891 — Gamut home page loaded with the sidebar listing QA-20261123-211717-px3f and QA-20261123-211716-k7es. No errors.
+[STEP] Step 2: Clicked QA-20261123-211717-px3f in the sidebar — agent page opened (idle, empty chat, message input visible).
+[STEP] Step 3: Typed "Open a browser and go to https://example.com. Tell me the page title." and sent it — a new session "Check Example.com Page Title" started, the agent went to "working", and the tool cards "ToolSearch" and "Open Browser → https://example.com" appeared.
+[STEP] Step 4: Waited for the response (wait for "Example Domain", 180s limit) — the response appeared within about 4 seconds. The turn finished as "Worked for 4s · 3 tool calls", and the agent returned to idle.
+[STEP] Step 5: Verified the response text: "The page title is "Example Domain". The page at https://example.com loaded normally, and I've closed the browser." Took a viewport screenshot (step5-response-example-domain.png) showing this reply.
+
+No bugs found. I did not check the browser preview panel, since it is not part of the steps. The browser tool-call cards were visible in the chat.
