@@ -1,10 +1,8 @@
 import { z } from 'zod'
 
 /**
- * What fills a session's context window, as the CLI's `/context` counts it in
- * full (`getContextUsage({ detail: 'full' })`): one row per category, plus the
- * MCP tools, memory files and skills behind three of them. Only the fields the
- * app draws are kept; the CLI sends more.
+ * Fields the Context tab displays from an SDK summary or full measurement.
+ * Both include category rows and their supporting tools, files and skills.
  */
 export const contextBreakdownSchema = z.object({
   /** Which row this is; a later CLI may add ids, so an unknown one is drawn by name. */
@@ -34,4 +32,3 @@ export const contextBreakdownSchema = z.object({
 })
 
 export type ContextBreakdown = z.infer<typeof contextBreakdownSchema>
-
