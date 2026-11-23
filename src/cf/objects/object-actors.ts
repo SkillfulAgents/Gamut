@@ -12,7 +12,7 @@ import type { AgentSlug } from '@shared/lib/agent-actor/types'
 import type { AgentDurableObject } from './cloudflare-agent'
 
 /** An agent's actor in its own object: the object's alarm is its idle wake-up, which outlives the isolate. */
-export class CloudflareAgentActor extends LocalAgentActor {
+export class CloudflareAgentActorInner extends LocalAgentActor {
   constructor(
     slug: AgentSlug,
     deps: LocalActorDeps,
@@ -33,19 +33,19 @@ export class CloudflareAgentActor extends LocalAgentActor {
 
   protected override cancelIdleWake(): void {
     this.object.cancelIdleCheck().catch((error: unknown) => {
-      console.error(`[CloudflareAgentActor ${this.slug}] cancelling the idle check failed:`, error)
+      console.error(`[CloudflareAgentActorInner ${this.slug}] cancelling the idle check failed:`, error)
     })
   }
 }
 
-const actors = new Map<AgentSlug, CloudflareAgentActor>()
+const actors = new Map<AgentSlug, CloudflareAgentActorInner>()
 let attached = false
 
 /**
  * The agent's actor for its own object: made on the object's first call here, and made again
  * for a new instance of the object, whose storage and alarm the old actor no longer reaches.
  */
-export function objectActor(slug: AgentSlug, object: AgentDurableObject, make: () => CloudflareAgentActor): CloudflareAgentActor {
+export function objectActor(slug: AgentSlug, object: AgentDurableObject, make: () => CloudflareAgentActorInner): CloudflareAgentActorInner {
   const held = actors.get(slug)
   if (held?.object === object) return held
   held?.dispose()
@@ -67,7 +67,7 @@ export function objectActor(slug: AgentSlug, object: AgentDurableObject, make: (
 }
 
 /** The agent's actor if its object runs it in this isolate. */
-export function heldObjectActor(slug: AgentSlug): CloudflareAgentActor | undefined {
+export function heldObjectActor(slug: AgentSlug): CloudflareAgentActorInner | undefined {
   return actors.get(slug)
 }
 
@@ -84,7 +84,7 @@ export async function evictObjectActors(): Promise<void> {
   actors.clear()
   await Promise.all(released.map((actor) =>
     actor.store.index.storeRecordedActivity().catch((error: unknown) => {
-      console.warn(`[CloudflareAgentActor] Could not store the recorded session activity of ${actor.slug}:`, error)
+      console.warn(`[CloudflareAgentActorInner] Could not store the recorded session activity of ${actor.slug}:`, error)
     }),
   ))
 }

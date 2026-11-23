@@ -47,8 +47,8 @@ import { CloudflareTaskManager, announceSessionStart, runHostToolInTaskManager }
 import { agentContainers, withAgentObject, sleepingStore } from './cloudflare-container-control'
 import { installCloudflareContainers } from '@shared/lib/container/cloudflare-container-runtime'
 import { createCloudflareFileOps } from './cloudflare-file-ops'
-import { cloudflareAgentActorStub, servingAgentObject, type ActorOutcome, type ReachActorObject } from './objects/cloudflare-agent-actor'
-import { CloudflareAgentActor, evictObjectActor, evictObjectActors, heldObjectActor, objectActor } from './objects/object-actors'
+import { CloudflareAgentActor, servingAgentObject, type ActorOutcome, type ReachActorObject } from './objects/cloudflare-agent-actor'
+import { CloudflareAgentActorInner, evictObjectActor, evictObjectActors, heldObjectActor, objectActor } from './objects/object-actors'
 import type { AgentDurableObject } from './objects/cloudflare-agent'
 import { createObjectSessionIndexStorage } from './lib/object-session-index-storage'
 import { callOnCurrentCode } from './lib/object-version'
@@ -104,10 +104,10 @@ export function serve(request: Request, env: Env, ctx: ExecutionContext): Promis
 }
 
 /** The agent's actor, for its own object only (cloudflare-agent.ts): made there on the object's first call in this isolate. */
-export function ownAgentActor(slug: AgentSlug, object: AgentDurableObject): CloudflareAgentActor {
+export function ownAgentActor(slug: AgentSlug, object: AgentDurableObject): CloudflareAgentActorInner {
   if (servingAgentObject(slug) !== object || !wired) throw new Error(`The actor of agent ${slug} is used directly only inside its own object`)
   const { env, deps } = wired
-  return objectActor(slug, object, () => new CloudflareAgentActor(slug, deps, object, (hooks) => cloudflareSessionStore(env, slug, object, hooks)))
+  return objectActor(slug, object, () => new CloudflareAgentActorInner(slug, deps, object, (hooks) => cloudflareSessionStore(env, slug, object, hooks)))
 }
 
 /** The agent auto-sleep timeout in the org's settings; 0 when auto-sleep is off. */
@@ -250,7 +250,7 @@ function cloudflareAgentRegistry(env: Env): AgentRegistry {
   return {
     get: (slug) => {
       let standIn = standIns.get(slug)
-      if (!standIn) standIns.set(slug, (standIn = cloudflareAgentActorStub(slug, (run) => reachAgentActor(env, slug, run), () => heldObjectActor(slug))))
+      if (!standIn) standIns.set(slug, (standIn = new CloudflareAgentActor(slug, (run) => reachAgentActor(env, slug, run), () => heldObjectActor(slug))))
       return standIn
     },
     evict: async (slug) => {

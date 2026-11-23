@@ -4,7 +4,7 @@ import type { AgentActor } from '@shared/lib/agent-actor/types'
 import { requestScopedSettings } from '@shared/lib/config/settings-request-memo'
 import { getRequestUserId, runOutsideRequestUser, runWithRequestUser } from '@shared/lib/platform-attribution/request-context'
 import type { AgentDurableObject } from './cloudflare-agent'
-import { cloudflareAgentActorStub, runActorOp, runAsAgentObject, servingAgentObject, type ActorObject, type ActorOutcome } from './cloudflare-agent-actor'
+import { CloudflareAgentActor, runActorOp, runAsAgentObject, servingAgentObject, type ActorObject, type ActorOutcome } from './cloudflare-agent-actor'
 
 /** The actor in the agent's object, reached the way RPC reaches it: arguments and results are cloned, and the caller's async context stays behind. */
 function overRpc(actor: Partial<Record<string, unknown>>) {
@@ -23,10 +23,10 @@ function overRpc(actor: Partial<Record<string, unknown>>) {
       return structuredClone(outcome)
     },
   }
-  return { client: cloudflareAgentActorStub('sales-agent', async (run) => (await run(object)) as ActorOutcome), calls }
+  return { client: new CloudflareAgentActor('sales-agent', async (run) => (await run(object)) as ActorOutcome), calls }
 }
 
-describe('cloudflareAgentActorStub', () => {
+describe('CloudflareAgentActor', () => {
   it("runs an op on the agent's actor and gets its value back, dates and maps included", async () => {
     const lastActivityAt = new Date('2026-11-06T18:00:00Z')
     const { client } = overRpc({ sessions: { summary: async () => ({ sessionIds: ['s1'], sessionCount: 1, lastActivityAt, byDay: new Map([['2026-11-06', 3]]) }) } })
@@ -134,7 +134,7 @@ describe("the stand-in inside the agent's own object", () => {
     const remote = { slug: 'sales-agent', files: { getDoc: async () => 'remote' } } as unknown as AgentActor
     const agentObject: ActorObject = { actorCall: async (path, args) => runActorOp(remote, path, args) }
     const local = { slug: 'sales-agent', files: { getDoc: async () => 'local' } } as unknown as AgentActor
-    const reached = cloudflareAgentActorStub('sales-agent', async (run) => (await run(agentObject)) as ActorOutcome, () => local)
+    const reached = new CloudflareAgentActor('sales-agent', async (run) => (await run(agentObject)) as ActorOutcome, () => local)
 
     expect(await reached.files.getDoc('AGENTS.md')).toBe('remote')
     expect(await runAsAgentObject('sales-agent', object, () => reached.files.getDoc('AGENTS.md'))).toBe('local')

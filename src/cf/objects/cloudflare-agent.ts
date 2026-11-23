@@ -14,7 +14,7 @@
  * image. A running container keeps its image until it stops; the next start uses the new one.
  *
  * The agent's actor runs here too: its ops come from the rest of the org as RPC calls
- * (`cloudflareAgentActorStub`), and this object boots SuperAgent to serve them. Calls the actor makes back to
+ * (`CloudflareAgentActor`), and this object boots SuperAgent to serve them. Calls the actor makes back to
  * the host stay in this isolate, which shares the org's database and AppState. The agent's idle
  * check runs on this object's alarm, which outlives the isolate.
  */
@@ -23,7 +23,7 @@ import { ASLEEP_HEADER, sleepingStoreOn, type AgentCalls, type ByteRange, type S
 import { WorkspaceFileError } from '@shared/lib/agent-actor/workspace-path'
 import type { AgentListing, AgentLiveSummary } from '@shared/lib/agent-actor/types'
 import { runActorOp, runAsAgentObject, type ActorOutcome } from './cloudflare-agent-actor'
-import type { CloudflareAgentActor } from './object-actors'
+import type { CloudflareAgentActorInner } from './object-actors'
 import { checkedCall, restartIfOlder, type Checked, type Restarting } from '../lib/object-version'
 import { needsLiveConnections, serveInTaskManager } from './cloudflare-task-manager'
 import { captureException } from '@shared/lib/error-reporting'
@@ -255,7 +255,7 @@ export class AgentDurableObject extends DurableObject<Env> {
     await this.checkIdle()
   }
 
-  /** One op on this agent's actor, for the rest of the org (cloudflareAgentActorStub). */
+  /** One op on this agent's actor, for the rest of the org (CloudflareAgentActor). */
   actorCall(path: string, args: unknown[], callerVersion?: string, actingUserId?: string): Promise<ActorOutcome | Restarting | Checked<ActorOutcome>> {
     // An isolate's first call here carries its version, so the check costs no call of its own.
     if (callerVersion !== undefined) return checkedCall(this.ctx, this.env.VERSION, callerVersion, () => this.runActorCall(path, args, actingUserId), this.mayRestart)
@@ -319,7 +319,7 @@ export class AgentDurableObject extends DurableObject<Env> {
     return this.ctx.storage.sql
   }
 
-  private syncStatus(actor: CloudflareAgentActor): Promise<void> {
+  private syncStatus(actor: CloudflareAgentActorInner): Promise<void> {
     return (this.statusSynced ??= actor.syncContainerStatus().catch((error: unknown) => {
       this.statusSynced = undefined
       console.error(`[AgentDurableObject ${actor.slug}] syncing the container status failed:`, error)

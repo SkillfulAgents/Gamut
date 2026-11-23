@@ -1,5 +1,5 @@
 /**
- * Each agent's actor runs in its own AgentDurableObject. Everywhere else, `cloudflareAgentActorStub`
+ * Each agent's actor runs in its own AgentDurableObject. Everywhere else, `CloudflareAgentActor`
  * reaches it over Durable Object RPC: each op is one `actorCall` on the agent's object, which runs
  * it on the actor there (`runActorOp`). Values cross as RPC clones them (dates, maps, bytes, byte
  * streams, requests and responses); errors cross through the actor error codec, so callers still
@@ -85,42 +85,70 @@ function withoutSignal(arg: unknown): unknown {
 }
 
 /**
- * The stand-in for the agent's actor everywhere but its object: `reach` runs a call on that
- * object. Inside the agent's own object it is the actor there (`own`), with no call to itself.
- * Chosen at each use, not once: an isolate can serve the agent's object and other callers.
+ * The agent's actor as every isolate reaches it. Each call runs on the agent's object (`reach`),
+ * except inside that object, where it goes straight to the actor there (`own`), the
+ * `CloudflareAgentActorInner`, with no call to itself. Chosen at each call, not once: an isolate
+ * can serve the agent's object and other callers.
  */
-export function cloudflareAgentActorStub(slug: AgentSlug, reach: ReachActorObject, own?: () => AgentActor | undefined): AgentActor {
-  const call = async (path: string, args: unknown[]): Promise<unknown> => {
-    // Read here, in the caller's own context: `reach` may run the call later, and the object never sees this context.
-    const actingUserId = getRequestUserId()
-    const outcome = await reach((agent, callerVersion) => agent.actorCall(path, args, callerVersion, actingUserId))
-    if ('error' in outcome) throw decodeActorError(outcome.error)
-    return OBJECT_STREAM_OPS.has(path) ? fromJsonLines(outcome.value as ReadableStream<Uint8Array>) : outcome.value
-  }
-  const group = (path: string): object => {
-    const nested = new Map((NESTED_GROUPS[path] ?? []).map((name) => [name, group(`${path}.${name}`)]))
-    return new Proxy(Object.create(null) as object, {
-      // Not a thenable, and no symbol is an op.
-      get: (_target, key) => (typeof key !== 'string' || key === 'then' ? undefined : nested.get(key) ?? ((...args: unknown[]) => call(`${path}.${key}`, args.map(withoutSignal)))),
+export class CloudflareAgentActor implements AgentActor {
+  declare readonly live: AgentActor['live']
+  declare readonly listing: AgentActor['listing']
+  declare readonly container: AgentActor['container']
+  declare readonly sessions: AgentActor['sessions']
+  declare readonly messages: AgentActor['messages']
+  declare readonly inputs: AgentActor['inputs']
+  declare readonly usage: AgentActor['usage']
+  declare readonly files: AgentActor['files']
+  declare readonly memories: AgentActor['memories']
+  declare readonly config: AgentActor['config']
+  declare readonly locks: AgentActor['locks']
+  declare readonly widgets: AgentActor['widgets']
+  declare readonly mcpSessions: AgentActor['mcpSessions']
+  declare readonly volumeUploads: AgentActor['volumeUploads']
+
+  constructor(readonly slug: AgentSlug, reach: ReachActorObject, own?: () => AgentActor | undefined) {
+    const call = async (path: string, args: unknown[]): Promise<unknown> => {
+      const local = own && servingAgentObject(slug) ? own() : undefined
+      if (local) return runOnActor(local, path, args)
+      // Read here, in the caller's own context: `reach` may run the call later, and the object never sees this context.
+      const actingUserId = getRequestUserId()
+      const sent = path === CONTAINER_FETCH ? fetchArgs(args) : args.map(withoutSignal)
+      const outcome = await reach((agent, callerVersion) => agent.actorCall(path, sent, callerVersion, actingUserId))
+      if ('error' in outcome) throw decodeActorError(outcome.error)
+      return OBJECT_STREAM_OPS.has(path) ? fromJsonLines(outcome.value as ReadableStream<Uint8Array>) : outcome.value
+    }
+    const group = (path: string): object => {
+      const nested = new Map((NESTED_GROUPS[path] ?? []).map((name) => [name, group(`${path}.${name}`)]))
+      return new Proxy(Object.create(null) as object, {
+        // Not a thenable, and no symbol is an op.
+        get: (_target, key) => (typeof key !== 'string' || key === 'then' ? undefined : nested.get(key) ?? ((...args: unknown[]) => call(`${path}.${key}`, args))),
+      })
+    }
+    const groups = Object.fromEntries(ACTOR_GROUPS.map((name) => [name, group(name)])) as Record<string, object>
+    const container = groups.container
+    groups.container = new Proxy(container, {
+      get: (target, key, receiver) => key === 'fetch' ? (path: string, init?: RequestInit) => call(CONTAINER_FETCH, [path, init]) : Reflect.get(target, key, receiver),
     })
+    const calls = Object.fromEntries(Object.keys(ACTOR_CALLS).map((name) => [name, () => call(name, [])]))
+    Object.assign(this, groups, calls)
   }
-  const groups = Object.fromEntries(ACTOR_GROUPS.map((name) => [name, group(name)])) as Record<string, object>
-  const container = groups.container
-  groups.container = new Proxy(container, {
-    get: (target, key, receiver) => key === 'fetch'
-      ? (path: string, init?: RequestInit) => call(CONTAINER_FETCH, [path, init && new Request('http://container', { ...init, signal: undefined })])
-      : Reflect.get(target, key, receiver),
-  })
-  const calls = Object.fromEntries(Object.keys(ACTOR_CALLS).map((name) => [name, () => call(name, [])]))
-  const remote = { slug, ...groups, ...calls } as unknown as AgentActor
-  if (!own) return remote
-  return new Proxy(remote, {
-    get: (target, key) => Reflect.get((servingAgentObject(slug) && own()) || target, key),
-  })
+}
+
+/** `container.fetch`'s arguments as they cross RPC: the request without its signal. */
+function fetchArgs([path, init]: unknown[]): unknown[] {
+  return [path, init && new Request('http://container', { ...(init as RequestInit), signal: undefined })]
+}
+
+/** One call on the actor in this isolate, as it was made: no clone, no codec. */
+async function runOnActor(actor: AgentActor, path: string, args: unknown[]): Promise<unknown> {
+  if (path === CONTAINER_FETCH) return actor.container.fetch(...(args as Parameters<AgentActor['container']['fetch']>))
+  const op = lookupOp(actor, path)
+  if (!op) throw new TypeError(`No actor op ${path}`)
+  return op.fn.apply(op.owner, args)
 }
 
 /**
- * Runs one op from `cloudflareAgentActorStub` on the actor in this object, as an API request runs:
+ * Runs one op from `CloudflareAgentActor` on the actor in this object, as an API request runs:
  * the op's settings readers share one read, and what the op does for a user (platform calls,
  * access checks) is done for `actingUserId`. With no user, the op resolves one as a background
  * job does.
