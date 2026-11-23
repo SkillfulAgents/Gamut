@@ -362,24 +362,45 @@ async function describe(
 
 /**
  * The uploads named by `attachments`, each taken for one use, as workspace
- * paths for the prompt. All or nothing: every id is checked before any is
- * spent, so a bad id leaves the others usable.
+ * paths for the prompt. All or nothing:
+ * - a repeated id, or one that is not a finished upload of this person for
+ *   this agent, is refused before any id is spent;
+ * - when a take still fails (another call took that id between the check and
+ *   the take), the ids this call already took are put back
+ *   (`takeSignedUpload`'s `putBack`), so they stay attachable. An id that
+ *   could not be put back (it expired meanwhile, or the store failed) is
+ *   named in the error as used up, to be uploaded again.
+ * Ids returned here are spent; a delivery that then fails says so
+ * (`spentUploadsNote`).
  */
 async function takeAttachments(ctx: McpCallContext, slug: string, uploadIds: string[]): Promise<string[]> {
   if (uploadIds.length === 0) return []
   if (uploadIds.length > MAX_ATTACHMENTS) throw new McpToolError(`At most ${MAX_ATTACHMENTS} attachments per call.`)
+  const repeated = uploadIds.find((id, index) => uploadIds.indexOf(id) !== index)
+  if (repeated !== undefined) {
+    throw new McpToolError(`Attachment "${repeated}" appears more than once in attachments; each upload_id is attached once. Nothing was sent and no upload was used.`)
+  }
   for (const id of uploadIds) {
     if (!(await resolveSignedUpload(ctx.userId, slug, id))) {
       throw new McpToolError(`Attachment "${id}" is not a finished upload for this agent: call prepare_file_upload with this agent, PUT the file to its upload_url, then pass its upload_id here. Each upload_id can be attached once.`)
     }
   }
-  const paths: string[] = []
+  const taken: Array<{ id: string; path: string; putBack: () => Promise<boolean> }> = []
   for (const id of uploadIds) {
-    const taken = await takeSignedUpload(ctx.userId, slug, id)
-    if (!taken) throw new McpToolError(`Attachment "${id}" was just used by another call; each upload_id can be attached once. Upload the file again.`)
-    paths.push(taken.path)
+    const upload = await takeSignedUpload(ctx.userId, slug, id)
+    if (!upload) {
+      const lost: string[] = []
+      for (const earlier of taken) {
+        if (!(await earlier.putBack().catch(() => false))) lost.push(earlier.id)
+      }
+      throw new McpToolError(
+        `Attachment "${id}" was just used by another call; each upload_id can be attached once. Upload that file again. Nothing was sent.` +
+        (lost.length > 0 ? ` ${spentUploadsNote(lost)}` : ''),
+      )
+    }
+    taken.push({ id, path: upload.result.path, putBack: upload.putBack })
   }
-  return paths
+  return taken.map((upload) => upload.path)
 }
 
 const DEADLINE = Symbol('deadline')

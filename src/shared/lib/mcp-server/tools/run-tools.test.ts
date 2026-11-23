@@ -16,6 +16,20 @@ import { declareServerCapabilities } from '@shared/lib/facts/server-facts'
 
 let handle: TestDatabase
 vi.mock('@shared/lib/db', () => ({ get db() { return handle.db } }))
+// The real signed-upload store, with a hook just before each take: a test
+// can play another call that takes an id between this call's check and take.
+const takes = vi.hoisted(() => ({ before: null as null | ((userId: string, agentSlug: string, uploadId: string) => Promise<void>) }))
+vi.mock('@shared/lib/signed-file-urls/signed-file-urls', async (original) => {
+  const real = await original<typeof import('@shared/lib/signed-file-urls/signed-file-urls')>()
+  return {
+    ...real,
+    takeSignedUpload: async (userId: string, agentSlug: string, uploadId: string) => {
+      await takes.before?.(userId, agentSlug, uploadId)
+      return real.takeSignedUpload(userId, agentSlug, uploadId)
+    },
+  }
+})
+
 const analytics = vi.hoisted(() => ({ track: vi.fn() }))
 vi.mock('@shared/lib/analytics/server-analytics', () => ({
   trackServerEvent: (...args: unknown[]) => analytics.track(...args),
@@ -254,6 +268,7 @@ beforeEach(async () => {
   fake.state.files.clear()
   fake.state.answers.length = 0
   analytics.track.mockClear()
+  takes.before = null
   handle = await createTestDatabase()
   await handle.db.insert(user).values([
     { id: 'alice', name: 'Alice', email: 'alice@example.com' },
@@ -428,6 +443,53 @@ describe('attachments', () => {
     await storeSignedUpload(grant, new Response(body).body, body.length)
     return prepared.upload_id
   }
+
+  it('a repeated id is refused before anything is spent; the upload stays attachable', async () => {
+    const id = await upload('alice', 'alpha', 'twice')
+    const refused = await call(invokeAgentTool, { agent: 'alpha', prompt: 'Read this', attachments: [id, id] }, person('alice'))
+    expect(refused.error).toBe(`Attachment "${id}" appears more than once in attachments; each upload_id is attached once. Nothing was sent and no upload was used.`)
+    expect(fake.state.sessions.size).toBe(0)
+    const { value } = await call(invokeAgentTool, { agent: 'alpha', prompt: 'Read this', attachments: [id] }, person('alice'))
+    expect(value.status).toBe('completed')
+  })
+
+  it('a take that fails after others succeeded (another call took that id) puts the taken ones back', async () => {
+    const first = await upload('alice', 'alpha', 'one')
+    const second = await upload('alice', 'alpha', 'two')
+    // Another call takes `second` between this call's check and its take.
+    takes.before = async (userId, agentSlug, uploadId) => {
+      if (uploadId !== second) return
+      takes.before = null
+      const { takeSignedUpload: realTake } = await vi.importActual<typeof import('@shared/lib/signed-file-urls/signed-file-urls')>('@shared/lib/signed-file-urls/signed-file-urls')
+      expect(await realTake(userId, agentSlug, uploadId)).not.toBeNull()
+    }
+    const failed = await call(invokeAgentTool, { agent: 'alpha', prompt: 'Read both', attachments: [first, second] }, person('alice'))
+    expect(failed.error).toBe(`Attachment "${second}" was just used by another call; each upload_id can be attached once. Upload that file again. Nothing was sent.`)
+    expect(fake.state.sessions.size).toBe(0)
+    // `first` was put back: still attachable. `second` is the other call's.
+    expect((await call(invokeAgentTool, { agent: 'alpha', prompt: 'Read one', attachments: [first] }, person('alice'))).value.status).toBe('completed')
+    expect((await call(invokeAgentTool, { agent: 'alpha', prompt: 'Read two', attachments: [second] }, person('alice'))).error).toMatch(/not a finished upload/)
+  })
+
+  it('an id that cannot be put back is named as used up', async () => {
+    const first = await upload('alice', 'alpha', 'one')
+    const second = await upload('alice', 'alpha', 'two')
+    takes.before = async (userId, agentSlug, uploadId) => {
+      if (uploadId !== second) return
+      takes.before = null
+      const { takeSignedUpload: realTake } = await vi.importActual<typeof import('@shared/lib/signed-file-urls/signed-file-urls')>('@shared/lib/signed-file-urls/signed-file-urls')
+      await realTake(userId, agentSlug, uploadId)
+      // The first id's record expires before it could be put back.
+      vi.useFakeTimers({ toFake: ['Date'] })
+      vi.setSystemTime(Date.now() + 2 * 60 * 60_000)
+    }
+    try {
+      const failed = await call(invokeAgentTool, { agent: 'alpha', prompt: 'Read both', attachments: [first, second] }, person('alice'))
+      expect(failed.error).toContain(`The attached uploads (${first}) were used up by this call: upload the files again with prepare_file_upload`)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 
   it('an upload id reaches the prompt as its workspace path, once', async () => {
     const id = await upload('alice', 'alpha', 'hello')
