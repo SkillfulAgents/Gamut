@@ -96,6 +96,7 @@ describe('LiveSessions.follow', () => {
         isWaitingBackground: false,
         backgroundTasks: [],
         activeSubagents: [],
+        pickedUpSends: [],
       })
       // The snapshot stands for everything the earlier viewer heard so far.
       expect(v.frames[0].id).toBe(before.frames.at(-2)!.id)
@@ -106,8 +107,16 @@ describe('LiveSessions.follow', () => {
       const v = viewer()
       await sessions().follow(SESSION, undefined, v.onFrame)
       expect(Object.keys(JSON.parse(v.frames[0].data))).toEqual([
-        'type', 'isActive', 'turnOutcome', 'isWaitingBackground', 'backgroundTasks', 'activeSubagents',
+        'type', 'isActive', 'turnOutcome', 'isWaitingBackground', 'backgroundTasks', 'activeSubagents', 'pickedUpSends',
       ])
+    })
+
+    it('names the sends the runtime took, for a viewer that was away when it did', async () => {
+      client.emit({ type: 'command_lifecycle', command_uuid: 'fresh', state: 'started' })
+      client.emit({ type: 'command_lifecycle', command_uuid: 'queued', state: 'queued' })
+      const v = viewer()
+      await sessions().follow(SESSION, undefined, v.onFrame)
+      expect(v.events()[0].pickedUpSends).toEqual(['fresh'])
     })
 
     it('includes the session\'s live slash commands', async () => {

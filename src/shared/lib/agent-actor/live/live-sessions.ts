@@ -348,6 +348,8 @@ export class LiveSessions {
         // it was away.
         backgroundTasks: this.backgroundTasks(sessionId),
         activeSubagents: this.activeSubagents(sessionId),
+        // A viewer that was away missed the frames naming the sends the runtime took.
+        pickedUpSends: [...(this.states.get(sessionId)?.pickedUpSends ?? [])],
       },
       lastId,
     )

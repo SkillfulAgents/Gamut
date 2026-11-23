@@ -283,6 +283,8 @@ export class LiveSession {
    * history readers see a completed call. Cleared at turn boundaries.
    */
   readonly settledInputRequests: Map<string, UserInputRequestOutcome>
+  /** Sent uuids the runtime took: a viewer that was away clears them from its snapshot. */
+  readonly pickedUpSends: Set<string>
   readonly stream: MainStream
   readonly response: TurnResponse
   readonly subagents: Subagents
@@ -316,6 +318,7 @@ export class LiveSession {
     this.hiddenFromLists = prior?.hiddenFromLists ?? false
     this.slashCommands = prior?.slashCommands ?? []
     this.settledInputRequests = prior?.settledInputRequests ?? new Map()
+    this.pickedUpSends = prior?.pickedUpSends ?? new Set()
     this.pendingError = prior?.pendingError ?? null
     if (this.pendingError) this.pendingError.owner = this
     this.response = TurnResponse.carriedOver(prior?.response, this.isActive)
@@ -1110,6 +1113,7 @@ export class LiveSession {
         // renderer joins terminal states back to its optimistic ghosts.
         const lifecycle = parseCommandLifecycle(content)
         if (!lifecycle) return
+        if (lifecycle.state === 'started' || lifecycle.state === 'completed') this.pickedUpSends.add(lifecycle.commandUuid)
         this.ctx.emit({ type: 'command_lifecycle', commandUuid: lifecycle.commandUuid, state: lifecycle.state })
         // A discarded message never ran, so whoever it tagged is not told.
         if (lifecycle.state === 'discarded') {

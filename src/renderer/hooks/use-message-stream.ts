@@ -204,6 +204,11 @@ export interface WorkflowRunLive {
 const EMPTY_WORKFLOWS: WorkflowRunLive[] = []
 const sessionWorkflows = new Map<string, WorkflowRunLive[]>()
 
+// Sent uuids the host saw the runtime take: a connected snapshot replaces them,
+// live frames add to them.
+const sessionPickedUpSends = new Map<string, ReadonlySet<string>>()
+const NO_PICKED_UP_SENDS: ReadonlySet<string> = new Set()
+
 // `done`/`failed` are terminal and sticky: a later `running`/`progress` snapshot must
 // never downgrade them (snapshots can momentarily lag or reorder).
 function mergeAgentStatus(prev: WorkflowAgentLiveStatus | undefined, next: WorkflowAgentLiveStatus): WorkflowAgentLiveStatus {
@@ -546,6 +551,9 @@ function getOrCreateEventSource(
         if (Array.isArray(data.slashCommands)) {
           sessionSlashCommands.set(sessionId, data.slashCommands)
         }
+        if (Array.isArray(data.pickedUpSends)) {
+          sessionPickedUpSends.set(sessionId, new Set(data.pickedUpSends.filter((uuid: unknown): uuid is string => typeof uuid === 'string')))
+        }
         const connectedSubagents = Array.isArray(data.activeSubagents)
           ? data.activeSubagents as SubagentInfo[]
           : null
@@ -801,6 +809,10 @@ function getOrCreateEventSource(
           (data.state === 'completed' || data.state === 'discarded' || data.state === 'cancelled')
         ) {
           startedCommandsAwaitingTranscript.delete(commandUuid)
+        }
+        const pickedUp = sessionPickedUpSends.get(sessionId) ?? NO_PICKED_UP_SENDS
+        if (commandUuid && (data.state === 'started' || data.state === 'completed') && !pickedUp.has(commandUuid)) {
+          sessionPickedUpSends.set(sessionId, new Set([...pickedUp, commandUuid]))
         }
         // Stop also cancels the command that is running, so 'cancelled' is no answer.
         if (
@@ -1583,6 +1595,7 @@ function releaseEventSource(sessionId: string): void {
     refCounts.delete(key)
     clearTimeout(typingTimers.get(key))
     typingTimers.delete(key)
+    sessionPickedUpSends.delete(key)
     const state = streamStates.get(key)
     if (state) streamStates.set(key, { ...state, typingUser: null })
     // Symmetric cleanup for the refetch throttle: cancel a pending trailing
@@ -1684,6 +1697,8 @@ export interface MessageStreamValue extends StreamState {
   autoApprovedScriptRunIds: ReadonlySet<string>
   autoApprovedComputerUseIds: ReadonlySet<string>
   workflows: WorkflowRunLive[]
+  /** Sent uuids the runtime took, as the host reported them. */
+  pickedUpSends: ReadonlySet<string>
   isThinking: boolean
   thinkingBlocks: ThinkingBlock[]
   /**
@@ -1704,6 +1719,7 @@ const EMPTY_MESSAGE_STREAM_VALUE: MessageStreamValue = {
   autoApprovedScriptRunIds: EMPTY_AUTO_APPROVED_SET,
   autoApprovedComputerUseIds: EMPTY_AUTO_APPROVED_SET,
   workflows: EMPTY_WORKFLOWS,
+  pickedUpSends: NO_PICKED_UP_SENDS,
   isThinking: EMPTY_THINKING.isThinking,
   thinkingBlocks: EMPTY_THINKING.blocks,
   readyStreamingToolUses: EMPTY_READY_TOOL_USES,
@@ -1752,6 +1768,7 @@ function readMessageStream(sessionId: string, prev: MessageStreamValue): Message
     autoApprovedScriptRunIds: snapshotIdSet(prev.autoApprovedScriptRunIds, sessionAutoApprovedScriptRunIds.get(sessionId)),
     autoApprovedComputerUseIds: snapshotIdSet(prev.autoApprovedComputerUseIds, sessionAutoApprovedComputerUseIds.get(sessionId)),
     workflows: sessionWorkflows.get(sessionId) ?? EMPTY_WORKFLOWS,
+    pickedUpSends: sessionPickedUpSends.get(sessionId) ?? NO_PICKED_UP_SENDS,
     isThinking: thinking.isThinking,
     thinkingBlocks: thinking.blocks,
   }

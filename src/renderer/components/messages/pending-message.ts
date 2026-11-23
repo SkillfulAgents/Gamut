@@ -24,6 +24,21 @@ export interface PendingMessage {
    */
   queued?: boolean
   sender?: { id: string; name: string; email: string; image?: string | null }
+  /** A message list already took this ghost as a send; a later mount of the session's list does not again. */
+  sendHandled?: boolean
+}
+
+/**
+ * A ghost sent before this list mounted whose uuid the runtime reported taking,
+ * while a page loaded since the mount stops short of the transcript's start:
+ * its copy may be above that page, where no fetched message can match it.
+ */
+export function pickedUpAbovePage(
+  pending: PendingMessage,
+  view: { pickedUpSends: ReadonlySet<string>; mountedAt: number; hasOlder: boolean; dataUpdatedAt: number },
+): boolean {
+  return !!pending.uuid && view.pickedUpSends.has(pending.uuid) && pending.sentAt < view.mountedAt &&
+    view.hasOlder && view.dataUpdatedAt >= view.mountedAt
 }
 
 /** True for user messages that start a new turn — queued (mid-turn) messages don't end the turn they appear in. */

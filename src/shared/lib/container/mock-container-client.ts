@@ -3938,6 +3938,13 @@ export class MockContainerClient extends EventEmitter implements ContainerClient
     // publish — so emitting 'running' here mirrors the runtime.
     this.busySessions.add(sessionId)
     this.emitSessionState(sessionId, 'running')
+    // The CLI names the send it took, a turn-starting one too.
+    if (uuid) {
+      this.emitStreamMessage(sessionId, {
+        type: 'command_lifecycle',
+        content: { type: 'command_lifecycle', command_uuid: uuid, state: 'started' },
+      })
+    }
     scenario.execute(sessionId, this.scenarioView(sessionId), content)
     return result
   }
