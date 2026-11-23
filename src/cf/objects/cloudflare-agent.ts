@@ -14,7 +14,7 @@
  * image. A running container keeps its image until it stops; the next start uses the new one.
  *
  * The agent's actor runs here too: its ops come from the rest of the org as RPC calls
- * (`cloudflareAgentActor`), and this object boots SuperAgent to serve them. Calls the actor makes back to
+ * (`cloudflareAgentActorStub`), and this object boots SuperAgent to serve them. Calls the actor makes back to
  * the host stay in this isolate, which shares the org's database and AppState. The agent's idle
  * check runs on this object's alarm, which outlives the isolate.
  */
@@ -255,7 +255,7 @@ export class AgentDurableObject extends DurableObject<Env> {
     await this.checkIdle()
   }
 
-  /** One op on this agent's actor, for the rest of the org (cloudflareAgentActor). */
+  /** One op on this agent's actor, for the rest of the org (cloudflareAgentActorStub). */
   actorCall(path: string, args: unknown[], callerVersion?: string, actingUserId?: string): Promise<ActorOutcome | Restarting | Checked<ActorOutcome>> {
     // An isolate's first call here carries its version, so the check costs no call of its own.
     if (callerVersion !== undefined) return checkedCall(this.ctx, this.env.VERSION, callerVersion, () => this.runActorCall(path, args, actingUserId), this.mayRestart)

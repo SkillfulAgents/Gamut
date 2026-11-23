@@ -47,7 +47,7 @@ import { CloudflareTaskManager, announceSessionStart, runHostToolInTaskManager }
 import { agentContainers, withAgentObject, sleepingStore } from './cloudflare-container-control'
 import { installCloudflareContainers } from '@shared/lib/container/cloudflare-container-runtime'
 import { createCloudflareFileOps } from './cloudflare-file-ops'
-import { cloudflareAgentActor, servingAgentObject, type ActorOutcome, type ReachActorObject } from './objects/cloudflare-agent-actor'
+import { cloudflareAgentActorStub, servingAgentObject, type ActorOutcome, type ReachActorObject } from './objects/cloudflare-agent-actor'
 import { CloudflareAgentActor, evictObjectActor, evictObjectActors, heldObjectActor, objectActor } from './objects/object-actors'
 import type { AgentDurableObject } from './objects/cloudflare-agent'
 import { createObjectSessionIndexStorage } from './lib/object-session-index-storage'
@@ -250,7 +250,7 @@ function cloudflareAgentRegistry(env: Env): AgentRegistry {
   return {
     get: (slug) => {
       let standIn = standIns.get(slug)
-      if (!standIn) standIns.set(slug, (standIn = cloudflareAgentActor(slug, (run) => reachAgentActor(env, slug, run), () => heldObjectActor(slug))))
+      if (!standIn) standIns.set(slug, (standIn = cloudflareAgentActorStub(slug, (run) => reachAgentActor(env, slug, run), () => heldObjectActor(slug))))
       return standIn
     },
     evict: async (slug) => {

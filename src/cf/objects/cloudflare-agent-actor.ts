@@ -1,5 +1,5 @@
 /**
- * Each agent's actor runs in its own AgentDurableObject. Everywhere else, `cloudflareAgentActor`
+ * Each agent's actor runs in its own AgentDurableObject. Everywhere else, `cloudflareAgentActorStub`
  * reaches it over Durable Object RPC: each op is one `actorCall` on the agent's object, which runs
  * it on the actor there (`runActorOp`). Values cross as RPC clones them (dates, maps, bytes, byte
  * streams, requests and responses); errors cross through the actor error codec, so callers still
@@ -89,7 +89,7 @@ function withoutSignal(arg: unknown): unknown {
  * object. Inside the agent's own object it is the actor there (`own`), with no call to itself.
  * Chosen at each use, not once: an isolate can serve the agent's object and other callers.
  */
-export function cloudflareAgentActor(slug: AgentSlug, reach: ReachActorObject, own?: () => AgentActor | undefined): AgentActor {
+export function cloudflareAgentActorStub(slug: AgentSlug, reach: ReachActorObject, own?: () => AgentActor | undefined): AgentActor {
   const call = async (path: string, args: unknown[]): Promise<unknown> => {
     // Read here, in the caller's own context: `reach` may run the call later, and the object never sees this context.
     const actingUserId = getRequestUserId()
@@ -120,7 +120,7 @@ export function cloudflareAgentActor(slug: AgentSlug, reach: ReachActorObject, o
 }
 
 /**
- * Runs one op from `cloudflareAgentActor` on the actor in this object, as an API request runs:
+ * Runs one op from `cloudflareAgentActorStub` on the actor in this object, as an API request runs:
  * the op's settings readers share one read, and what the op does for a user (platform calls,
  * access checks) is done for `actingUserId`. With no user, the op resolves one as a background
  * job does.
