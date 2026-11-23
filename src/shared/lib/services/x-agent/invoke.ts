@@ -13,6 +13,7 @@ import { deleteMessageAuthorBestEffort, insertMessageAuthorBestEffort } from '@s
 import { userExists } from '@shared/lib/services/user-profile-service'
 import { isAuthMode } from '@shared/lib/auth/mode'
 import { runWithOptionalUser } from '@shared/lib/platform-attribution'
+import { runWithAgent } from '@shared/lib/platform-attribution/request-context'
 import { getAgentRecord } from '@shared/lib/services/agent-service'
 import { agentCatalog, agentRegistry } from '@shared/lib/agent-actor'
 import { deliveryFailure, startFailure } from '@shared/lib/agent-actor/delivery-errors'
@@ -333,7 +334,9 @@ export async function invokeAgent(caller: XAgentCaller, input: InvokeInput): Pro
   // The person allowing the card picked another model for the new session.
   if (policy.pick) pick = policy.pick
 
-  return runWithOptionalUser(attributedUserId, async (): Promise<XAgentResult<InvokeOutcome>> => {
+  // The target's container start, session and message are the target's work, and
+  // so is whatever that start leaves running after this request.
+  return runWithAgent(targetSlug, () => runWithOptionalUser(attributedUserId, async (): Promise<XAgentResult<InvokeOutcome>> => {
     // Stages for runtime 500s: ensure_running → create_session / send_message.
     let stage = 'ensure_running'
     let stagedTargetDirectory: string | undefined
@@ -639,5 +642,5 @@ export async function invokeAgent(caller: XAgentCaller, input: InvokeInput): Pro
       })
       return fail(500, `Failed to invoke agent (${stage}): ${message}`)
     }
-  })
+  }))
 }

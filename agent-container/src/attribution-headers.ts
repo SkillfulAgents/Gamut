@@ -13,8 +13,8 @@
  * (encodeURIComponent) and the consumer decodes unconditionally.
  */
 
-const AGENT_ID_HEADER = 'X-Superagent-Agent-Id';
-const AGENT_NAME_HEADER = 'X-Superagent-Agent-Name';
+export const AGENT_ID_HEADER = 'X-Superagent-Agent-Id';
+export const AGENT_NAME_HEADER = 'X-Superagent-Agent-Name';
 const SPEED_HEADER = 'X-Superagent-Speed';
 
 /** Env keys carrying the boot-time agent identity. Rejected by POST /env. */
@@ -52,6 +52,30 @@ const BOOT_IDENTITY: AgentIdentity = captureAgentIdentity(process.env);
 const MAX_NAME_CODE_POINTS = 200;
 
 /**
+ * The id and name headers for an agent, as [name, value] pairs, for the
+ * container's model calls and the app's own platform calls alike. No id, no
+ * headers: platform drops a name without an id.
+ */
+export function agentAttributionHeaders(id: string | undefined, name: string | undefined): Array<[string, string]> {
+  const agentId = (id ?? '').trim().replace(/[^A-Za-z0-9._-]/g, '');
+  if (!agentId) return [];
+  const headers: Array<[string, string]> = [[AGENT_ID_HEADER, agentId]];
+  const rawName = (name ?? '').trim();
+  if (rawName) {
+    // Replace lone surrogates with U+FFFD (String.prototype.toWellFormed, hand
+    // rolled — the tsconfig lib predates it): encodeURIComponent throws on
+    // them, which would kill header composition entirely.
+    const wellFormed = rawName.replace(
+      /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g,
+      '�'
+    );
+    const capped = Array.from(wellFormed).slice(0, MAX_NAME_CODE_POINTS).join('');
+    headers.push([AGENT_NAME_HEADER, encodeURIComponent(capped)]);
+  }
+  return headers;
+}
+
+/**
  * Return a copy of `env` with ANTHROPIC_CUSTOM_HEADERS extended with the agent
  * attribution headers composed from the boot-time identity snapshot. Any
  * pre-existing X-Superagent-Agent-* lines are stripped (case-insensitively) and
@@ -75,23 +99,10 @@ export function withAgentAttributionHeaders(
     .map((line) => line.trim())
     .filter((line) => line && !ATTRIBUTION_HEADER_LINE.test(line));
 
-  const agentId = (identity.id ?? '').trim().replace(/[^A-Za-z0-9._-]/g, '');
-  const lines = [...preserved];
-  if (agentId) {
-    lines.push(`${AGENT_ID_HEADER}: ${agentId}`);
-    const rawName = (identity.name ?? '').trim();
-    if (rawName) {
-      // Replace lone surrogates with U+FFFD (String.prototype.toWellFormed, hand
-      // rolled — the tsconfig lib predates it): encodeURIComponent throws on
-      // them, which would kill header composition entirely.
-      const wellFormed = rawName.replace(
-        /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g,
-        '�'
-      );
-      const capped = Array.from(wellFormed).slice(0, MAX_NAME_CODE_POINTS).join('');
-      lines.push(`${AGENT_NAME_HEADER}: ${encodeURIComponent(capped)}`);
-    }
-  }
+  const lines = [
+    ...preserved,
+    ...agentAttributionHeaders(identity.id, identity.name).map(([name, value]) => `${name}: ${value}`),
+  ];
 
   if (lines.length > 0) {
     out.ANTHROPIC_CUSTOM_HEADERS = lines.join('\n');

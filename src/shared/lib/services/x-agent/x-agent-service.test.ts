@@ -116,6 +116,7 @@ import { userXAgentCaller, agentXAgentCaller, type XAgentCaller } from './caller
 import { getTargetSessions, getTargetTranscript, listVisibleAgents, openDeliveredFile } from './operations'
 import { invokeAgent } from './invoke'
 import { effectiveSyncWaitMs } from './sync-wait'
+import { currentAgentSlug, runWithAgent } from '@shared/lib/platform-attribution/request-context'
 
 async function seedRole(userId: string, agentSlug: string, role: AgentRole) {
   await testDb.insert(schema.agentAcl).values({ id: randomUUID(), userId, agentSlug, role, createdAt: new Date() })
@@ -277,6 +278,22 @@ describe('a user caller is authorized by its own role on the target', () => {
     await seedRole(USER_ID, TARGET, 'user')
     expect(await invoke(user())).toEqual({ ok: true, value: { sessionId: SESSION_ID, status: 'running' } })
     expect(mockDeliver).toHaveBeenCalledTimes(1)
+  })
+
+  it("runs the target's start and delivery as the target's work, for a person or an agent caller", async () => {
+    await seedRole(USER_ID, TARGET, 'owner')
+    await seedRole(USER_ID, CALLER_AGENT, 'owner')
+    const seen: Array<string | null> = []
+    const record = async () => { seen.push(currentAgentSlug()) }
+    fakeActor.container.start.mockImplementationOnce(record).mockImplementationOnce(record)
+    mockDeliver.mockImplementationOnce(record).mockImplementationOnce(record)
+    await invoke(user())
+    // An agent's invoke runs inside its own gate's scope: the target's scope wins inside, the caller's returns after.
+    await runWithAgent(CALLER_AGENT, async () => {
+      await invokeAgent(agentXAgentCaller(CALLER_AGENT), { slug: TARGET, prompt: 'hi', sessionId: SESSION_ID })
+      seen.push(currentAgentSlug())
+    })
+    expect(seen).toEqual([TARGET, TARGET, TARGET, TARGET, CALLER_AGENT])
   })
 
   it('no role on the target is refused everywhere', async () => {

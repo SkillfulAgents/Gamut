@@ -1,5 +1,6 @@
 import type { MiddlewareHandler } from 'hono'
 import { validateProxyToken } from '@shared/lib/proxy/token-store'
+import { runWithAgent } from '@shared/lib/platform-attribution/request-context'
 
 /**
  * Who a container-to-host request is from: the agent its proxy token belongs to.
@@ -45,5 +46,7 @@ export const requireAgentCaller: MiddlewareHandler<{ Variables: AgentCallerVaria
     return c.json({ error: 'Unauthorized' }, 401)
   }
   c.set('callerSlug', callerSlug)
-  await next()
+  // Platform calls these routes make act for the caller. Work an invoke does for
+  // its target opens the target's scope inside (x-agent/invoke.ts).
+  await runWithAgent(callerSlug, () => next())
 }

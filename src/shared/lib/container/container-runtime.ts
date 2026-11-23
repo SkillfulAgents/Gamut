@@ -5,7 +5,7 @@
  * The agent's actor holds its runtime in its state, and the container host
  * makes it (`ContainerHost.createRuntime`). Nothing else imports this module.
  * A runtime knows only its own agent: what it needs of the agent (live
- * sessions, idle alarm, container watch, instructions) its actor hands it as
+ * sessions, idle alarm, container watch, display name) its actor hands it as
  * `RuntimeAgent`, and what spans every agent on the machine (the hook before a
  * stop, force-stop fallout) is the host's, reached through `RuntimeHost`.
  */
@@ -29,7 +29,7 @@ import { eq } from 'drizzle-orm'
 import { getOrCreateProxyToken } from '@shared/lib/proxy/token-store'
 import { getOrCreateHostToken } from '@shared/lib/container/host-token-store'
 import { getSettings, type AppSettings } from '@shared/lib/config/settings'
-import { displayNameFromInstructions } from '@shared/lib/utils/agent-display-name'
+import { sanitizeAgentName } from '@shared/lib/llm-provider/platform-provider'
 import type { RuntimeSessions } from './agent-sessions-access'
 import type { RuntimeFatalKind } from './runtime-death'
 import { globalFeed } from '@shared/lib/notifications/global-feed'
@@ -91,8 +91,8 @@ export interface RuntimeAgent {
   readonly idleAlarm: IdleAlarm
   /** Checks whether the container runs, and its health while it does. */
   readonly containerWatch: ContainerWatch
-  /** The agent's instructions document (`AGENTS.md`), for the display name a start gives the container; null when it has none. */
-  instructions(): Promise<string | null>
+  /** The agent's name in the agent list, for the attribution its model calls carry; null when the agent is not listed. */
+  displayName(): Promise<string | null>
 }
 
 /** The auto-sleep timeout in `settings`, in ms; zero or less disables. */
@@ -755,13 +755,10 @@ export class ContainerRuntime {
       envVars['BROWSER_HIGH_DPI'] = '1'
     }
 
-    // What the start needs from the agent's workspace goes through the
-    // agent's actor, never a host path: the workspace is wherever the actor
-    // says it is.
     let agentName: string | undefined
     // The display name is attribution only; a start without it is still a start.
     try {
-      agentName = displayNameFromInstructions(await this.agent.instructions())
+      agentName = sanitizeAgentName((await this.agent.displayName()) ?? '') || undefined
     } catch (error) {
       console.warn(`[ContainerRuntime] Could not read the display name for ${slug}; starting without it:`, error)
     }

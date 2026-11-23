@@ -16,6 +16,7 @@ import { getCurrentUserId } from '@shared/lib/auth/config'
 import { getUserSettings } from '@shared/lib/services/user-settings-service'
 import { captureException } from '@shared/lib/error-reporting'
 import { background } from '@shared/lib/background'
+import { runWithAgent } from '@shared/lib/platform-attribution/request-context'
 
 const voice = new Hono<LimitedJsonBodyEnv>()
 
@@ -109,7 +110,8 @@ async function createLiveSession(c: Context<LimitedJsonBodyEnv>) {
     }
     // Created with this request's settings read (key and summarizer); hung up
     // later with the provider's key as configured then (`live-sessions.ts`).
-    const answer = await conversation.createLiveSession(parsed.data.sdp, parsed.data.history, agentContext, { settings })
+    const answer = await runWithAgent(agentContext ? getAgentId(c) : null, () =>
+      conversation.createLiveSession(parsed.data.sdp, parsed.data.history, agentContext, { settings }))
     // Hangs the session up itself when the reservation is gone by now.
     const started = await reservation.start(answer.session.id)
     if (!started) {

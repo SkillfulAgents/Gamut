@@ -3,6 +3,7 @@ import { and, eq, inArray } from 'drizzle-orm'
 import { isAuthMode } from '@shared/lib/auth/mode'
 import { SESSION_CHALLENGE } from '@shared/lib/auth/session-challenge'
 import { runWithOptionalUser, runWithRequestUser } from '@shared/lib/platform-attribution'
+import { runWithAgent } from '@shared/lib/platform-attribution/request-context'
 import { db } from '@shared/lib/db'
 import { agentAcl, connectedAccounts, remoteMcpServers, notifications } from '@shared/lib/db/schema'
 import { validateProxyToken, validateProxyTokenWithOwner } from '@shared/lib/proxy/token-store'
@@ -570,6 +571,7 @@ export function HasNotificationAccess(): MiddlewareHandler {
  * Gate for container→host routes. Validates the agent proxy token, stashes `agentSlug` (SUP-216),
  * and runs under the agent owner's attribution scope so billed proxy calls (`/v1/browserbase`,
  * `/v1/exa`) carry `token::memberId`. Single-user installs have no ACL row → null scope.
+ * The calls also carry the agent, in every mode.
  */
 export function IsAgent(): MiddlewareHandler {
   return async (c: Context, next: Next) => {
@@ -582,7 +584,7 @@ export function IsAgent(): MiddlewareHandler {
       return c.json({ error: 'Unauthorized' }, 401)
     }
     c.set('agentSlug' as never, caller.agentSlug as never)
-    return runWithOptionalUser(caller.ownerUserId, () => next())
+    return runWithAgent(caller.agentSlug, () => runWithOptionalUser(caller.ownerUserId, () => next()))
   }
 }
 

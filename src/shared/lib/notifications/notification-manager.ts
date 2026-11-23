@@ -28,7 +28,7 @@ import { isHiddenAutomatedSession } from '@shared/lib/services/session-visibilit
 import { captureException } from '@shared/lib/error-reporting'
 import { background } from '@shared/lib/background'
 import { getAgentOwnerUserId } from '@shared/lib/services/agent-owner'
-import { runWithOptionalUser } from '@shared/lib/platform-attribution/request-context'
+import { runWithAgent, runWithOptionalUser } from '@shared/lib/platform-attribution/request-context'
 import { getNotificationChannels } from './channels'
 import { broadcastMentionWithdrawn } from './channels/client-broadcast-channel'
 import { isNotificationTypeEnabled } from './notification-preferences'
@@ -265,7 +265,7 @@ class NotificationManager {
         // owner. The owner lookup is a DB read, so it stays inside the guard.
         resolve: async () => {
           try {
-            return await runWithOptionalUser(await getAgentOwnerUserId(agentSlug), async () =>
+            return await runWithAgent(agentSlug, async () => runWithOptionalUser(await getAgentOwnerUserId(agentSlug), async () =>
               buildSessionCompleteBody({
                 sessionId,
                 agentSlug,
@@ -273,7 +273,7 @@ class NotificationManager {
                 responseTranscriptEndOffset: options.responseTranscriptEndOffset,
                 fallbackBody,
               }),
-            )
+            ))
           } catch (error) {
             // Body enrichment must never turn a successful session into a lost
             // notification. The helper is defensive too; this is the last guard.

@@ -327,7 +327,9 @@ describe('initializeServices post-bind critical path', () => {
     await prepareProcess()
     expect(registerAllAccountProviders).toHaveBeenCalledTimes(1)
     expect(initEnvManagedPlatformStatus).toHaveBeenCalledTimes(1)
-    expect(getPlatformAccessToken).toHaveBeenCalledTimes(1)
+    // With no org token too: every install's platform calls carry the agent.
+    const { installPlatformFetchInterceptor } = await import('./platform-attribution')
+    expect(installPlatformFetchInterceptor).toHaveBeenCalledTimes(1)
     expect(validateAuth).toHaveBeenCalledTimes(1)
     expect(ensureManagedPlatformConnection).toHaveBeenCalledTimes(1)
   })

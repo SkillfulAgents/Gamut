@@ -8,6 +8,7 @@ import { agentRegistry } from '../agent-actor'
 import { captureException } from '../error-reporting'
 import { chunksOf } from '../agent-actor/jsonl-files'
 import { heicUploadAsJpeg } from '@/api/routes/heic-jpeg'
+import { runWithAgent } from '@shared/lib/platform-attribution/request-context'
 const MAX_FILE_DOWNLOAD_SIZE = 50 * 1024 * 1024
 const reportError = (err: unknown, operation: string, extra?: Record<string, unknown>, level?: 'error' | 'warning') =>
   captureException(err, { tags: { component: 'chat-integration', operation }, extra, level })
@@ -54,8 +55,9 @@ export class ChatInputBuilder {
         const data = await this.downloadFileBuffer(integration, file.url)
         if (data) {
           // For iMessage voice notes, try to transcribe audio files
-          if (integration.provider === 'imessage' && file.mimeType?.startsWith('audio/')) {
-            const transcript = await this.tryTranscribeAudio(data, file.mimeType)
+          const mimeType = file.mimeType
+          if (integration.provider === 'imessage' && mimeType?.startsWith('audio/')) {
+            const transcript = await runWithAgent(integration.agentSlug, () => this.tryTranscribeAudio(data, mimeType))
             if (transcript) {
               const note = `[Voice note: "${transcript}"]`
               transcribedText = (transcribedText ? transcribedText + '\n' : '') + note

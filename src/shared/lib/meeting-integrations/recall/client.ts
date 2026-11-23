@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { IntegrationPolicyError } from '../../agent-integrations/errors'
 import type { RecallOwner, RecallTransport } from './transport'
+import { runWithAgent } from '@shared/lib/platform-attribution/request-context'
 
 /** One media file of a recording, as `media_shortcuts` lists it. */
 const recallMediaSchema = z.object({
@@ -52,14 +53,15 @@ export class RecallClient {
   private async request<T>(path: string, schema: z.ZodType<T>, init: RequestInit = {}): Promise<T> {
     let response: Response
     try {
-      response = await this.fetchImpl(`${this.transport.baseUrl}${path}`, {
+      // The bot is the agent's work, so its platform calls carry the agent.
+      response = await runWithAgent(this.owner.agentSlug, async () => this.fetchImpl(`${this.transport.baseUrl}${path}`, {
         ...init,
         headers: {
           Authorization: await this.transport.authorization(this.owner), Accept: 'application/json',
           ...(init.body ? { 'Content-Type': 'application/json' } : {}), ...(init.headers ?? {}),
         },
         signal: init.signal ?? AbortSignal.timeout(20_000),
-      })
+      }))
     } catch (error) {
       if (error instanceof IntegrationPolicyError) throw error
       throw new RecallApiError('Could not reach the meeting bot service. Please retry.', 503)

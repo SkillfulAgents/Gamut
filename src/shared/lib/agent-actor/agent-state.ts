@@ -28,6 +28,7 @@ import { VolumeUploadGuard } from '@shared/lib/volumes/volume-upload-guard'
 import { IdleAlarm, type IdleAlarmDeps } from '@shared/lib/container/idle-alarm'
 import { ContainerWatch, type ContainerWatchDeps } from '@shared/lib/container/container-watch'
 import type { ContainerRuntime, RuntimeAgent } from '@shared/lib/container/container-runtime'
+import { agentCatalog } from './agent-catalog'
 import { AgentLocks } from './agent-locks'
 import { LiveSessions, type LiveSessionsDeps } from './live/live-sessions'
 import type { SessionEvent } from './live/session-channel'
@@ -138,7 +139,7 @@ export function createAgentState(slug: AgentSlug, hooks: AgentStateHooks): Agent
     sessions: live,
     idleAlarm,
     containerWatch,
-    instructions: () => hooks.sessions.store.config.get('instructions'),
+    displayName: async () => (await agentCatalog.get(slug))?.name ?? null,
   }
   let runtime: ContainerRuntime | undefined
   return {

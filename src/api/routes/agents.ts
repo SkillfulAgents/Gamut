@@ -337,6 +337,7 @@ import {
 } from '@shared/lib/agent-connections/public'
 import { createSecretRequestSchema, updateSecretRequestSchema } from './secrets-schema'
 import type { Bookmark } from '@shared/lib/utils/bookmarks'
+import { runWithAgent } from '@shared/lib/platform-attribution/request-context'
 
 const WorkspaceBookmarkSchema = z.object({
   name: z.string().min(1),
@@ -1406,7 +1407,7 @@ async function generateAndUpdateSessionNameAsync(
   if (!skipProviderNaming) {
     try {
       const { client: anthropic, model: summarizerModel } = await getConfiguredLlmClientAndModel()
-      sessionName = await createSummarizerText(anthropic, {
+      sessionName = await runWithAgent(agentSlug, () => createSummarizerText(anthropic, {
         model: summarizerModel,
         messages: [
           {
@@ -1418,7 +1419,7 @@ async function generateAndUpdateSessionNameAsync(
 Respond with ONLY the session name, nothing else. No quotes, no explanation.`,
           },
         ],
-      })
+      }))
     } catch (error) {
       console.error('Failed to generate session name after retries:', error)
     }

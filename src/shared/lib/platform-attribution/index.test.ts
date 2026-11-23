@@ -163,8 +163,8 @@ describe('attribution.current', () => {
 })
 
 describe('attribution.current within one request', () => {
-  /** One resolution = one member lookup + one token read. */
-  const resolutions = () => mockDbAll.mock.calls.length
+  /** One resolution = one token read, then the member lookup an org token needs. */
+  const resolutions = () => mockGetPlatformAccessToken.mock.calls.length
 
   it('resolves once for every platform call in the request, concurrent ones sharing the resolution in flight', async () => {
     await runWithRequestUser('user_1', async () => {
@@ -185,6 +185,8 @@ describe('attribution.current within one request', () => {
       expect((await attribution.current())?.bearerToken()).toBe(ACCESS_KEY)
     })
     expect(resolutions()).toBe(2)
+    // The opaque key needs no acting member, so the second request reads no member.
+    expect(mockDbAll).toHaveBeenCalledTimes(1)
   })
 
   it('work the request left running resolves afresh once the request is over', async () => {

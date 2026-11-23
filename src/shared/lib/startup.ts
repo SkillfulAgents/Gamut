@@ -23,11 +23,8 @@ import { listAgents } from './services/agent-service'
 import { isAuthMode } from './auth/mode'
 import { clearPendingApprovalBans } from './auth/clear-pending-approval-bans'
 import { validateAuthModeStartup } from './auth/startup-validation'
-import {
-  decodeOrgIdFromToken,
-  installPlatformFetchInterceptor,
-} from './platform-attribution'
-import { getPlatformAccessToken, initEnvManagedPlatformStatus } from './services/platform-auth-service'
+import { installPlatformFetchInterceptor } from './platform-attribution'
+import { initEnvManagedPlatformStatus } from './services/platform-auth-service'
 import { setupBrowserStreamProxy } from '../../main/browser-stream-proxy'
 import { setupCloudStreamProxy } from '../../main/cloud-stream-proxy'
 import { setupArtifactStreamProxy } from '../../main/artifact-stream-proxy'
@@ -219,15 +216,8 @@ export async function prepareProcess(): Promise<void> {
   // Account providers (Composio, Nango if configured)
   registerAllAccountProviders()
   await initEnvManagedPlatformStatus()
-  // Install fetch interceptor for org JWTs (opaque keys don't need attribution).
-  try {
-    const platformToken = await getPlatformAccessToken()
-    if (platformToken && decodeOrgIdFromToken(platformToken) !== null) {
-      installPlatformFetchInterceptor()
-    }
-  } catch (error) {
-    captureException(error, { tags: { component: 'startup', operation: 'install-fetch-interceptor' } })
-  }
+  // Every platform call carries the agent it serves. Org tokens also get their acting member.
+  installPlatformFetchInterceptor()
 }
 
 /**
