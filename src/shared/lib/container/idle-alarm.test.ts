@@ -1,49 +1,62 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { IDLE_ALARM_RETRY_MS, IdleAlarm, MAX_TIMER_MS, idleLongerThan, type IdleTimer } from './idle-alarm'
+import { background } from '../background'
+import { IDLE_ALARM_RETRY_MS, IdleAlarm, autoSleepTimeoutMsFrom } from './idle-alarm'
+import { MAX_TIMER_MS, processTimer } from './process-timer'
 
 const MINUTE = 60_000
 const TIMEOUT = 30 * MINUTE
 const T0 = new Date('2026-03-01T12:00:00Z').getTime()
 
-/** An alarm over a fake container: a clock, a busy flag and a stop that resets the clock. */
-function fakeContainer(options: { timeoutMs?: number; stopCompletes?: boolean } = {}) {
+/**
+ * An alarm over a fake container: a clock, a busy flag, and a stop that takes
+ * the container down. Its wake-up is a timer of this process, as a local
+ * actor's is; with `ownWakeUp`, nothing in this process wakes it, as for an
+ * actor whose wake-up lives outside its process.
+ */
+function fakeContainer(options: { timeoutMs?: number; stopCompletes?: boolean; ownWakeUp?: boolean } = {}) {
   const state = {
     lastActivityAt: undefined as number | undefined,
     busy: false,
     timeoutMs: options.timeoutMs ?? TIMEOUT,
     stopCompletes: options.stopCompletes ?? true,
   }
-  const sleep = vi.fn(async (_timeoutMs: number) => {
-    if (state.stopCompletes) state.lastActivityAt = undefined
-  })
+  const timer = processTimer()
   // The timeout is a settings read: asynchronous, and read fresh every time.
   const timeoutMs = vi.fn(async () => state.timeoutMs)
-  const alarm = new IdleAlarm({
-    timeoutMs,
-    lastActivityAt: () => state.lastActivityAt,
-    isBusy: () => state.busy,
-    sleep,
+  const lastActivityAt = vi.fn(() => state.lastActivityAt)
+  const wakeAt = vi.fn((at: number) => {
+    if (!options.ownWakeUp) timer.set(at - Date.now(), () => background(alarm.fire(), { name: 'test.idle-wake' }))
   })
+  const cancelWake = vi.fn(() => timer.clear())
+  /** The container went down: nothing on its clock, and its runtime disarms the alarm. */
+  const down = () => {
+    state.lastActivityAt = undefined
+    alarm.disarm()
+  }
+  const sleep = vi.fn(async (_timeoutMs: number) => {
+    if (state.stopCompletes) down()
+  })
+  const alarm: IdleAlarm = new IdleAlarm({ timeoutMs, lastActivityAt, isBusy: () => state.busy, sleep, wakeAt, cancelWake })
+  /** Activity: it only moves the clock. */
   const mark = (at = Date.now()) => {
     state.lastActivityAt = Math.max(state.lastActivityAt ?? -Infinity, at)
-    alarm.schedule()
   }
-  return { state, sleep, timeoutMs, alarm, mark }
+  /** The container came up: its start is the first mark, and its runtime arms the alarm. */
+  const up = () => {
+    mark()
+    alarm.arm()
+  }
+  return { state, sleep, timeoutMs, lastActivityAt, wakeAt, cancelWake, alarm, mark, up, down }
 }
 
 /** Let the timeout reads in flight land, without moving the clock. */
 const settle = () => vi.advanceTimersByTimeAsync(0)
 
-describe('idleLongerThan', () => {
-  it('is a pure function of the clock and the timeout', () => {
-    expect(idleLongerThan(T0 - TIMEOUT - 1, TIMEOUT, T0)).toBe(true)
-    expect(idleLongerThan(T0 - TIMEOUT, TIMEOUT, T0)).toBe(false)
-    expect(idleLongerThan(T0 - 5 * MINUTE, TIMEOUT, T0)).toBe(false)
-  })
-
-  it('never calls a null clock idle: busy, or nothing recorded yet', () => {
-    expect(idleLongerThan(null, TIMEOUT, T0)).toBe(false)
-    expect(idleLongerThan(null, 0, T0)).toBe(false)
+describe('autoSleepTimeoutMsFrom', () => {
+  it('is the setting in ms: 30 minutes unless set, and zero when auto-sleep is off', () => {
+    expect(autoSleepTimeoutMsFrom({ app: {} } as Parameters<typeof autoSleepTimeoutMsFrom>[0])).toBe(30 * MINUTE)
+    expect(autoSleepTimeoutMsFrom({ app: { autoSleepTimeoutMinutes: 5 } } as Parameters<typeof autoSleepTimeoutMsFrom>[0])).toBe(5 * MINUTE)
+    expect(autoSleepTimeoutMsFrom({ app: { autoSleepTimeoutMinutes: 0 } } as Parameters<typeof autoSleepTimeoutMsFrom>[0])).toBe(0)
   })
 })
 
@@ -55,15 +68,17 @@ describe('IdleAlarm', () => {
 
   afterEach(() => {
     vi.useRealTimers()
+    vi.restoreAllMocks()
   })
 
-  it('sleeps the container one timeout after its last mark', async () => {
-    const { sleep, alarm, mark } = fakeContainer()
-    mark()
+  it('sleeps the container one timeout after it came up', async () => {
+    const { sleep, alarm, wakeAt, up } = fakeContainer()
+    up()
     await settle()
     expect(alarm.isArmed()).toBe(true)
+    expect(wakeAt).toHaveBeenCalledWith(T0 + TIMEOUT)
 
-    await vi.advanceTimersByTimeAsync(TIMEOUT)
+    await vi.advanceTimersByTimeAsync(TIMEOUT - 1)
     expect(sleep).not.toHaveBeenCalled()
 
     await vi.advanceTimersByTimeAsync(1)
@@ -72,352 +87,342 @@ describe('IdleAlarm', () => {
     expect(alarm.isArmed()).toBe(false)
   })
 
-  it('every mark pushes the alarm out: a keep-alive or a session write inside the window keeps it awake', async () => {
-    const { sleep, mark } = fakeContainer()
-    mark()
+  it('activity pushes the sleep back without touching the alarm: the wake-up that finds it waits for the rest', async () => {
+    const { sleep, timeoutMs, wakeAt, mark, up } = fakeContainer()
+    up()
+    await settle()
     await vi.advanceTimersByTimeAsync(20 * MINUTE)
-    mark()
+    // A burst of activity: no read of the timeout, no wake-up set.
+    for (let i = 0; i < 5; i++) mark()
+    expect(timeoutMs).toHaveBeenCalledTimes(1)
+    expect(wakeAt).toHaveBeenCalledTimes(1)
+
+    // The wake-up at 30 minutes finds the activity at 20, and waits until 50.
     await vi.advanceTimersByTimeAsync(20 * MINUTE)
     expect(sleep).not.toHaveBeenCalled()
+    expect(wakeAt).toHaveBeenCalledTimes(2)
+    expect(wakeAt).toHaveBeenLastCalledWith(T0 + 50 * MINUTE)
 
-    await vi.advanceTimersByTimeAsync(10 * MINUTE + 1)
-    expect(sleep).toHaveBeenCalledTimes(1)
-  })
-
-  it('a mark stamped in the past arms for the remainder, and one past the timeout fires at once', async () => {
-    const { sleep, mark } = fakeContainer()
-    mark(T0 - 25 * MINUTE)
-    await vi.advanceTimersByTimeAsync(5 * MINUTE)
+    await vi.advanceTimersByTimeAsync(10 * MINUTE - 1)
     expect(sleep).not.toHaveBeenCalled()
     await vi.advanceTimersByTimeAsync(1)
     expect(sleep).toHaveBeenCalledTimes(1)
+  })
+
+  it('counts from the last activity when it is armed: the rest of the timeout, or at once when that is past', async () => {
+    const recent = fakeContainer()
+    recent.mark(T0 - 25 * MINUTE)
+    recent.alarm.arm()
+    await vi.advanceTimersByTimeAsync(5 * MINUTE - 1)
+    expect(recent.sleep).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(1)
+    expect(recent.sleep).toHaveBeenCalledTimes(1)
 
     const stale = fakeContainer()
     stale.mark(T0 - TIMEOUT - MINUTE)
-    await vi.advanceTimersByTimeAsync(0)
+    stale.alarm.arm()
+    await settle()
     expect(stale.sleep).toHaveBeenCalledTimes(1)
   })
 
-  it('waits another full window while the container is busy at fire time', async () => {
-    const { state, sleep, alarm, mark } = fakeContainer()
-    mark()
+  it('waits another full timeout while the container is busy', async () => {
+    const { state, sleep, alarm, up } = fakeContainer()
+    up()
     state.busy = true
-    await vi.advanceTimersByTimeAsync(TIMEOUT + 1)
+    await vi.advanceTimersByTimeAsync(TIMEOUT)
     expect(sleep).not.toHaveBeenCalled()
     expect(alarm.isArmed()).toBe(true)
 
-    // The turn ends without a new mark (nothing wrote): the next fire sleeps.
+    // The turn ends without new activity (nothing wrote): the next wake-up sleeps.
     state.busy = false
+    await vi.advanceTimersByTimeAsync(TIMEOUT - 1)
+    expect(sleep).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(1)
+    expect(sleep).toHaveBeenCalledTimes(1)
+  })
+
+  it('waits for nothing while auto-sleep is off, and reads the setting again when the container is next reported up', async () => {
+    const { state, sleep, alarm, wakeAt, mark, up } = fakeContainer({ timeoutMs: 0 })
+    up()
+    await settle()
+    expect(alarm.isArmed()).toBe(false)
+    expect(wakeAt).not.toHaveBeenCalled()
+
+    // Turned on: nothing here hears of it.
+    state.timeoutMs = TIMEOUT
+    await vi.advanceTimersByTimeAsync(10 * TIMEOUT)
+    expect(sleep).not.toHaveBeenCalled()
+    expect(alarm.isArmed()).toBe(false)
+
+    // The next status read that finds the container running arms the alarm.
+    mark()
+    alarm.arm()
+    await settle()
+    expect(alarm.isArmed()).toBe(true)
     await vi.advanceTimersByTimeAsync(TIMEOUT)
     expect(sleep).toHaveBeenCalledTimes(1)
   })
 
-  it('never arms while disabled, and disarms when disabled before it fires', async () => {
-    const off = fakeContainer({ timeoutMs: 0 })
-    off.mark()
+  it('stops waiting when its wake-up finds auto-sleep turned off', async () => {
+    const { state, sleep, alarm, up } = fakeContainer()
+    up()
     await settle()
-    expect(off.alarm.isArmed()).toBe(false)
-
-    const { state, sleep, alarm, mark } = fakeContainer()
-    mark()
-    await settle()
-    expect(alarm.isArmed()).toBe(true)
     state.timeoutMs = 0
-    alarm.schedule()
+    await vi.advanceTimersByTimeAsync(10 * TIMEOUT)
+    expect(sleep).not.toHaveBeenCalled()
+    expect(alarm.isArmed()).toBe(false)
+  })
+
+  it('a changed timeout applies at the next wake-up, not before', async () => {
+    const shortened = fakeContainer()
+    shortened.up()
+    await settle()
+    shortened.state.timeoutMs = 5 * MINUTE
+    await vi.advanceTimersByTimeAsync(TIMEOUT - 1)
+    expect(shortened.sleep).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(1)
+    expect(shortened.sleep).toHaveBeenCalledWith(5 * MINUTE)
+
+    vi.setSystemTime(T0)
+    const lengthened = fakeContainer()
+    lengthened.up()
+    await settle()
+    lengthened.state.timeoutMs = 2 * TIMEOUT
+    await vi.advanceTimersByTimeAsync(2 * TIMEOUT - 1)
+    expect(lengthened.sleep).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(1)
+    expect(lengthened.sleep).toHaveBeenCalledWith(2 * TIMEOUT)
+  })
+
+  it('waits for nothing with nothing to sleep', async () => {
+    const { sleep, alarm, wakeAt } = fakeContainer()
+    alarm.arm()
     await settle()
     expect(alarm.isArmed()).toBe(false)
-    await vi.advanceTimersByTimeAsync(2 * TIMEOUT)
+    expect(wakeAt).not.toHaveBeenCalled()
     expect(sleep).not.toHaveBeenCalled()
   })
 
-  it('never arms with nothing on the clock', async () => {
-    const { alarm } = fakeContainer()
-    alarm.schedule()
-    await settle()
-    expect(alarm.isArmed()).toBe(false)
-  })
-
-  it('a shorter timeout applies on re-schedule, firing at once when the mark is already past it', async () => {
-    const { state, sleep, alarm, mark } = fakeContainer()
-    mark()
-    await vi.advanceTimersByTimeAsync(10 * MINUTE)
-    state.timeoutMs = 5 * MINUTE
-    alarm.schedule()
-    await vi.advanceTimersByTimeAsync(0)
-    expect(sleep).toHaveBeenCalledTimes(1)
-  })
-
-  it('retries a minute later when the stop did not complete', async () => {
-    const { state, sleep, alarm, mark } = fakeContainer({ stopCompletes: false })
-    mark()
-    await vi.advanceTimersByTimeAsync(TIMEOUT + 1)
+  it('tries again a minute later when the stop did not complete, until the container is down', async () => {
+    const { state, sleep, alarm, up } = fakeContainer({ stopCompletes: false })
+    up()
+    await vi.advanceTimersByTimeAsync(TIMEOUT)
     expect(sleep).toHaveBeenCalledTimes(1)
     expect(alarm.isArmed()).toBe(true)
 
-    await vi.advanceTimersByTimeAsync(IDLE_ALARM_RETRY_MS)
+    await vi.advanceTimersByTimeAsync(IDLE_ALARM_RETRY_MS - 1)
+    expect(sleep).toHaveBeenCalledTimes(1)
+    await vi.advanceTimersByTimeAsync(1)
     expect(sleep).toHaveBeenCalledTimes(2)
 
-    // Once the stop lands the clock resets and the retries end.
     state.stopCompletes = true
     await vi.advanceTimersByTimeAsync(IDLE_ALARM_RETRY_MS)
     expect(sleep).toHaveBeenCalledTimes(3)
     expect(alarm.isArmed()).toBe(false)
+    await vi.advanceTimersByTimeAsync(10 * IDLE_ALARM_RETRY_MS)
+    expect(sleep).toHaveBeenCalledTimes(3)
   })
 
-  it('retries after a stop that threw, and logs it', async () => {
-    const { sleep, alarm, mark } = fakeContainer()
-    sleep.mockRejectedValueOnce(new Error('runtime busy'))
-    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
-    mark()
-    await vi.advanceTimersByTimeAsync(TIMEOUT + 1)
-    expect(sleep).toHaveBeenCalledTimes(1)
-    expect(consoleError).toHaveBeenCalledTimes(1)
+  it('tries again after a stop that threw, and logs it', async () => {
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const { sleep, alarm, up } = fakeContainer()
+    sleep.mockRejectedValueOnce(new Error('runner is down'))
+    up()
+    await vi.advanceTimersByTimeAsync(TIMEOUT)
+    expect(errors).toHaveBeenCalledWith('[IdleAlarm] Sleep failed; will retry:', expect.any(Error))
     expect(alarm.isArmed()).toBe(true)
+
     await vi.advanceTimersByTimeAsync(IDLE_ALARM_RETRY_MS)
     expect(sleep).toHaveBeenCalledTimes(2)
-    consoleError.mockRestore()
+    expect(alarm.isArmed()).toBe(false)
   })
 
-  it('cancel disarms, and a later mark arms again', async () => {
-    const { sleep, alarm, mark } = fakeContainer()
-    mark()
+  it('tries again a minute later when the timeout cannot be read', async () => {
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const { sleep, timeoutMs, alarm, wakeAt, up } = fakeContainer()
+    timeoutMs.mockRejectedValueOnce(new Error('database is locked'))
+    up()
     await settle()
+    expect(errors).toHaveBeenCalledWith('[IdleAlarm] Could not read the auto-sleep timeout; will retry:', expect.any(Error))
     expect(alarm.isArmed()).toBe(true)
-    alarm.cancel()
+    expect(wakeAt).toHaveBeenLastCalledWith(T0 + IDLE_ALARM_RETRY_MS)
+
+    await vi.advanceTimersByTimeAsync(IDLE_ALARM_RETRY_MS)
+    expect(wakeAt).toHaveBeenLastCalledWith(T0 + TIMEOUT)
+    await vi.advanceTimersByTimeAsync(TIMEOUT - IDLE_ALARM_RETRY_MS)
+    expect(sleep).toHaveBeenCalledTimes(1)
+  })
+
+  it('disarm drops the wake-up, and the container coming up again arms anew', async () => {
+    const { sleep, alarm, cancelWake, up, down } = fakeContainer()
+    up()
+    await settle()
+    down()
     expect(alarm.isArmed()).toBe(false)
+    expect(cancelWake).toHaveBeenCalledTimes(1)
     await vi.advanceTimersByTimeAsync(2 * TIMEOUT)
     expect(sleep).not.toHaveBeenCalled()
 
-    mark()
-    await vi.advanceTimersByTimeAsync(TIMEOUT + 1)
+    up()
+    await settle()
+    expect(alarm.isArmed()).toBe(true)
+    await vi.advanceTimersByTimeAsync(TIMEOUT)
     expect(sleep).toHaveBeenCalledTimes(1)
   })
 
-  it('waits out a timeout longer than a Node timer in legs, without firing early', async () => {
-    const THIRTY_DAYS = 30 * 24 * 60 * MINUTE
-    const { sleep, alarm, mark } = fakeContainer({ timeoutMs: THIRTY_DAYS })
-    const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout')
-    mark()
+  it('arming an armed alarm does nothing: no read, and the wake-up is not moved', async () => {
+    const { sleep, timeoutMs, alarm, wakeAt, up } = fakeContainer()
+    up()
     await settle()
-    expect(setTimeoutSpy).toHaveBeenLastCalledWith(expect.any(Function), MAX_TIMER_MS)
+    await vi.advanceTimersByTimeAsync(20 * MINUTE)
+    alarm.arm()
+    alarm.arm()
+    await settle()
+    expect(timeoutMs).toHaveBeenCalledTimes(1)
+    expect(wakeAt).toHaveBeenCalledTimes(1)
+    await vi.advanceTimersByTimeAsync(10 * MINUTE)
+    expect(sleep).toHaveBeenCalledTimes(1)
+  })
 
-    // The first leg ends before the deadline: the alarm rechecks and re-arms.
+  it('a wake-up that comes early waits for the rest', async () => {
+    const { sleep, alarm, wakeAt, up } = fakeContainer()
+    up()
+    await settle()
+    await vi.advanceTimersByTimeAsync(10 * MINUTE)
+    await alarm.fire()
+    expect(sleep).not.toHaveBeenCalled()
+    expect(wakeAt).toHaveBeenLastCalledWith(T0 + TIMEOUT)
+    await vi.advanceTimersByTimeAsync(20 * MINUTE)
+    expect(sleep).toHaveBeenCalledTimes(1)
+  })
+
+  it('waits out a timeout longer than a Node timer, without sleeping early', async () => {
+    const LONG = MAX_TIMER_MS + 1000
+    const { sleep, alarm, up } = fakeContainer({ timeoutMs: LONG })
+    up()
     await vi.advanceTimersByTimeAsync(MAX_TIMER_MS)
     expect(sleep).not.toHaveBeenCalled()
     expect(alarm.isArmed()).toBe(true)
-    expect(setTimeoutSpy).toHaveBeenCalledTimes(2)
-
-    await vi.advanceTimersByTimeAsync(THIRTY_DAYS - MAX_TIMER_MS + 1)
-    expect(sleep).toHaveBeenCalledTimes(1)
-    setTimeoutSpy.mockRestore()
-  })
-
-  it('fire() decides now and ignores a second call while a sleep is in flight', async () => {
-    const { state, sleep, alarm, mark } = fakeContainer()
-    let release!: () => void
-    sleep.mockImplementationOnce(() => new Promise<void>((resolve) => { release = resolve }))
-    mark(T0 - TIMEOUT - 1)
-    const first = alarm.fire()
-    await alarm.fire()
-    await settle()
-    expect(sleep).toHaveBeenCalledTimes(1)
-    state.lastActivityAt = undefined
-    release()
-    await first
-    expect(alarm.isArmed()).toBe(false)
-  })
-
-  it('reads the timeout again at fire: a change made after the alarm was armed decides', async () => {
-    const longer = fakeContainer()
-    longer.mark()
-    await settle()
-    expect(longer.timeoutMs).toHaveBeenCalledTimes(1)
-    // Changed elsewhere, with nothing here re-arming: the alarm fires on the
-    // old deadline, reads the new timeout, and waits out the remainder.
-    longer.state.timeoutMs = 2 * TIMEOUT
-    await vi.advanceTimersByTimeAsync(TIMEOUT + 1)
-    expect(longer.timeoutMs).toHaveBeenCalledTimes(2)
-    expect(longer.sleep).not.toHaveBeenCalled()
-    expect(longer.alarm.isArmed()).toBe(true)
-    await vi.advanceTimersByTimeAsync(TIMEOUT)
-    expect(longer.sleep).toHaveBeenCalledTimes(1)
-    expect(longer.sleep).toHaveBeenCalledWith(2 * TIMEOUT)
-
-    const disabled = fakeContainer()
-    disabled.mark()
-    await settle()
-    disabled.state.timeoutMs = 0
-    await vi.advanceTimersByTimeAsync(TIMEOUT + 1)
-    expect(disabled.sleep).not.toHaveBeenCalled()
-    expect(disabled.alarm.isArmed()).toBe(false)
-  })
-
-  it('a burst of marks shares one timeout read, which arms from the latest mark when it lands', async () => {
-    const { sleep, timeoutMs, alarm, mark } = fakeContainer()
-    let landRead!: (ms: number) => void
-    timeoutMs.mockImplementationOnce(() => new Promise<number>((resolve) => { landRead = resolve }))
-    mark()
-    await vi.advanceTimersByTimeAsync(5 * MINUTE)
-    // Session writes while the read is out: none starts another read.
-    for (let i = 0; i < 5; i++) mark()
-    expect(timeoutMs).toHaveBeenCalledTimes(1)
-
-    landRead(TIMEOUT)
-    await settle()
-    expect(alarm.isArmed()).toBe(true)
-    // Counted from the latest mark (at +5m), not the first.
-    await vi.advanceTimersByTimeAsync(TIMEOUT)
+    await vi.advanceTimersByTimeAsync(999)
     expect(sleep).not.toHaveBeenCalled()
     await vi.advanceTimersByTimeAsync(1)
     expect(sleep).toHaveBeenCalledTimes(1)
-
-    // Once it landed, the next mark reads again.
-    timeoutMs.mockClear()
-    mark()
-    expect(timeoutMs).toHaveBeenCalledTimes(1)
   })
 
-  it('a re-arm with a timeout read after a change wins over a read started before it', async () => {
-    const { state, sleep, timeoutMs, alarm, mark } = fakeContainer()
-    let landSlowRead!: (ms: number) => void
-    timeoutMs.mockImplementationOnce(() => new Promise<number>((resolve) => { landSlowRead = resolve }))
-    mark()
-    // The setting changes to 5 minutes; the host re-arms with what it read after the change.
-    state.timeoutMs = 5 * MINUTE
-    alarm.rearm(5 * MINUTE)
-    expect(alarm.isArmed()).toBe(true)
-
-    // The read from before the change lands late with the old timeout: it arms nothing.
-    landSlowRead(TIMEOUT)
+  it('decisions never overlap: one asked for during a sleep in flight is made after it', async () => {
+    const { sleep, alarm, mark, down } = fakeContainer()
+    let finishStop!: () => void
+    sleep.mockImplementationOnce(() => new Promise<void>((resolve) => {
+      finishStop = () => {
+        down()
+        resolve()
+      }
+    }))
+    mark(T0 - TIMEOUT - 1)
+    const first = alarm.fire()
     await settle()
-    // A mark after the re-arm reads afresh instead of joining the detached read.
-    timeoutMs.mockClear()
-    mark()
-    expect(timeoutMs).toHaveBeenCalledTimes(1)
-    await settle()
-    await vi.advanceTimersByTimeAsync(5 * MINUTE + 1)
     expect(sleep).toHaveBeenCalledTimes(1)
-    expect(sleep).toHaveBeenCalledWith(5 * MINUTE)
-  })
 
-  it('a re-arm to zero disarms, and ensureArmed arms only what is not armed', async () => {
-    const { timeoutMs, alarm, mark } = fakeContainer()
-    mark()
+    const second = alarm.fire()
     await settle()
-    expect(alarm.isArmed()).toBe(true)
-    alarm.rearm(0)
-    expect(alarm.isArmed()).toBe(false)
-
-    // Nothing armed: a sweep's timeout arms it without a read.
-    timeoutMs.mockClear()
-    alarm.ensureArmed(TIMEOUT)
-    expect(alarm.isArmed()).toBe(true)
-    expect(timeoutMs).not.toHaveBeenCalled()
-
-    // Armed: nothing to do, and nothing read.
-    alarm.ensureArmed()
-    alarm.ensureArmed(TIMEOUT)
-    await settle()
-    expect(timeoutMs).not.toHaveBeenCalled()
-
-    // Nothing armed and no timeout given: it reads for itself.
-    alarm.cancel()
-    alarm.ensureArmed()
-    await settle()
-    expect(timeoutMs).toHaveBeenCalledTimes(1)
-    expect(alarm.isArmed()).toBe(true)
-  })
-
-  it('a mark made while a fire reads the timeout decides instead of the fire', async () => {
-    const { state, sleep, timeoutMs, alarm, mark } = fakeContainer()
-    // Idle past the timeout as the fire begins.
-    state.lastActivityAt = T0 - TIMEOUT - 1
-    let landFireRead!: (ms: number) => void
-    timeoutMs.mockImplementationOnce(() => new Promise<number>((resolve) => { landFireRead = resolve }))
-    const firing = alarm.fire()
-    // Activity lands while the fire is still reading: the container is not idle.
-    mark()
-    await settle()
-    landFireRead(TIMEOUT)
-    await firing
-    expect(sleep).not.toHaveBeenCalled()
-    expect(alarm.isArmed()).toBe(true)
-
-    await vi.advanceTimersByTimeAsync(TIMEOUT + 1)
     expect(sleep).toHaveBeenCalledTimes(1)
-  })
 
-  it('a stop while a timeout read is in flight is not undone by the read', async () => {
-    const { timeoutMs, alarm, mark } = fakeContainer()
-    let landRead!: (ms: number) => void
-    timeoutMs.mockImplementationOnce(() => new Promise<number>((resolve) => { landRead = resolve }))
-    mark()
-    alarm.cancel()
-    landRead(TIMEOUT)
-    await settle()
+    finishStop()
+    await Promise.all([first, second])
+    // The second decision found the container down.
+    expect(sleep).toHaveBeenCalledTimes(1)
     expect(alarm.isArmed()).toBe(false)
   })
 
-  it('a timeout read that fails keeps the alarm armed, or retries a minute later when nothing was', async () => {
-    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
-    const { sleep, timeoutMs, alarm, mark } = fakeContainer()
-    timeoutMs.mockRejectedValueOnce(new Error('database is locked'))
-    mark()
+  it('a container that went down while the timeout was being read is left alone', async () => {
+    const { timeoutMs, lastActivityAt, alarm, wakeAt, up, down } = fakeContainer()
+    let landRead!: () => void
+    timeoutMs.mockImplementationOnce(() => new Promise((resolve) => {
+      landRead = () => resolve(TIMEOUT)
+    }))
+    up()
+    down()
+    lastActivityAt.mockClear()
+    landRead()
     await settle()
-    expect(consoleError).toHaveBeenCalledTimes(1)
-    expect(alarm.isArmed()).toBe(true)
-
-    // The retry reads again and arms for the rest of the window.
-    await vi.advanceTimersByTimeAsync(IDLE_ALARM_RETRY_MS)
-    expect(sleep).not.toHaveBeenCalled()
-    expect(alarm.isArmed()).toBe(true)
-
-    // A later schedule whose read fails leaves that alarm in place.
-    timeoutMs.mockRejectedValueOnce(new Error('database is locked'))
-    alarm.schedule()
-    await settle()
-    expect(consoleError).toHaveBeenCalledTimes(2)
-    await vi.advanceTimersByTimeAsync(TIMEOUT - IDLE_ALARM_RETRY_MS + 1)
-    expect(sleep).toHaveBeenCalledTimes(1)
-    consoleError.mockRestore()
+    // Not even asked whether it runs: its actor may be gone.
+    expect(lastActivityAt).not.toHaveBeenCalled()
+    expect(wakeAt).not.toHaveBeenCalled()
+    expect(alarm.isArmed()).toBe(false)
   })
 
-  it("waits with the host's timer: one set per arm, the fire it gets sleeps the container, and a stop clears it", async () => {
-    const calls: string[] = []
-    let goOff: (() => void) | undefined
-    const timer: IdleTimer = {
-      set: (ms, fire) => {
-        calls.push(`set ${ms / MINUTE} min`)
-        goOff = fire
-      },
-      clear: () => void calls.push('clear'),
-    }
-    const state = { lastActivityAt: undefined as number | undefined }
-    const sleep = vi.fn(async () => {
-      state.lastActivityAt = undefined
-    })
-    const alarm = new IdleAlarm({ timeoutMs: async () => TIMEOUT, lastActivityAt: () => state.lastActivityAt, isBusy: () => false, sleep, timer: () => timer })
+  it('a container that came back up while a decision was in flight gets a decision of its own', async () => {
+    const { sleep, timeoutMs, alarm, wakeAt, up, down } = fakeContainer()
+    let landRead!: () => void
+    timeoutMs.mockImplementationOnce(() => new Promise((resolve) => {
+      landRead = () => resolve(TIMEOUT)
+    }))
+    up()
+    down()
+    await vi.advanceTimersByTimeAsync(MINUTE)
+    up()
+    landRead()
+    await settle()
+    expect(timeoutMs).toHaveBeenCalledTimes(2)
+    expect(alarm.isArmed()).toBe(true)
+    expect(wakeAt).toHaveBeenLastCalledWith(T0 + MINUTE + TIMEOUT)
+    await vi.advanceTimersByTimeAsync(TIMEOUT)
+    expect(sleep).toHaveBeenCalledTimes(1)
+  })
 
-    state.lastActivityAt = Date.now()
-    alarm.schedule()
+  it('an actor with a wake-up of its own: nothing in this process fires, and its fire() sleeps the container', async () => {
+    const { sleep, alarm, wakeAt, cancelWake, up } = fakeContainer({ ownWakeUp: true })
+    up()
     await settle()
-    vi.setSystemTime(T0 + 10 * MINUTE)
-    state.lastActivityAt = Date.now()
-    alarm.schedule()
-    await settle()
-    // Each arm replaces the wait: a timer kept in storage pays one write per arm.
-    expect(calls).toEqual(['set 30 min', 'set 30 min'])
-    expect(vi.getTimerCount()).toBe(0)
+    expect(wakeAt).toHaveBeenCalledTimes(1)
+    expect(wakeAt).toHaveBeenCalledWith(T0 + TIMEOUT)
 
-    vi.setSystemTime(T0 + 41 * MINUTE)
-    goOff!()
-    await settle()
-    expect(sleep).toHaveBeenCalledOnce()
+    // This process's timers go off, and nothing sleeps.
+    await vi.advanceTimersByTimeAsync(2 * TIMEOUT)
+    expect(sleep).not.toHaveBeenCalled()
 
-    state.lastActivityAt = Date.now()
-    alarm.schedule()
-    await settle()
-    alarm.cancel()
-    expect(calls.slice(2)).toEqual(['set 30 min', 'clear'])
+    // The actor's wake-up goes off, perhaps in a process that never armed this alarm.
+    await alarm.fire()
+    expect(sleep).toHaveBeenCalledTimes(1)
+    expect(cancelWake).toHaveBeenCalledTimes(1)
+    expect(alarm.isArmed()).toBe(false)
+  })
+})
+
+describe('processTimer', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('runs once when its time comes; a new set replaces the old one, and clear drops it', async () => {
+    const timer = processTimer()
+    const first = vi.fn()
+    const second = vi.fn()
+    timer.set(1000, first)
+    timer.set(2000, second)
+    await vi.advanceTimersByTimeAsync(2000)
+    expect(first).not.toHaveBeenCalled()
+    expect(second).toHaveBeenCalledTimes(1)
+
+    timer.set(1000, first)
+    timer.clear()
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(first).not.toHaveBeenCalled()
+  })
+
+  it('goes off at once for a time already past, and at the longest Node timer for one beyond it', async () => {
+    const timer = processTimer()
+    const fire = vi.fn()
+    timer.set(-5000, fire)
+    await vi.advanceTimersByTimeAsync(0)
+    expect(fire).toHaveBeenCalledTimes(1)
+
+    timer.set(MAX_TIMER_MS + 5000, fire)
+    await vi.advanceTimersByTimeAsync(MAX_TIMER_MS)
+    expect(fire).toHaveBeenCalledTimes(2)
   })
 })

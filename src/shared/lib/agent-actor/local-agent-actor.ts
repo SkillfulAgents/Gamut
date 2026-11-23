@@ -1,6 +1,8 @@
 import pLimit from 'p-limit'
 import type { containerHost } from '@shared/lib/container/container-host'
-import { processIdleTimer, type IdleTimer } from '@shared/lib/container/idle-alarm'
+import { autoSleepTimeoutMsFrom } from '@shared/lib/container/idle-alarm'
+import { processTimer } from '@shared/lib/container/process-timer'
+import { getSettings } from '@shared/lib/config/settings'
 import type { ContainerRuntime } from '@shared/lib/container/container-runtime'
 import type { userInputRequestManager } from '@shared/lib/tools/requests/request-manager'
 import type { reviewManager } from '@shared/lib/proxy/review-manager'
@@ -86,11 +88,6 @@ export interface LocalActorDeps {
   readonly loadSessionUsageTotals: typeof loadSessionUsageTotals
   /** The host this agent asks for host tools, machine work and side effects. */
   readonly host: HostPort
-  /**
-   * What the agent's idle alarm waits with, for a deployment whose process
-   * can end while the container runs. Absent: this process's timer.
-   */
-  readonly idleTimer?: (slug: AgentSlug) => IdleTimer
 }
 
 // Dev-only capture of the sessions' frames for fixture replays: one per
@@ -143,6 +140,8 @@ export class LocalAgentActor implements AgentActor {
    * handle that adopts state an earlier one made has nothing to read.
    */
   readonly firstRead: Promise<void>
+  /** What wakes this actor to check whether its container is idle: a timer of this process (see `wakeToCheckIdleAt`). */
+  private readonly idleWake = processTimer()
 
   /**
    * `state` is given when the handle is wrapping state that outlived an
@@ -166,7 +165,14 @@ export class LocalAgentActor implements AgentActor {
           runtime: createSessionsRuntime(slug, runtime),
           capture: subagentCapture,
         },
-        idle: createIdleAlarmHooks(slug, deps, runtime),
+        idle: {
+          // The setting, read by the actor itself at every decision.
+          timeoutMs: async () => autoSleepTimeoutMsFrom(await getSettings()),
+          lastActivityAt: () => runtime().sleepableSince(),
+          sleep: (timeoutMs) => runtime().sleepIdle(timeoutMs),
+          wakeAt: (at) => this.wakeToCheckIdleAt(at),
+          cancelWake: () => this.cancelIdleWake(),
+        },
         watch: createContainerWatchHooks(slug, () => this.state),
         runtime: (agent) => deps.containerHost.createRuntime(slug, agent),
       })
@@ -199,19 +205,34 @@ export class LocalAgentActor implements AgentActor {
     })
   }
 
+  /**
+   * Decides whether the container sleeps now: what this actor's idle wake-up
+   * runs when it goes off. The idle alarm sleeps the container, or sets the
+   * next wake-up.
+   */
+  checkIdle(): Promise<void> {
+    return this.state.idleAlarm.fire()
+  }
+
+  /**
+   * Has `checkIdle()` run at `at` (epoch ms), in place of any wake-up set
+   * before. Here that is a timer of this process, which is all an actor that
+   * lives and dies with its process needs. An actor that outlives its process
+   * overrides this and `cancelIdleWake` with a wake-up that does too (a
+   * Durable Object, with its own alarm), and runs `checkIdle()` when it goes off.
+   */
+  protected wakeToCheckIdleAt(at: number): void {
+    this.idleWake.set(at - Date.now(), () => background(this.checkIdle(), { name: 'agent-actor.check-idle' }))
+  }
+
+  /** Drops the wake-up `wakeToCheckIdleAt` set, if any. */
+  protected cancelIdleWake(): void {
+    this.idleWake.clear()
+  }
+
   /** The registry is dropping this handle: release everything it owns. */
   dispose(): void {
     releaseAgentState(this.state)
-  }
-}
-
-/** What the agent's idle alarm reads and does: the auto-sleep timeout, and the agent's container runtime. */
-function createIdleAlarmHooks(slug: AgentSlug, deps: LocalActorDeps, runtime: () => ContainerRuntime): AgentStateHooks['idle'] {
-  return {
-    timeoutMs: () => deps.containerHost.autoSleepTimeoutMs(),
-    lastActivityAt: () => runtime().sleepableSince(),
-    sleep: (timeoutMs) => runtime().sleepIdle(timeoutMs),
-    timer: () => deps.idleTimer?.(slug) ?? processIdleTimer(),
   }
 }
 

@@ -39,6 +39,8 @@ const NO_CONTAINER_IDLE: AgentStateHooks['idle'] = {
   timeoutMs: async () => 0,
   lastActivityAt: () => undefined,
   sleep: async () => {},
+  wakeAt: () => {},
+  cancelWake: () => {},
 }
 
 /** An agent with no container: its watch has nothing to check. */

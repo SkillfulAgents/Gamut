@@ -57,7 +57,7 @@ import {
   getWebProvider,
   resolveEffectiveWebVendorFrom,
 } from '@shared/lib/web-provider'
-import { agentRegistry, containerHost } from '@shared/lib/agent-actor'
+import { containerHost } from '@shared/lib/agent-actor'
 import { checkAllRunnersAvailability, refreshRunnerAvailability, startRunner, restartRunner, getContainerClientClass, getRunnerDisplayName, SUPPORTED_RUNNERS, type ContainerRunner } from '@shared/lib/container/client-factory'
 import { offersRuntime } from '@shared/lib/facts/capabilities'
 import { getServerFacts } from '@shared/lib/facts/server-facts'
@@ -509,11 +509,6 @@ settings.put(
           catalog: !!body.modelCatalog,
           models: (['agentModel', 'summarizerModel', 'browserModel', 'dashboardBuilderModel'] as const).filter(key => !!body.llmProvider || Object.hasOwn(body.models ?? {}, key)),
           selectDefault: !!body.llmProvider })
-      }
-
-      // A new auto-sleep timeout applies to the containers already up.
-      if (body.app?.autoSleepTimeoutMinutes !== undefined) {
-        agentRegistry.rearmIdleAlarms()
       }
 
       // If account provider settings changed, re-register providers

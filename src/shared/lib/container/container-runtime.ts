@@ -28,7 +28,7 @@ import { agentConnectedAccounts, connectedAccounts } from '@shared/lib/db/schema
 import { eq } from 'drizzle-orm'
 import { getOrCreateProxyToken } from '@shared/lib/proxy/token-store'
 import { getOrCreateHostToken } from '@shared/lib/container/host-token-store'
-import { getSettings, type AppSettings } from '@shared/lib/config/settings'
+import { getSettings } from '@shared/lib/config/settings'
 import { displayNameFromInstructions } from '@shared/lib/utils/agent-display-name'
 import type { RuntimeSessions } from './agent-sessions-access'
 import type { RuntimeFatalKind } from './runtime-death'
@@ -86,17 +86,15 @@ export interface RuntimeHost {
 export interface RuntimeAgent {
   /** The agent's live sessions, as the runtime marks and recovers them. */
   readonly sessions: RuntimeSessions
-  /** Puts the container to sleep once it is idle. */
-  readonly idleAlarm: IdleAlarm
+  /**
+   * Puts the container to sleep once it is idle. The actor's own: the runtime
+   * only tells it when the container is up and when it is down.
+   */
+  readonly idleAlarm: Pick<IdleAlarm, 'arm' | 'disarm'>
   /** Checks whether the container runs, and its health while it does. */
   readonly containerWatch: ContainerWatch
   /** The agent's instructions document (`AGENTS.md`), for the display name a start gives the container; null when it has none. */
   instructions(): Promise<string | null>
-}
-
-/** The auto-sleep timeout in `settings`, in ms; zero or less disables. */
-export function autoSleepTimeoutMsFrom(settings: Pick<AppSettings, 'app'>): number {
-  return (settings.app?.autoSleepTimeoutMinutes ?? 30) * 60_000
 }
 
 const healthVolumesSchema = z.object({ status: z.literal('ok'), volumes: z.array(z.string()) })
@@ -370,10 +368,9 @@ export class ContainerRuntime {
 
   /**
    * Hold a start as the in-flight one until it settles, then arm the idle
-   * alarm: a mark made while the start was in flight (the start's own, or a
-   * session write) could not arm it, since the alarm is inert during a start.
-   * A start that failed is seen as not running, so arming is a no-op, and the
-   * status check reads its container again.
+   * alarm: there is nothing to sleep while a start is in flight. A start that
+   * failed is seen as not running, so the alarm finds nothing to wait for,
+   * and the status check reads its container again.
    */
   private async trackStart(startPromise: Promise<ContainerClient>): Promise<void> {
     this.starting = startPromise
@@ -388,7 +385,7 @@ export class ContainerRuntime {
     } finally {
       // A later start that replaced this one clears and arms for itself when it settles.
       if (this.starting === startPromise) this.starting = null
-      if (this.starting === null) this.agent.idleAlarm.schedule()
+      if (this.starting === null) this.agent.idleAlarm.arm()
     }
   }
 
@@ -438,7 +435,7 @@ export class ContainerRuntime {
   markAsStopped(): void {
     this.updateCachedStatus('stopped', null)
     this.activity.reset()
-    this.agent.idleAlarm.cancel()
+    this.agent.idleAlarm.disarm()
   }
 
   /**
@@ -558,18 +555,16 @@ export class ContainerRuntime {
       // Host restart clears in-memory start times. Floor the idle clock at
       // rediscovery so zero-session warm containers are still reaped.
       if (!this.activity.hasStarted()) this.activity.started()
-      // Arm from the last mark whether or not the clock was floored just now:
-      // an alarm that fired while a sync (or a transient inspect failure)
-      // reported the container stopped found nothing to sleep and disarmed,
-      // and the marks it would have re-armed from are still on the clock.
-      // An alarm still armed is left as it is: every mark re-armed it, and
-      // its fire reads the timeout again.
-      this.agent.idleAlarm.ensureArmed()
+      // The alarm waits again if it stopped: a sync (or a transient inspect
+      // failure) that reported the container stopped disarmed it, and the
+      // marks are still on the clock for it to count from. An alarm still
+      // armed is left as it is.
+      this.agent.idleAlarm.arm()
     } else {
       // Nothing to sleep while the container is not observed running. The
       // marks stay: if the report was a transient failure, the next running
       // sync arms from them again rather than from a fresh floor.
-      this.agent.idleAlarm.cancel()
+      this.agent.idleAlarm.disarm()
     }
 
     // Broadcast if status changed (e.g., container was stopped externally)
@@ -829,8 +824,8 @@ export class ContainerRuntime {
     this.updateCachedStatus(info.status, info.port)
 
     // The start is the first mark on the idle clock: it floors stale session
-    // timestamps from before the previous sleep. The alarm is armed by
-    // trackStart once this start is no longer in flight.
+    // timestamps from before the previous sleep. trackStart arms the alarm
+    // once this start is no longer in flight.
     this.activity.started()
 
     // Broadcast agent status change globally
@@ -879,7 +874,6 @@ export class ContainerRuntime {
   // Record a keep-alive ping (e.g. from an open dashboard) to prevent auto-sleep
   keepAlive(): void {
     this.activity.keepAlive()
-    this.agent.idleAlarm.schedule()
   }
 
   /**
@@ -889,7 +883,6 @@ export class ContainerRuntime {
    */
   noteSessionActivity(at: number = Date.now()): void {
     this.activity.sessionActivity(at)
-    this.agent.idleAlarm.schedule()
   }
 
   /**
@@ -915,9 +908,9 @@ export class ContainerRuntime {
    * The clock as the alarm sees it: the last mark while the container is
    * running and neither starting nor stopping, otherwise nothing. A session
    * of a stopped agent is still written to (a message deleted, a transcript
-   * appended), and that marks the clock, but it must not arm an alarm that
-   * would stop a container that is not there — or, worse, one that a later
-   * start is in the middle of bringing up.
+   * appended), and that marks the clock, but the alarm must not stop a
+   * container that is not there — or, worse, one that a later start is in the
+   * middle of bringing up.
    */
   sleepableSince(): number | undefined {
     if (this.starting || this.stopping || this.getCachedInfo().status !== 'running') return undefined
@@ -956,7 +949,7 @@ export class ContainerRuntime {
     this.clientRunner = null
     this.cached = null
     this.activity.reset()
-    this.agent.idleAlarm.cancel()
+    this.agent.idleAlarm.disarm()
     this.agent.containerWatch.stop()
     this.healthWarnings = []
     this.stopping = false
