@@ -1,0 +1,7 @@
+[TEST_PASS]
+[REASON] Sent the "Open a browser and go to https://example.com. Tell me the page title." prompt to agent QA-20261123-192632-hq83 and verified the reply names "Example Domain".
+[STEP] Step 1, navigate to http://localhost:47891 — the Gamut app loaded (page title "Gamut") and the sidebar listed the QA-20261123-192632-hq83 agent.
+[STEP] Step 2, click QA-20261123-192632-hq83 in the sidebar — the agent page opened at /agents/qa-20261123-192632-hq83-rc42te6isl, showing an empty "How can I help?" input and status "idle".
+[STEP] Step 3, send the message — the text was typed into the input, the send button enabled, and clicking it created a session ("Check Example.com Page Title") with my message shown in the chat and status "working".
+[STEP] Step 4, wait up to 3 minutes for a response — the agent's activity showed a ToolSearch call and an "Open Browser" tool call to https://example.com, and a browser preview panel with the title "Example Domain" appeared. The "Working..." indicator then disappeared, the status returned to "idle", and the turn finished after "Worked for 5s · 3 tool calls".
+[STEP] Step 5, verify the response mentions "Example Domain" and take a screenshot — the agent's reply reads: "The page title at https://example.com is "Example Domain". I've closed the browser." The text matches, and the screenshot was taken.
