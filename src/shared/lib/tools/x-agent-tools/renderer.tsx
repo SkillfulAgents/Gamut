@@ -3,6 +3,17 @@ import { SquareGanttChart, SquarePlus, SquareArrowRight, MessagesSquare, ArrowUp
 import type { ToolRendererProps } from '../renderer-types'
 import { ResultBlock } from '../ui/shared'
 import { AppLink } from '@renderer/components/ui/app-link'
+import { useSessionTray } from '@renderer/context/session-tray-context'
+import { invokedSessionResult } from '@shared/lib/services/x-agent/invoked-session-schema'
+import { ChevronDown, ChevronRight, PanelRight } from 'lucide-react'
+import { useQuery } from '@tanstack/react-query'
+import { useAgents } from '@renderer/hooks/use-agents'
+import { useInvocationList } from '@renderer/hooks/use-invocations'
+import { sessionQuery } from '@renderer/hooks/query-options'
+import { findCalledAgent } from '@renderer/components/tray/agent-calls'
+import { CalledAgentAvatar, calledSessionState } from '@renderer/components/agents/called-agent-avatar'
+import type { ToolHeaderProps } from '../renderer-types'
+import type { ApiSession } from '@shared/lib/types/api'
 import {
   listAgentsDef,
   createAgentDef,
@@ -96,17 +107,63 @@ export const createAgentRenderer = defineToolRenderer(createAgentDef, {
 
 // ── invoke_agent ──────────────────────────────────────────────
 
+function InvokeAgentHeader({ input, result, isError, agentSlug, sessionId, toolUseId, isSessionActive, expanded, toggleDetails }: ToolHeaderProps) {
+  const tray = useSessionTray()
+  const { data: agents } = useAgents()
+  const args = invokeAgentDef.parseInput(input)
+  const returned = invokedSessionResult(result)
+  const awaitingDelivery = !isError && !result && !args.session_id && !!isSessionActive
+  const receipts = useInvocationList(agentSlug ?? '', sessionId ?? '', false, !!agentSlug && !!sessionId && awaitingDelivery)
+  const receipt = awaitingDelivery ? receipts.data?.find(call => call.toolUseId === toolUseId) : undefined
+  const requestedSlug = receipt?.agentSlug ?? args.slug ?? agentSlug
+  const agent = requestedSlug ? findCalledAgent(requestedSlug, agents) : undefined
+  const slug = agent?.slug ?? requestedSlug
+  const childId = returned?.sessionId ?? args.session_id ?? receipt?.sessionId
+  const child = useQuery({ ...sessionQuery(slug ?? '', childId ?? ''), enabled: !isError && !!slug && !!childId, retry: false })
+  const state = calledSessionState(child.data as ApiSession | undefined, !isError && ((!result && !!isSessionActive) || returned?.status === 'running'))
+  const name = agent?.name ?? slug ?? 'agent'
+  const open = tray && slug && childId && !isError ? () => tray.openUtility('invoked-agents', { slug, sessionId: childId }) : undefined
+  const detailsLabel = `${expanded ? 'Collapse' : 'Expand'} invoke agent tool details`
+
+  return (
+    <div className="flex items-stretch">
+      <button type="button" onClick={open ?? toggleDetails} aria-label={open ? `Open ${name} session in tray` : detailsLabel}
+        aria-expanded={open ? undefined : expanded} data-testid="invoke-agent-row"
+        className="flex min-w-0 flex-1 items-center gap-2 px-2 py-1.5 text-left hover:bg-muted/50">
+        <CalledAgentAvatar agent={agent} state={state} size={16} />
+        <span className="shrink-0 text-foreground/65">Invoke Agent</span>
+        <span className="truncate text-xs text-muted-foreground">{name}{args.prompt ? ` · ${args.prompt}` : ''}</span>
+        {isError && <span className="ml-auto text-xs text-destructive">Failed</span>}
+      </button>
+      {open ? <button type="button" onClick={toggleDetails} aria-label={detailsLabel} aria-expanded={expanded}
+        data-testid="tool-call-toggle-mcp__agents__invoke_agent" className="shrink-0 px-2 text-muted-foreground hover:bg-muted/50">
+        {expanded ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
+      </button> : null}
+    </div>
+  )
+}
+
 function InvokeAgentExpandedView({ input, result, isError, agentSlug }: ToolRendererProps) {
   const { slug, prompt, session_id, sync, attachments } = invokeAgentDef.parseInput(input)
   const target = slug ?? agentSlug
   // Parse sessionId + status from result (format: 'session_id: X\nstatus: Y\n...')
-  const resultText = typeof result === 'string' ? result : ''
-  const sessionIdMatch = resultText.match(/session_id:\s*([^\s]+)/)
-  const statusMatch = resultText.match(/status:\s*([^\s]+)/)
-  const resolvedSessionId = sessionIdMatch?.[1] ?? session_id
+  const resolved = invokedSessionResult(result)
+  const resolvedSessionId = resolved?.sessionId ?? session_id
+  const tray = useSessionTray()
 
   return (
     <div className="space-y-3">
+      {tray && target && resolvedSessionId && !isError && (
+        <button
+          type="button"
+          onClick={() => tray.openUtility('invoked-agents', { slug: target, sessionId: resolvedSessionId })}
+          className="inline-flex items-center gap-1.5 rounded-control border border-border/60 bg-background px-2.5 py-1 text-xs text-foreground transition-colors hover:bg-muted"
+          data-testid="invoke-agent-open-panel"
+        >
+          <PanelRight className="h-3.5 w-3.5 text-muted-foreground" />
+          Open in panel
+        </button>
+      )}
       <div className="flex flex-wrap items-center gap-2 text-xs">
         <span className="text-muted-foreground">Target:</span>
         {target ? <AgentLink slug={target} label={slug ? undefined : 'This agent'} /> : <span>—</span>}
@@ -121,15 +178,15 @@ function InvokeAgentExpandedView({ input, result, isError, agentSlug }: ToolRend
             sync
           </span>
         )}
-        {statusMatch && (
+        {resolved && (
           <span
             className={`rounded px-1.5 py-0.5 text-xs ${
-              statusMatch[1] === 'completed'
+              resolved.status === 'completed'
                 ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'
                 : 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200'
             }`}
           >
-            {statusMatch[1]}
+            {resolved.status}
           </span>
         )}
       </div>
@@ -161,6 +218,7 @@ function InvokeAgentExpandedView({ input, result, isError, agentSlug }: ToolRend
 }
 
 export const invokeAgentRenderer = defineToolRenderer(invokeAgentDef, {
+  Header: InvokeAgentHeader,
   icon: SquareArrowRight,
   ExpandedView: InvokeAgentExpandedView,
 })

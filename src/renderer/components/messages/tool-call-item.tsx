@@ -297,10 +297,15 @@ function ToolCallItemComponent({ toolCall, messageCreatedAt, agentSlug, sessionI
 
   // Get custom expanded view if available
   const CustomExpandedView = renderer?.ExpandedView
+  const Header = renderer?.Header
 
   return (
     <div className="text-sm border border-border/70 rounded-md overflow-hidden" data-testid={`tool-call-${toolCall.name}`}>
-      <button
+      {Header ? (
+        <Header toolUseId={toolCall.id} input={toolCall.input} result={resultStr} isError={toolCall.isError}
+          agentSlug={agentSlug} sessionId={sessionId} isSessionActive={isSessionActive} expanded={expanded}
+          toggleDetails={() => setExpanded(current => !current)} />
+      ) : <button
         type="button"
         aria-expanded={expanded}
         aria-label={`${expanded ? 'Collapse' : 'Expand'} ${toolCall.name} tool call`}
@@ -349,7 +354,7 @@ function ToolCallItemComponent({ toolCall, messageCreatedAt, agentSlug, sessionI
             )}
           </span>
         </span>
-      </button>
+      </button>}
 
       {expanded && (
         <div className="border-t border-border/70 bg-muted/50 px-3 py-3">

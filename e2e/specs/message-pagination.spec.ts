@@ -185,6 +185,44 @@ test.describe('transcript pagination', () => {
     await expect(page.getByText(OLDEST, { exact: true })).toHaveCount(0)
   })
 
+  test('opens a called session whose invocation predates the loaded page', async ({ page, request }, testInfo) => {
+    const caller = await createAgent(request, uniqueName(testInfo, 'Archive Caller'))
+    const target = await createAgent(request, uniqueName(testInfo, 'Archive Target'))
+    const session = await seededSession(request, caller)
+    const child = await createSession(request, target, 'Review the archived worksheet')
+    const file = sessionJsonlPath(caller.slug, session.id)
+    // Old sessions have a tool result in the transcript and no invocation receipt.
+    const call = {
+      type: 'tool_use', id: 'archive-call', name: 'mcp__agents__invoke_agent',
+      input: { slug: target.slug, prompt: 'Review the archived worksheet' },
+    }
+    const result = {
+      type: 'tool_result', tool_use_id: call.id,
+      content: [{ type: 'text', text: `session_id: ${child.id}\nstatus: completed` }],
+    }
+    const entries = [call, result].map((block, i) => {
+      const role = i === 0 ? 'assistant' : 'user'
+      return JSON.stringify({
+        type: role, uuid: `archive-${i}`, timestamp: new Date(1000 * i).toISOString(),
+        sessionId: session.id, parentUuid: i === 0 ? null : 'archive-0', message: { role, content: [block] },
+      })
+    })
+    fs.writeFileSync(file, entries.join('\n') + '\n' + fs.readFileSync(file, 'utf-8'))
+
+    await page.goto(`/agents/${caller.slug}/sessions/${session.id}`)
+    await expect(page.getByText(NEWEST, { exact: true })).toBeVisible({ timeout: 30_000 })
+    await expect(page.getByText('Review the archived worksheet')).toHaveCount(0)
+    await page.getByTestId('tray-show').click()
+    await page.getByTestId('tray-empty-invoked-agents').click()
+    const row = page.getByTestId('agent-sessions-list-row').filter({ hasText: 'Review the archived worksheet' })
+    await row.click()
+    await expect(page.getByTestId('called-transcript')).toContainText('Review the archived worksheet')
+    await page.getByTestId('agent-call-back').click()
+    await row.click()
+    await page.getByTestId('agent-call-open-session').click()
+    await expect(page).toHaveURL(new RegExp(`/sessions/${child.id}$`))
+  })
+
   test('scrolling to the top pages back to the start and stops there', async ({
     page,
     request,

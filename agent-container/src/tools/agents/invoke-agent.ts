@@ -3,6 +3,8 @@ import { z } from 'zod'
 import { callHost, textResult, XAgentError } from './host-client'
 import { invokeResultSchema } from './host-response-schemas'
 
+const invocationMetadata = z.object({ _meta: z.object({ 'claudecode/toolUseId': z.string().min(1) }) })
+
 export function makeInvokeAgentTool(getCallerSessionId: () => string) {
   return tool(
     'invoke_agent',
@@ -25,12 +27,14 @@ Note: sessions started by invoke_agent cannot themselves invoke agents — invoc
       effort: z.enum(['low', 'medium', 'high', 'xhigh', 'max']).optional().describe('Optional effort level for a new session. If not specified, uses the target agent\'s default. Not allowed with session_id.'),
       speed: z.enum(['slow', 'normal', 'fast']).optional().describe('Optional processing-speed tier for a new session. If not specified, uses the target agent\'s default. Not allowed with session_id.'),
     },
-    async (args) => {
+    async (args, extra) => {
       try {
         const body: Record<string, unknown> = {
           slug: args.slug,
           prompt: args.prompt,
         }
+        const metadata = invocationMetadata.safeParse(extra)
+        if (metadata.success) body.callerToolUseId = metadata.data._meta['claudecode/toolUseId']
         if (args.session_id) body.sessionId = args.session_id
         if (args.sync) body.sync = true
         if (args.attachments !== undefined) body.attachments = args.attachments

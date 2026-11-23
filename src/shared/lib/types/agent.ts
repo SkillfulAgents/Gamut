@@ -134,6 +134,7 @@ export interface SessionMetadata extends RuntimeOptions {
   errorProviders?: Record<string, LlmProviderId>
   // X-Agent: present when this session was created by another agent invoking this one.
   // Such sessions are hidden as automated until promoted for human input.
+  invokedSessions?: import('@shared/lib/services/x-agent/invoked-session-schema').InvokedSession[]
   invokedByAgentSlug?: string
   // Widget repair: the platform opened this session because the artifact's
   // widget refresh script failed. Automated (hidden) like a cron run, and the

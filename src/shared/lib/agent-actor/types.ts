@@ -381,6 +381,8 @@ export interface SessionOps {
   exportMetadata(): Promise<PortableSessionMetadataMap>
   /** `ingestSessionMetadataFile` — take a `session-metadata.json` an import wrote into the workspace into the index. */
   ingestMetadataFile(): Promise<void>
+  /** Record a delivered call on its parent session, atomically merging concurrent calls. */
+  recordInvocation(sessionId: string, invocation: import('@shared/lib/services/x-agent/invoked-session-schema').InvokedSession): Promise<void>
   /** `updateSessionMetadata` */
   updateMetadata(sessionId: string, updates: Partial<SessionMetadata>): Promise<SessionMetadata | undefined>
   /** `sessionFileRealPathWithinAgent` — the transcript's real location is inside the workspace, links followed. */
@@ -596,6 +598,8 @@ export interface MessageOps {
 
   /** `getSessionMessagesWithCompact` */
   withCompact(sessionId: string): Promise<(JsonlMessageEntry | JsonlSystemEntry)[]>
+  /** Matching tool uses and results from the complete session. */
+  toolHistory(sessionId: string, names: string[]): Promise<import('@shared/lib/utils/message-transform').TransformedItem[]>
   /** `readTranscriptView`: the transcript other agents read, and its delivered files, in one streaming pass. */
   transcriptView(sessionId: string, opts: { fullTranscript?: boolean; limit?: number }): Promise<TranscriptView>
   /** `findDeliveredFile`: one delivered file of the transcript, found in one streaming pass. */

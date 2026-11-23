@@ -1,3 +1,4 @@
+import { CalledAgentAvatar, type CalledSessionState } from '@renderer/components/agents/called-agent-avatar'
 import { cn } from '@shared/lib/utils'
 import { ChevronDown, ChevronRight, Circle, CircleCheckBig, Loader2, Monitor, X } from 'lucide-react'
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from 'react'
@@ -46,6 +47,21 @@ export interface ActivityBackgroundTask {
   detail?: string | null
 }
 
+/** A conversation this turn started or continued with another agent (invoke_agent). */
+export interface ActivityAgentCall {
+  key: string
+  /** The called agent's name. */
+  name: string
+  /** For its avatar beside the name. */
+  agent?: Pick<ApiAgent, 'slug' | 'avatar'> | null
+  /** What this session asked of it. */
+  prompt: string
+  /** Working while the called session is; completed once it has stopped. */
+  state: CalledSessionState
+  /** The called session; null until the call has returned it, and the row cannot open before then. */
+  sessionId: string | null
+}
+
 export interface ActivityComputerUse {
   app: string
   /** base64 PNG of the app icon; falls back to a generic monitor glyph. */
@@ -72,6 +88,8 @@ export interface ActivityCardProps {
   /** No composer box beneath it (voice mode): the card stands on its own, all corners rounded. */
   detached?: boolean
   computerUse?: ActivityComputerUse | null
+  agentCalls?: ActivityAgentCall[]
+  onOpenAgentCall?: (call: ActivityAgentCall) => void
   subagents?: ActivitySubagentItem[]
   backgroundTasks?: ActivityBackgroundTask[]
   todos?: Todo[] | null
@@ -99,6 +117,8 @@ export function ActivityCard({
   isAwaitingInput = false,
   detached = false,
   computerUse,
+  agentCalls = [],
+  onOpenAgentCall,
   subagents = [],
   backgroundTasks = [],
   todos,
@@ -127,6 +147,7 @@ export function ActivityCard({
   // The plan is a different kind of thing (intent, not activity), so it sits
   // below the tree under its own header rather than taking branches.
   const hasTreeRows = !!computerUse
+    || agentCalls.length > 0
     || subagents.length > 0
     || visibleBackgroundTasks.length > 0
   const hasPlan = !!todos && pendingTaskCount > 0
@@ -139,6 +160,7 @@ export function ActivityCard({
     formatActivityCount(monitorCount, 'monitor', 'monitors'),
     formatActivityCount(backgroundWorkflowCount, 'background workflow', 'background workflows'),
     formatActivityCount(activeSubagentCount, 'subagent', 'subagents'),
+    formatActivityCount(agentCalls.filter(call => call.state !== 'idle').length, 'invoked agent', 'invoked agents'),
     formatActivityCount(pendingTaskCount, 'pending task', 'pending tasks'),
   ].filter(Boolean).join(', ')
 
@@ -260,11 +282,20 @@ export function ActivityCard({
               </li>
             ))}
 
+            {agentCalls.map((call, index) => (
+              <AgentCallActivityRow
+                key={call.key}
+                call={call}
+                tracerRow={computerUseRows + subagents.length + index}
+                onOpen={onOpenAgentCall && call.sessionId ? () => onOpenAgentCall(call) : undefined}
+              />
+            ))}
+
             {visibleBackgroundTasks.map((task, index) => (
               <BackgroundTaskRow
                 key={task.taskId}
                 task={task}
-                tracerRow={computerUseRows + subagents.length + index}
+                tracerRow={computerUseRows + subagents.length + agentCalls.length + index}
                 onStop={onStopTask}
               />
             ))}
@@ -306,6 +337,50 @@ export function ActivityErrorCard({ message }: { message: string }) {
 function formatActivityCount(count: number, singular: string, plural: string): string {
   if (count === 0) return ''
   return `${count} ${count === 1 ? singular : plural}`
+}
+
+function AgentCallActivityRow({ call, tracerRow, onOpen }: {
+  call: ActivityAgentCall
+  tracerRow: number
+  onOpen?: () => void
+}) {
+  const running = call.state !== 'idle'
+  const fullText = call.prompt ? `${call.name} ${call.prompt}` : call.name
+  const content = (
+    <>
+      <CalledAgentAvatar agent={call.agent} size={12} state={call.state} />
+      <span className="min-w-0 truncate">
+        <span>{call.name}</span>
+        {call.prompt && <span className="text-muted-foreground">{' '}{call.prompt}</span>}
+      </span>
+    </>
+  )
+  return (
+    <li
+      style={tracerRowStyle(tracerRow)}
+      data-testid="agent-call-activity-row"
+      data-tracer-live={running ? 'true' : undefined}
+    >
+      <div className={cn('flex items-center gap-1.5', !running && 'text-muted-foreground')}>
+        <RowMark>{running ? null : <span>✓</span>}</RowMark>
+        {onOpen ? (
+          <button
+            type="button"
+            onClick={onOpen}
+            className="group flex min-w-0 flex-1 items-center gap-1 rounded-sm text-left hover:underline"
+            title={fullText}
+            aria-label={`Open ${fullText}`}
+            data-testid="agent-call-activity-open"
+          >
+            {content}
+            <ChevronRight className="h-3 w-3 opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100" />
+          </button>
+        ) : (
+          <span className="flex min-w-0 flex-1 items-center gap-1" title={fullText}>{content}</span>
+        )}
+      </div>
+    </li>
+  )
 }
 
 function SubagentActivityLabel({ item, onOpen }: { item: ActivitySubagentItem; onOpen?: () => void }) {

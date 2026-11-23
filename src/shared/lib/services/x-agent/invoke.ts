@@ -167,12 +167,15 @@ function messageAuthorFields(
  */
 function withoutServiceOwnedMetadata(metadata: Partial<SessionMetadata>): Partial<SessionMetadata> {
   const rest = { ...metadata }
+  delete rest.invokedSessions
   delete rest.invokedByAgentSlug
   delete rest.createdByUserId
   return rest
 }
 
 export interface InvokeInput {
+  /** SDK tool invocation that delivered this message, when sent by a container. */
+  callerToolUseId?: string
   /** The target. An agent caller may leave it out to mean its own agent. */
   slug?: string
   prompt: string
@@ -333,6 +336,19 @@ export async function invokeAgent(caller: XAgentCaller, input: InvokeInput): Pro
   // The person allowing the card picked another model for the new session.
   if (policy.pick) pick = policy.pick
 
+  // Record only accepted deliveries, including continuations, before a synchronous caller starts waiting.
+  const recordInvocation = async (sessionId: string) => {
+    if (!callerSlug || !callerSessionId) return
+    try {
+      await agentRegistry.get(callerSlug).sessions.recordInvocation(callerSessionId, {
+        agentSlug: targetSlug, sessionId, prompt: prompt.slice(0, 300), calledAt: new Date().toISOString(),
+        ...(input.callerToolUseId ? { toolUseId: input.callerToolUseId } : {}),
+      })
+    } catch (error) {
+      // Retrying an accepted invoke could duplicate the work. Its transcript still supplies the reference.
+      captureException(error, { tags: { area: 'x-agent', op: 'record-invocation' } })
+    }
+  }
   return runWithOptionalUser(attributedUserId, async (): Promise<XAgentResult<InvokeOutcome>> => {
     // Stages for runtime 500s: ensure_running → create_session / send_message.
     let stage = 'ensure_running'
@@ -430,6 +446,7 @@ export async function invokeAgent(caller: XAgentCaller, input: InvokeInput): Pro
           throw sendError
         }
 
+        await recordInvocation(existingSessionId)
         if (sync) {
           stage = 'wait_for_idle'
           let outcome: 'completed' | 'timeout'
@@ -575,6 +592,7 @@ export async function invokeAgent(caller: XAgentCaller, input: InvokeInput): Pro
         )
       }
       const newSessionId = containerSession.id
+      await recordInvocation(newSessionId)
       if (initialMessageUuid && createdByUserId) {
         await insertMessageAuthorBestEffort({
           id: initialMessageUuid,

@@ -7,6 +7,8 @@ import type { BackgroundTaskRef } from '@renderer/lib/background-task-label'
 import { parsePlatformErrorResponse } from '@shared/lib/llm-provider/platform-error-presentation'
 import type { ProviderErrorPresentation } from '@shared/lib/llm-provider/error-presentation'
 
+vi.mock('@renderer/hooks/use-turn-agent-calls', () => ({ useTurnAgentCalls: () => [] }))
+
 // Mock useMessageStream
 const mockStreamState = {
   isActive: false,

@@ -1,3 +1,4 @@
+import { useTurnAgentCalls } from '@renderer/hooks/use-turn-agent-calls'
 import { useSessionTray } from '@renderer/context/session-tray-context'
 import { useSessionSubagents } from '@renderer/hooks/use-session-subagents'
 
@@ -78,6 +79,8 @@ export function AgentActivityIndicator({ sessionId, agentSlug }: AgentActivityIn
   const isAwaitingInput = isActive &&
     (pendingUserRequests ?? []).some((r) => r.blocking && !r.autoApproved)
   const { data: messages } = useMessages(sessionId, agentSlug)
+
+  const agentCalls = useTurnAgentCalls(messages, agentSlug, sessionId, isActive)
 
   // Use activeStartTime from SSE (set when session_active fires) as primary source.
   // Falls back to last persisted user message timestamp (for page refresh recovery).
@@ -171,6 +174,10 @@ export function AgentActivityIndicator({ sessionId, agentSlug }: AgentActivityIn
         revokeError,
         onRevoke: handleRevokeComputerUse,
       } : null}
+      agentCalls={agentCalls}
+      onOpenAgentCall={tray ? call => {
+        if (call.agent && call.sessionId) tray.openUtility('invoked-agents', { slug: call.agent.slug, sessionId: call.sessionId })
+      } : undefined}
       subagents={subagentRows}
       onOpenSubagent={tray ? item => tray.openUtility('subagents', item.id) : undefined}
       backgroundTasks={labeledBackgroundTasks}
