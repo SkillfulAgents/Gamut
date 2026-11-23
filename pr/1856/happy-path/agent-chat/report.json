@@ -1,26 +1,24 @@
 {
   "storyId": "agent-chat",
-  "passed": false,
-  "reason": "Opened agent QA-20261123-211716-k7es, confirmed it was idle, sent \"Hello! What is 2+2?\", and checked that the reply contains \"4\". The reply was correct, but the session header still reads \"New Session\" after the sidebar renamed the session.\n  Bugs found:\n    - After the first message, the session header breadcrumb and page title still read \"New Session\", while the sidebar shows the session as \"Basic Arithmetic Question\". Expected: the header reflects the session's current title. Actual: the header stays \"New Session\". This is a minor inconsistency and may be a stale render, but I did not reload to confirm.",
+  "passed": true,
+  "reason": "Sent \"Hello! What is 2+2?\" to agent QA-20261123-214748-3luq and confirmed the reply contains \"4\".",
   "steps": [
-    "Step 1: Navigated to http://localhost:47891 — the Gamut home page loaded with the sidebar listing QA-20261123-211717-px3f and QA-20261123-211716-k7es.",
-    "Step 2: Clicked QA-20261123-211716-k7es in the sidebar — its agent page opened at /agents/qa-20261123-211716-k7es-xks5v79884.",
-    "Step 3: Checked the agent status — the header shows \"idle\" and the sidebar shows \"Idle\". The status is idle, so the check passes. Screenshot taken.",
-    "Step 4: Typed \"Hello! What is 2+2?\" into the message box and clicked Send — the app navigated to a new session at /sessions/bb71d943-… and the message appeared in the chat.",
-    "Step 5: No explicit wait was needed. The reply \"2 + 2 = 4.\" was already present in the message list on the first check after sending.",
-    "Step 6: Verified the response contains \"4\" (\"2 + 2 = 4.\") and took a screenshot. The step passes, but the header naming bug above was seen in the same screenshot."
+    "1. Navigated to http://localhost:47891 — Gamut home page loaded with the sidebar listing both QA agents.",
+    "2. Clicked the QA-20261123-214748-3luq agent in the sidebar — agent page opened at /agents/qa-20261123-214748-3luq-umliwjhv8u.",
+    "3. Verified status — the status indicator reads \"idle\", which is an accepted status. Screenshot saved as step3-agent-status.png.",
+    "4. Typed \"Hello! What is 2+2?\" into the message input and clicked Send — the app navigated to a new session (\"Basic Arithmetic Question Check\") and the message appeared in the message list.",
+    "5. Waited for a response — the reply \"2 + 2 = 4.\" was already present on the first check after sending, so no further wait was needed. Status returned to \"idle\".",
+    "6. Verified the response mentions \"4\" — it reads \"2 + 2 = 4.\" Screenshot saved as step6-response-verified.png."
   ],
-  "bugs": [
-    "After the first message, the session header breadcrumb and page title still read \"New Session\", while the sidebar shows the session as \"Basic Arithmetic Question\". Expected: the header reflects the session's current title. Actual: the header stays \"New Session\". This is a minor inconsistency and may be a stale render, but I did not reload to confirm."
-  ],
-  "durationMs": 47827,
-  "sessionId": "7b4d078b-63de-469b-a290-c5ebbae3cf5e",
+  "bugs": [],
+  "durationMs": 27539,
+  "sessionId": "2c838773-d223-4a66-9036-3f3a51e5af98",
   "cost": {
-    "inputTokens": 7492,
-    "outputTokens": 5126,
-    "cacheCreationTokens": 134276,
-    "cacheReadTokens": 434331,
+    "inputTokens": 7722,
+    "outputTokens": 4473,
+    "cacheCreationTokens": 104071,
+    "cacheReadTokens": 624693,
     "model": "claude-haiku-5-5",
-    "totalCostUsd": 0.2444
+    "totalCostUsd": 0.222645
   }
 }
