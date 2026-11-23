@@ -1,23 +1,23 @@
 {
   "storyId": "browser-test",
   "passed": true,
-  "reason": "Sent the \"Open a browser and go to https://example.com. Tell me the page title.\" prompt to agent QA-20261122-231850-32me and confirmed the reply names \"Example Domain\".",
+  "reason": "Ran the 5-step agent chat check: open agent QA-20261123-040456-zzi8, send the example.com title request, and verify the reply mentions \"Example Domain\".",
   "steps": [
-    "Step 1: Navigated to http://localhost:47891. The Gamut home page loaded with the \"Your Agents\" sidebar listing QA-20261122-231850-32me and QA-20261122-231849-p85n.",
-    "Step 2: Clicked QA-20261122-231850-32me in the sidebar. The agent page opened showing an idle status and an empty message input. Screenshot: step2-agent-open.png.",
-    "Step 3: Typed the message into the input and clicked the Send button. The message appeared in the chat, the session was created as \"Browser Page Title Check\", and the agent status changed to \"working\". Screenshot: step3-message-typed.png was taken before sending.",
-    "Step 4: Waited for the text \"Example Domain\" to appear, with a 180-second limit. It appeared after about 7 seconds (\"Worked for 7s\", 3 tool calls). The agent status returned to \"idle\".",
-    "Step 5: The agent's reply reads: 'The page title is \"Example Domain\". I've closed the browser.' This confirms the expected text. Screenshot: step5-response-verified.png."
+    "Step 1: Navigated to http://localhost:47891 — the Gamut home page loaded with the sidebar listing QA-20261123-040456-zzi8 and QA-20261123-040455-votk.",
+    "Step 2: Clicked QA-20261123-040456-zzi8 in the sidebar — the agent page opened at /agents/qa-20261123-040456-zzi8-b2zgoqz7y0 showing an idle status and an empty message input. Screenshot: step2-agent-opened.png.",
+    "Step 3: Typed \"Open a browser and go to https://example.com. Tell me the page title.\" into the message box and pressed Enter — the text stayed in the input and was not sent. The placeholder reads \"Press cmd+enter to send\", so this appears to be expected behaviour, not a bug. I then clicked the Send button — the message was sent, a new session \"Check Example.com Page Title\" was created, and the message appeared in the chat. Screenshot: step3-message-typed.png (taken before the send click).",
+    "Step 4: Waited for the response — the agent replied within about 5 seconds (\"Worked for 5s · 3 tool calls · 163,108 tokens\"), well inside the 3-minute limit.",
+    "Step 5: Verified the response: \"The page title is \"Example Domain\". The page loaded normally (HTTP 200), and I've closed the browser.\" The reply contains \"Example Domain\". Screenshot: step5-response-verified.png."
   ],
   "bugs": [],
-  "durationMs": 62809,
-  "sessionId": "a248f279-2428-4cbc-be71-f1d7b068f827",
+  "durationMs": 44575,
+  "sessionId": "1b245fe1-584a-4993-a072-9569d66b42d8",
   "cost": {
-    "inputTokens": 8271,
-    "outputTokens": 4938,
-    "cacheCreationTokens": 66040,
-    "cacheReadTokens": 737143,
+    "inputTokens": 7869,
+    "outputTokens": 5351,
+    "cacheCreationTokens": 63735,
+    "cacheReadTokens": 655940,
     "model": "claude-haiku-5-5",
-    "totalCostUsd": 0.189225
+    "totalCostUsd": 0.179887
   }
 }

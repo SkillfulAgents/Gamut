@@ -1,8 +1,8 @@
 [TEST_PASS]
-[REASON] Sent "Hello! What is 2+2?" to agent QA-20261122-231849-p85n in the Playwright browser and confirmed the reply contains "4".
-[STEP] 1. Navigated to http://localhost:47891 — the Gamut app loaded with the sidebar listing QA-20261122-231850-32me and QA-20261122-231849-p85n.
-[STEP] 2. Clicked the QA-20261122-231849-p85n agent in the sidebar/main list — its agent page opened at /agents/qa-20261122-231849-p85n-euqr7bhlae.
-[STEP] 3. Verified status — the agent-status indicator in the header reads "idle", which is an accepted status.
-[STEP] 4. Typed "Hello! What is 2+2?" into the message box and clicked Send — a new session "Simple Arithmetic Greeting Question" opened and the user message appeared in the chat.
-[STEP] 5. Waited for the response — the "Working..." indicator cleared and the agent returned to idle; the reply "2 + 2 = 4." was present in the message list.
-[STEP] 6. Verified the response mentions "4" — "2 + 2 = 4." is shown in the chat; screenshot taken (step6-response-verified.png).
+[REASON] Opened agent QA-20261123-040455-votk, confirmed it was idle, sent "Hello! What is 2+2?", and verified the reply contains 4.
+[STEP] Navigated to http://localhost:47891 — the Gamut home page loaded and listed both agents (QA-20261123-040456-zzi8 and QA-20261123-040455-votk) in the sidebar.
+[STEP] Clicked QA-20261123-040455-votk in the sidebar — navigated to /agents/qa-20261123-040455-votk-24ye4ets8t and the agent header showed the name.
+[STEP] Verified agent status — the status indicator read "idle", which satisfies the running/idle check. Screenshot taken (step2-3-agent-idle.png).
+[STEP] Typed "Hello! What is 2+2?" into the message input and clicked Send — the message appeared in the chat and a new session "Basic Arithmetic Question Check" was created. The activity indicator showed "Working...".
+[STEP] Waited for the response — "Working..." cleared within the 170-second wait, the agent status returned to "idle", and the reply "2 + 2 = 4." was shown.
+[STEP] Verified the response mentions "4" and took a screenshot (step6-response-verified.png) — the reply "2 + 2 = 4." is visible in the chat.

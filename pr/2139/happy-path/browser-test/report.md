@@ -1,7 +1,7 @@
 [TEST_PASS]
-[REASON] Sent the "Open a browser and go to https://example.com. Tell me the page title." prompt to agent QA-20261122-231850-32me and confirmed the reply names "Example Domain".
-[STEP] Step 1: Navigated to http://localhost:47891. The Gamut home page loaded with the "Your Agents" sidebar listing QA-20261122-231850-32me and QA-20261122-231849-p85n.
-[STEP] Step 2: Clicked QA-20261122-231850-32me in the sidebar. The agent page opened showing an idle status and an empty message input. Screenshot: step2-agent-open.png.
-[STEP] Step 3: Typed the message into the input and clicked the Send button. The message appeared in the chat, the session was created as "Browser Page Title Check", and the agent status changed to "working". Screenshot: step3-message-typed.png was taken before sending.
-[STEP] Step 4: Waited for the text "Example Domain" to appear, with a 180-second limit. It appeared after about 7 seconds ("Worked for 7s", 3 tool calls). The agent status returned to "idle".
-[STEP] Step 5: The agent's reply reads: 'The page title is "Example Domain". I've closed the browser.' This confirms the expected text. Screenshot: step5-response-verified.png.
+[REASON] Ran the 5-step agent chat check: open agent QA-20261123-040456-zzi8, send the example.com title request, and verify the reply mentions "Example Domain".
+[STEP] Step 1: Navigated to http://localhost:47891 — the Gamut home page loaded with the sidebar listing QA-20261123-040456-zzi8 and QA-20261123-040455-votk.
+[STEP] Step 2: Clicked QA-20261123-040456-zzi8 in the sidebar — the agent page opened at /agents/qa-20261123-040456-zzi8-b2zgoqz7y0 showing an idle status and an empty message input. Screenshot: step2-agent-opened.png.
+[STEP] Step 3: Typed "Open a browser and go to https://example.com. Tell me the page title." into the message box and pressed Enter — the text stayed in the input and was not sent. The placeholder reads "Press cmd+enter to send", so this appears to be expected behaviour, not a bug. I then clicked the Send button — the message was sent, a new session "Check Example.com Page Title" was created, and the message appeared in the chat. Screenshot: step3-message-typed.png (taken before the send click).
+[STEP] Step 4: Waited for the response — the agent replied within about 5 seconds ("Worked for 5s · 3 tool calls · 163,108 tokens"), well inside the 3-minute limit.
+[STEP] Step 5: Verified the response: "The page title is "Example Domain". The page loaded normally (HTTP 200), and I've closed the browser." The reply contains "Example Domain". Screenshot: step5-response-verified.png.

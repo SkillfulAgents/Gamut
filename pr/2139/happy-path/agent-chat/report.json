@@ -1,24 +1,24 @@
 {
   "storyId": "agent-chat",
   "passed": true,
-  "reason": "Sent \"Hello! What is 2+2?\" to agent QA-20261122-231849-p85n in the Playwright browser and confirmed the reply contains \"4\".",
+  "reason": "Opened agent QA-20261123-040455-votk, confirmed it was idle, sent \"Hello! What is 2+2?\", and verified the reply contains 4.",
   "steps": [
-    "1. Navigated to http://localhost:47891 — the Gamut app loaded with the sidebar listing QA-20261122-231850-32me and QA-20261122-231849-p85n.",
-    "2. Clicked the QA-20261122-231849-p85n agent in the sidebar/main list — its agent page opened at /agents/qa-20261122-231849-p85n-euqr7bhlae.",
-    "3. Verified status — the agent-status indicator in the header reads \"idle\", which is an accepted status.",
-    "4. Typed \"Hello! What is 2+2?\" into the message box and clicked Send — a new session \"Simple Arithmetic Greeting Question\" opened and the user message appeared in the chat.",
-    "5. Waited for the response — the \"Working...\" indicator cleared and the agent returned to idle; the reply \"2 + 2 = 4.\" was present in the message list.",
-    "6. Verified the response mentions \"4\" — \"2 + 2 = 4.\" is shown in the chat; screenshot taken (step6-response-verified.png)."
+    "Navigated to http://localhost:47891 — the Gamut home page loaded and listed both agents (QA-20261123-040456-zzi8 and QA-20261123-040455-votk) in the sidebar.",
+    "Clicked QA-20261123-040455-votk in the sidebar — navigated to /agents/qa-20261123-040455-votk-24ye4ets8t and the agent header showed the name.",
+    "Verified agent status — the status indicator read \"idle\", which satisfies the running/idle check. Screenshot taken (step2-3-agent-idle.png).",
+    "Typed \"Hello! What is 2+2?\" into the message input and clicked Send — the message appeared in the chat and a new session \"Basic Arithmetic Question Check\" was created. The activity indicator showed \"Working...\".",
+    "Waited for the response — \"Working...\" cleared within the 170-second wait, the agent status returned to \"idle\", and the reply \"2 + 2 = 4.\" was shown.",
+    "Verified the response mentions \"4\" and took a screenshot (step6-response-verified.png) — the reply \"2 + 2 = 4.\" is visible in the chat."
   ],
   "bugs": [],
-  "durationMs": 62481,
-  "sessionId": "aae92c2c-ef08-4ec5-8e02-a4fe38ad5f86",
+  "durationMs": 67409,
+  "sessionId": "23768679-c8d1-47b3-aab6-a627f0696241",
   "cost": {
-    "inputTokens": 7765,
-    "outputTokens": 4911,
-    "cacheCreationTokens": 148846,
-    "cacheReadTokens": 723932,
+    "inputTokens": 7884,
+    "outputTokens": 4865,
+    "cacheCreationTokens": 171665,
+    "cacheReadTokens": 623912,
     "model": "claude-haiku-5-5",
-    "totalCostUsd": 0.290771
+    "totalCostUsd": 0.309181
   }
 }
