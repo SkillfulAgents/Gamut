@@ -6,7 +6,7 @@
 import type { XAgentRuntime } from '@shared/lib/proxy/x-agent-review'
 
 import { randomUUID } from 'crypto'
-import { and, desc, eq, isNotNull, sql } from 'drizzle-orm'
+import { and, desc, eq, isNotNull, sql, type SQL } from 'drizzle-orm'
 import { db } from '@shared/lib/db'
 import { messageAuthor } from '@shared/lib/db/schema'
 import { deleteMessageAuthorBestEffort, insertMessageAuthorBestEffort } from '@shared/lib/services/message-author'
@@ -58,28 +58,34 @@ import { fail, type XAgentResult } from './operations'
 const X_AGENT_SENTRY = { area: 'x-agent', op: 'invoke' } as const
 
 /**
- * Resolve the user who sent the message currently driving an agent session.
- * In shared sessions this can differ from the session creator, so invocation
- * attribution must prefer the latest per-message author record.
+ * The person behind the message the session acts on. In a shared session this
+ * can differ from whoever wrote last: a message queued behind a running turn
+ * acts only once the runtime starts it. With no message acting (the session
+ * is idle, or the host restarted), or one that names no person (an
+ * integration's), it is the newest person who wrote in the session.
  */
-async function getLatestMessageAuthorUserId(
+async function getActingMessageUserId(
   agentSlug: string,
   sessionId: string,
 ): Promise<string | undefined> {
   try {
+    // A failed read of the session leaves only the fallback.
+    const actingMessageUuid = await agentRegistry.get(agentSlug).sessions.live(sessionId)
+      .then((live) => live.actingMessageUuid, () => null)
     // An incoming agent call carries the payer forward into the next call.
     const payer = sql<string | null>`coalesce(${messageAuthor.userId}, ${messageAuthor.billedUserId})`
-    const rows = await db
+    const newestPayer = async (message?: SQL) => (await db
       .select({ userId: payer })
       .from(messageAuthor)
       .where(and(
         eq(messageAuthor.agentSlug, agentSlug),
         eq(messageAuthor.sessionId, sessionId),
         isNotNull(payer),
+        message,
       ))
       .orderBy(desc(messageAuthor.createdAt), desc(messageAuthor.id))
-      .limit(1)
-    return rows[0]?.userId ?? undefined
+      .limit(1))[0]?.userId ?? undefined
+    return (actingMessageUuid && await newestPayer(eq(messageAuthor.id, actingMessageUuid))) || await newestPayer()
   } catch (error) {
     // Attribution is optional. A DB/read failure must never block the invoke.
     console.warn('[x-agent] failed to resolve triggering message author; continuing unattributed', {
@@ -237,7 +243,7 @@ export async function invokeAgent(caller: XAgentCaller, input: InvokeInput): Pro
     ? agentRegistry.get(callerSlug).sessions.metadata(callerSessionId)
     : Promise.resolve(null))
   const triggeringUserRead = startRead(isAuthMode() && callerSlug && callerSessionId
-    ? getLatestMessageAuthorUserId(callerSlug, callerSessionId)
+    ? getActingMessageUserId(callerSlug, callerSessionId)
     : Promise.resolve(undefined))
   const access = startRead(callerHasRoleOnTarget(caller, targetSlug, 'user'))
   // No policy applies to the caller's own agent (checkAgentPolicy), nor to a user.
@@ -269,10 +275,8 @@ export async function invokeAgent(caller: XAgentCaller, input: InvokeInput): Pro
     return fail(400, 'A session cannot send a message to itself. Omit session_id to start a worker session.')
   }
 
-  // Capture the triggering message's author before a review prompt can pause
-  // this request and newer messages can arrive in a shared caller session.
-  // This remains a best-effort "latest author" heuristic until the container
-  // can pass the exact driving message UUID.
+  // Capture the acting message's author before a review prompt can pause this
+  // request and the caller session's turn moves on to a newer message.
   const triggeringUserId = await triggeringUserRead
 
   if (!(await access)) {
