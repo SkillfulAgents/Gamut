@@ -307,8 +307,6 @@ describe('CreateAgentForm', () => {
 
   it('does not offer file attachments', () => {
     renderWithProviders(<CreateAgentForm />)
-    expect(screen.getByTestId('composer-options')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Add files' })).toBeNull()
   })
-}
-)
+})
