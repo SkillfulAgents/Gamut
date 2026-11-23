@@ -1,24 +1,24 @@
 {
   "storyId": "agent-chat",
   "passed": true,
-  "reason": "Sent \"Hello! What is 2+2?\" to agent QA-20261123-182100-8j4g and verified the reply contains 4.",
+  "reason": "Sent \"Hello! What is 2+2?\" to agent QA-20261123-184652-tfvd and verified the agent is idle and the reply contains \"4\".",
   "steps": [
-    "Step 1: Navigated to http://localhost:47891 — the Gamut home page loaded with the sidebar listing agents QA-20261123-182101-nkvd and QA-20261123-182100-8j4g.",
-    "Step 2: Clicked QA-20261123-182100-8j4g in the sidebar — its agent page opened (URL /agents/qa-20261123-182100-8j4g-2ponln91ht).",
-    "Step 3: Checked agent status — the header status indicator reads \"idle\", which is an accepted status.",
-    "Step 4: Typed \"Hello! What is 2+2?\" in the message composer and clicked Send — the session \"Basic Arithmetic Question\" opened and the user message appeared in the chat.",
-    "Step 5: Waited for the response — the activity indicator changed from \"Working...\" to done within the 180-second wait. A partial \"2\" appeared mid-stream, and the final reply completed as \"2 + 2 = 4.\" with no timeout.",
-    "Step 6: Verified the response mentions \"4\" — the final assistant message is \"2 + 2 = 4.\", so the check passes. Screenshot taken of the completed response."
+    "Step 1: Navigated to http://localhost:47891 — the Gamut home page loaded with the sidebar listing both agents.",
+    "Step 2: Clicked QA-20261123-184652-tfvd in the sidebar — the agent page opened at /agents/qa-20261123-184652-tfvd-j9kmulq3wv.",
+    "Step 3: Verified the status — the status indicator reads \"idle\", which is an accepted state.",
+    "Step 4: Typed \"Hello! What is 2+2?\" into the message input and clicked Send — the message appeared in a new session titled \"Basic Arithmetic Question Check\" and the activity indicator showed \"Working...\".",
+    "Step 5: Waited up to 3 minutes for the response — the \"Working...\" indicator disappeared well within the window and the agent replied.",
+    "Step 6: Verified the response — the assistant reply \"2 + 2 = 4.\" is in the message list, and the header shows \"idle\". Screenshots were taken after sending and after the response."
   ],
   "bugs": [],
-  "durationMs": 64952,
-  "sessionId": "8341ffba-80fd-430a-a38c-f0f6418a7b61",
+  "durationMs": 60218,
+  "sessionId": "f8fc1bdc-7045-4cf4-9acd-53752569f651",
   "cost": {
-    "inputTokens": 8606,
-    "outputTokens": 7542,
-    "cacheCreationTokens": 162666,
-    "cacheReadTokens": 677217,
+    "inputTokens": 8022,
+    "outputTokens": 5807,
+    "cacheCreationTokens": 152548,
+    "cacheReadTokens": 690969,
     "model": "claude-haiku-5-5",
-    "totalCostUsd": 0.31737
+    "totalCostUsd": 0.296839
   }
 }
