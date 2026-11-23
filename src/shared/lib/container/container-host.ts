@@ -92,7 +92,7 @@ export class ContainerHost {
 
   /** A runtime for the agent whose actor hands over `agent`, for this machine's runner. Never does I/O. */
   createRuntime(slug: string, agent: RuntimeAgent): ContainerRuntime {
-    return new ContainerRuntime(slug, this.hooks, agent, getWebhookRelay().kind === 'platform')
+    return new ContainerRuntime(slug, this.hooks, agent, getWebhookRelay().kind !== 'unavailable')
   }
 
   /**

@@ -138,7 +138,7 @@ vi.mock('@shared/lib/composio/client', () => ({
   isPlatformComposioActive: () => false, isPlatformComposioActiveFrom: () => false,
 }))
 
-const relayState = vi.hoisted(() => ({ kind: 'unavailable' as 'platform' | 'unavailable', available: false }))
+const relayState = vi.hoisted(() => ({ kind: 'unavailable' as string, available: false }))
 vi.mock('@shared/lib/webhook-relay', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@shared/lib/webhook-relay')>()),
   getWebhookRelay: () => ({ kind: relayState.kind, snapshot: () => ({ available: relayState.available }) }),
@@ -296,7 +296,7 @@ describe('ContainerRuntime webhook relay env', () => {
   })
 
   /** A new agent on a host with the given relay, started. */
-  async function start(kind: 'platform' | 'unavailable') {
+  async function start(kind: string) {
     relayState.kind = kind
     agents.drop('test-agent')
     agents.runtime('test-agent').updateCachedStatus('stopped', null)
@@ -304,9 +304,10 @@ describe('ContainerRuntime webhook relay env', () => {
     return mockStart.mock.calls.at(-1)![0].envVars as Record<string, string>
   }
 
-  it('sets WEBHOOK_RELAY_AVAILABLE when the host has a platform relay, even while it is offline', async () => {
+  it('sets WEBHOOK_RELAY_AVAILABLE for any configured relay, even while it is offline', async () => {
     relayState.available = false
     expect((await start('platform')).WEBHOOK_RELAY_AVAILABLE).toBe('true')
+    expect((await start('custom')).WEBHOOK_RELAY_AVAILABLE).toBe('true')
 
     // Also covers the custom-env clobber: the key is reserved.
     mockGetSettings.mockReturnValue({

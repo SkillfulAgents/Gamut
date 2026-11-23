@@ -170,10 +170,6 @@ export class ContainerRuntime {
     readonly slug: string,
     private readonly host: RuntimeHost,
     private readonly agent: RuntimeAgent,
-    /**
-     * Whether this host has a webhook relay, fixed when the agent is created
-     * (WEBHOOK_RELAY_AVAILABLE). A change takes a restart, or a redeploy.
-     */
     private readonly webhookRelayAvailable: boolean,
   ) {}
 
