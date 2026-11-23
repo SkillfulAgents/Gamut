@@ -186,19 +186,27 @@ export function createCloudflareFileOps(callContainer: ContainerFetch, sleeping:
     return saved ? inChunks(saved.stream) : null
   }
 
-  // The file, or the range asked for, streamed: from the container while it runs, else from the saved workspace.
-  const contentStream = async (rel: string, range?: ByteRange): Promise<{ size: number; stream: ReadableStream<Uint8Array> }> => {
+  const fileSize = async (rel: string): Promise<number> => {
     const found = await info(rel)
     if (!found) throw new WorkspaceFileError('not-found')
     if (Array.isArray(found)) throw new WorkspaceFileError('not-a-file')
-    const size = found.size ?? 0
+    return found.size ?? 0
+  }
+
+  const fileStream = async (rel: string, range?: ByteRange): Promise<ReadableStream<Uint8Array>> => {
+    const stream = await bytesStream(rel, range)
+    if (!stream) throw new WorkspaceFileError('not-found')
+    return stream
+  }
+
+  // The file, or the range asked for, streamed: from the container while it runs, else from the saved workspace.
+  const contentStream = async (rel: string, range?: ByteRange): Promise<{ size: number; stream: ReadableStream<Uint8Array> }> => {
+    const size = await fileSize(rel)
     // A closed range inside the file, as a local read takes it.
     if (range && (range.start < 0 || (range.end !== undefined && (range.end < range.start || range.end >= size)))) {
       throw new WorkspaceFileError('invalid-path', 'Byte range out of bounds')
     }
-    const stream = await bytesStream(rel, range)
-    if (!stream) throw new WorkspaceFileError('not-found')
-    return { size, stream }
+    return { size, stream: await fileStream(rel, range) }
   }
 
   // Asleep, the change goes to the saved workspace; if the container started meanwhile, to it.
@@ -250,8 +258,15 @@ export function createCloudflareFileOps(callContainer: ContainerFetch, sleeping:
       return (await contentStream(normalizeWorkspacePath(path), range)).stream
     },
 
-    async readSized(path) {
-      return contentStream(normalizeWorkspacePath(path))
+    // As a local readSized: the range is cut at the size, a range past the end is empty, and size stays the whole file's.
+    async readSized(path, options) {
+      const rel = normalizeWorkspacePath(path)
+      const range = options?.range
+      if (!range) return contentStream(rel)
+      const size = await fileSize(rel)
+      const start = Math.max(0, range.start)
+      const end = Math.min(range.end, size - 1)
+      return { size, stream: start > end ? emptyStream() : await fileStream(rel, { start, end }) }
     },
 
     async getDoc(path) {
