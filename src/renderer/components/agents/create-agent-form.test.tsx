@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import type { ReactNode } from 'react'
 import { act, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { DREAM_SETUP_PROMPT } from '@shared/lib/skillset-provider/dream-skill'
@@ -56,13 +57,19 @@ vi.mock('@renderer/context/nav-transient-context', () => ({
 }))
 
 vi.mock('@renderer/components/messages/composer-options', () => ({
-  ComposerOptions: () => null,
+  ComposerOptions: ({ footer }: { footer?: ReactNode }) => <div data-testid="composer-options">{footer}</div>,
   findCatalogModel: () => undefined,
   useComposerOptions: () => ({
     model: 'opus',
     catalog: [],
     toRuntimeOptions: () => ({}),
   }),
+}))
+
+vi.mock('@renderer/components/messages/agent-default-footer', () => ({
+  AgentDefaultFooter: ({ agentSlug, agentHomeLink }: { agentSlug: string; agentHomeLink?: boolean }) => (
+    <div data-testid="agent-default-footer" data-slug={agentSlug} data-home-link={String(agentHomeLink)} />
+  ),
 }))
 
 vi.mock('@renderer/hooks/use-agent-templates', () => ({
@@ -143,6 +150,20 @@ describe('CreateAgentForm', () => {
       displaySlug: 'new-agent',
       name: 'New Agent',
     })
+  })
+
+  it('offers Set as Agent Default in the model picker once the named flow has its agent', () => {
+    renderWithProviders(<CreateAgentForm namedFlow existingAgent={{ slug: 'scout', displaySlug: 'scout-id' }} />)
+    const footer = within(screen.getByTestId('composer-options')).getByTestId('agent-default-footer')
+    expect(footer).toHaveAttribute('data-slug', 'scout')
+    // Agent home would leave the wizard mid-flow.
+    expect(footer).toHaveAttribute('data-home-link', 'false')
+  })
+
+  it('has no agent default footer before an agent exists', () => {
+    renderWithProviders(<CreateAgentForm />)
+    expect(screen.getByTestId('composer-options')).toBeInTheDocument()
+    expect(screen.queryByTestId('agent-default-footer')).not.toBeInTheDocument()
   })
 
   it('keeps the typed message visible until create completes', () => {
@@ -286,6 +307,8 @@ describe('CreateAgentForm', () => {
 
   it('does not offer file attachments', () => {
     renderWithProviders(<CreateAgentForm />)
+    expect(screen.getByTestId('composer-options')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Add files' })).toBeNull()
   })
-})
+}
+)
