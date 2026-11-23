@@ -8,7 +8,7 @@
  * import graph of anything that touches an agent. Notifications, analytics
  * and the global feed are handed over synchronously, as they always were.
  */
-import { createLocalHostPort, type ComputerUseCaller, type SessionNotification } from '@shared/lib/agent-actor/host-port'
+import { createLocalHostPort, type ComputerUseCaller, type HostCallHandlers, type HostEventHandlers, type SessionNotification } from '@shared/lib/agent-actor/host-port'
 import { globalFeed, type GlobalFeedEvent } from '@shared/lib/notifications/global-feed'
 import { notificationManager } from '@shared/lib/notifications/notification-manager'
 import { trackServerEvent } from '@shared/lib/analytics/server-analytics'
@@ -98,29 +98,32 @@ async function hostWorkFor(event: GlobalFeedEvent): Promise<void> {
   }
 }
 
-export const localHostPort = createLocalHostPort({
-  calls: {
-    hostTool: async (request) => (await import('./tools')).runHostTool(request),
-    computerUse: async ({ method, params, caller, startBy, app }) => {
-      if (!isE2EMock()) return (await computerUse()).executeComputerUseCommand(method, params, await computerUseCaller(caller), { startBy, app })
-      const acted = app ?? (await mockTargetApp(method, params))
-      return { output: `[mock] ${method} executed successfully`, ...(acted !== undefined && { app: acted }) }
-    },
-    computerUsePermissions: async (needs) => (isE2EMock() ? null : (await computerUse()).checkComputerUsePermissions(needs)),
-    computerUseTargetApp: async ({ method, params }) =>
-      isE2EMock()
-        ? mockTargetApp(method, params)
-        : (await computerUse()).placeComputerUseCall(method, params),
-    computerUseAppIcon: async ({ app }) => (await import('@shared/lib/computer-use/app-icon')).getAppIconBase64(app),
-    hostScript: async ({ script, scriptType }) => (await import('./script')).runHostScript(script, scriptType),
-    loginRequest: async (request) => (await import('@shared/lib/browser-vault/login-host')).decideLoginRequest(request),
+/** What each host call does in this process. A deployment that runs some elsewhere overrides those entries. */
+export const localHostCalls: HostCallHandlers = {
+  hostTool: async (request) => (await import('./tools')).runHostTool(request),
+  computerUse: async ({ method, params, caller, startBy, app }) => {
+    if (!isE2EMock()) return (await computerUse()).executeComputerUseCommand(method, params, await computerUseCaller(caller), { startBy, app })
+    const acted = app ?? (await mockTargetApp(method, params))
+    return { output: `[mock] ${method} executed successfully`, ...(acted !== undefined && { app: acted }) }
   },
-  events: {
-    global: feedEvent,
-    notification: notify,
-    analytics: ({ event, properties }) => trackServerEvent(event, properties),
-    computerUseTurnEnded: async ({ sessionId }) => {
-      if (!isE2EMock()) (await computerUse()).endComputerUseTurn(sessionId)
-    },
+  computerUsePermissions: async (needs) => (isE2EMock() ? null : (await computerUse()).checkComputerUsePermissions(needs)),
+  computerUseTargetApp: async ({ method, params }) =>
+    isE2EMock()
+      ? mockTargetApp(method, params)
+      : (await computerUse()).placeComputerUseCall(method, params),
+  computerUseAppIcon: async ({ app }) => (await import('@shared/lib/computer-use/app-icon')).getAppIconBase64(app),
+  hostScript: async ({ script, scriptType }) => (await import('./script')).runHostScript(script, scriptType),
+  loginRequest: async (request) => (await import('@shared/lib/browser-vault/login-host')).decideLoginRequest(request),
+}
+
+/** What each host event does in this process, overridden the same way. */
+export const localHostEvents: HostEventHandlers = {
+  global: feedEvent,
+  notification: notify,
+  analytics: ({ event, properties }) => trackServerEvent(event, properties),
+  computerUseTurnEnded: async ({ sessionId }) => {
+    if (!isE2EMock()) (await computerUse()).endComputerUseTurn(sessionId)
   },
-})
+}
+
+export const localHostPort = createLocalHostPort({ calls: localHostCalls, events: localHostEvents })

@@ -89,6 +89,7 @@ export default defineConfig({
         const backgroundWorkModule = path.resolve(__dirname, 'src/shared/lib/background-work/index.ts')
         const localTaskManagerModule = path.resolve(__dirname, 'src/shared/lib/background-work/local-task-manager.ts')
         const startupModule = path.resolve(__dirname, 'src/shared/lib/startup.ts')
+        const registryModule = path.resolve(__dirname, 'src/shared/lib/agent-actor/registry.ts')
         const ensureBooted = async () => {
           const { isDatabaseOpen, openDatabase } = await server.ssrLoadModule(dbModule)
           if (!isDatabaseOpen()) {
@@ -98,6 +99,12 @@ export default defineConfig({
           // Checked and installed in one step: a local AppState installs synchronously.
           if (!isAppStateInitialized()) {
             await initializeLocalAppState()
+          }
+          // Then the agents, as the web server does. Re-checked like the database:
+          // an edit that re-evaluates the registry module leaves it with none.
+          const { isAgentRegistryInitialized, initializeAgentRegistry, createLocalAgentRegistry } = await server.ssrLoadModule(registryModule)
+          if (!isAgentRegistryInitialized()) {
+            initializeAgentRegistry(createLocalAgentRegistry())
           }
           // Then key custody, as the web server does: the vault seals through it.
           // Concurrent requests share one install (ensureKeyManager).
