@@ -17,6 +17,7 @@ import { agentAvatarSchema } from '@shared/lib/types/agent-avatar'
 import { integrationMessageDisplaySchema, type IntegrationMessageDisplay } from '@shared/lib/agent-integrations/message-display-schema'
 import { toUserProfile, userProfileFields } from '@shared/lib/services/user-profile-service'
 import type { TransformedItem } from '@shared/lib/utils/message-transform'
+import type { TranscriptSender } from '@shared/lib/services/x-agent-transcript-view'
 
 function parseDisplay(json: string | null): IntegrationMessageDisplay | null {
   if (!json) return null
@@ -96,4 +97,25 @@ export async function annotateMessageAuthors(
       item.sender = toUserProfile(row.profile)
     }
   }
+}
+
+/** Each line's recorded sender as another agent sees it: no email, picture or integration card. */
+export async function transcriptSenders(
+  agentSlug: string,
+  sessionId: string,
+  ids: readonly string[],
+): Promise<Map<string, TranscriptSender>> {
+  const senders = new Map<string, TranscriptSender>()
+  if (ids.length === 0) return senders
+  for (const row of await messageAuthorsQuery(agentSlug, sessionId, ids).all()) {
+    if (row.integrationId !== null) {
+      const display = parseDisplay(row.display)
+      if (display) senders.set(row.id, { kind: 'integration', provider: display.integration.provider })
+    } else if (row.authorAgentSlug) {
+      senders.set(row.id, { kind: 'agent', slug: row.authorAgentSlug })
+    } else if (row.profile) {
+      senders.set(row.id, { kind: 'person', id: row.profile.id, name: row.profile.name })
+    }
+  }
+  return senders
 }

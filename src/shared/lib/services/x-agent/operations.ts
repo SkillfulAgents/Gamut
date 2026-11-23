@@ -13,7 +13,11 @@ import {
   transferError,
   XAgentAttachmentError,
 } from '@shared/lib/services/x-agent-attachment-service'
-import type { TranscriptView } from '@shared/lib/services/x-agent-transcript-view'
+import type { TranscriptMessage, TranscriptView } from '@shared/lib/services/x-agent-transcript-view'
+import { transcriptSenders } from '@shared/lib/services/message-author-annotation-service'
+import type { SessionOrigin } from '@shared/lib/types/agent'
+import { isAuthMode } from '@shared/lib/auth/mode'
+import { captureException } from '@shared/lib/error-reporting'
 import {
   callerHasRoleOnTarget,
   callerVisibleAgentSlugs,
@@ -83,6 +87,9 @@ export interface ListedSession {
   createdAt: Date
   lastActivityAt: Date
   isRunning: boolean
+  origin?: SessionOrigin
+  /** The invoking agent's slug when `origin` is `agent`. */
+  invokedBy?: string
 }
 
 export async function getTargetSessions(
@@ -110,14 +117,25 @@ export async function getTargetSessions(
   const allSessions = await actor.sessions.list()
   const page = allSessions.slice(offset, offset + limit)
   const active = new Set((await actor.live()).activeSessionIds)
+  const metadata = page.some((s) => s.origin === 'agent')
+    ? await actor.sessions.readMetadata().catch((error: unknown) => {
+      captureException(error, { tags: { area: 'x-agent', op: 'get-sessions' }, level: 'warning' })
+      return undefined
+    })
+    : undefined
   return ok({
-    sessions: page.map((s) => ({
-      id: s.id,
-      name: s.name,
-      createdAt: s.createdAt,
-      lastActivityAt: s.lastActivityAt,
-      isRunning: active.has(s.id),
-    })),
+    sessions: page.map((s) => {
+      const invokedBy = s.origin === 'agent' ? metadata?.[s.id]?.invokedByAgentSlug : undefined
+      return {
+        id: s.id,
+        name: s.name,
+        createdAt: s.createdAt,
+        lastActivityAt: s.lastActivityAt,
+        isRunning: active.has(s.id),
+        ...(s.origin ? { origin: s.origin } : {}),
+        ...(invokedBy ? { invokedBy } : {}),
+      }
+    }),
     total: allSessions.length,
     offset,
     limit,
@@ -151,7 +169,7 @@ export type TranscriptStatus = 'running' | 'idle' | 'awaiting_input'
 export async function getTargetTranscript(
   caller: XAgentCaller,
   input: GetTranscriptInput,
-): Promise<XAgentResult<{ status: TranscriptStatus } & TranscriptView>> {
+): Promise<XAgentResult<{ status: TranscriptStatus; messages: TranscriptMessage[] } & Omit<TranscriptView, 'messages'>>> {
   // Stamp the sync budget before any slow pre-work (policy review can block on
   // a human decision) so the total response time stays under the transport cap.
   const syncDeadline = Date.now() + effectiveSyncWaitMs(input.syncWaitMs)
@@ -219,7 +237,18 @@ export async function getTargetTranscript(
       ? 'running'
       : 'idle'
 
-  const { messages, total, deliveredFiles } = await actor.messages.transcriptView(sessionId, { fullTranscript, limit })
+  const { messages: lines, total, deliveredFiles } = await actor.messages.transcriptView(sessionId, { fullTranscript, limit })
+  const userIds = lines.flatMap((line) => (line.role === 'user' && line.id ? [line.id] : []))
+  // As the app's transcript route: a failure fails the read with auth, and only drops senders without.
+  const senders = await transcriptSenders(targetSlug, sessionId, userIds).catch((error: unknown) => {
+    if (isAuthMode()) throw error
+    captureException(error, { tags: { area: 'x-agent', op: 'get-transcript' }, level: 'warning' })
+    return new Map<string, never>()
+  })
+  const messages = lines.map(({ id, ...line }): TranscriptMessage => {
+    const sender = id ? senders.get(id) : undefined
+    return sender ? { ...line, sender } : line
+  })
 
   return ok({ status, messages, total, deliveredFiles })
 }

@@ -2,15 +2,49 @@ import type { JsonlMessageEntry, JsonlSystemEntry } from '@shared/lib/types/agen
 import { deliverFileInputSchema } from '@shared/lib/tools/deliver-file/schema'
 import { getDeliveredFileMetadata } from '@shared/lib/tools/deliver-file/definition'
 import { sanitizeUploadFilename } from '@shared/lib/utils/path-safety'
-import { transformMessages } from '@shared/lib/utils/message-transform'
+import {
+  isTaskNotificationMessage,
+  isToolResultOnlyMessage,
+  parseCommandMessage,
+  transformMessages,
+} from '@shared/lib/utils/message-transform'
+import { isSystemMessageText } from '@shared/lib/utils/system-message'
+import { isSyntheticPlaceholderMessage } from '@shared/lib/utils/synthetic-message'
+import { parseSignInMethodRequestMessage } from '@shared/lib/utils/sign-in-method-request'
+import { integrationTimestamp } from '@shared/lib/agent-integrations/message-display-schema'
+
+// The CLI's stop marker; the renderer draws it bare, as no one's message.
+const INTERRUPT_PREFIX = '[Request interrupted by user'
+
+/** A user-role line no person wrote; a person's message has no kind. `injected`: text the runtime adds (skill instructions, image notes). */
+export type TranscriptLineKind =
+  | 'tool_result'
+  | 'task_notification'
+  | 'compact_summary'
+  | 'injected'
+  | 'interrupt'
+  | 'system'
+  | 'command_output'
+
+export type TranscriptSender =
+  | { kind: 'person'; id: string; name: string }
+  | { kind: 'agent'; slug: string }
+  | { kind: 'integration'; provider: string }
 
 export type TranscriptMessage = {
   role: string
   content: string
   toolName?: string
+  at?: string
+  kind?: TranscriptLineKind
+  forked?: true
+  sender?: TranscriptSender
 }
 
-export type CompactedMessage = TranscriptMessage & {
+/** A view line with its transcript uuid, which senders join on. */
+export type TranscriptViewLine = TranscriptMessage & { id?: string }
+
+export type CompactedMessage = TranscriptViewLine & {
   spoken: string
 }
 
@@ -27,7 +61,7 @@ export interface ResolvedDeliveredAgentFile extends DeliveredAgentFile {
 }
 
 export interface TranscriptView {
-  messages: TranscriptMessage[]
+  messages: TranscriptViewLine[]
   total: number
   deliveredFiles: DeliveredAgentFile[]
 }
@@ -118,6 +152,33 @@ const INTERNAL_STUB: TranscriptMessage = {
   content: 'tool calls + thinking',
 }
 
+/** A user-role line's kind, by the markers the app's chat hides it on. */
+function lineKind(entry: JsonlMessageEntry): TranscriptLineKind | undefined {
+  if (isToolResultOnlyMessage(entry)) return 'tool_result'
+  if (isTaskNotificationMessage(entry)) return 'task_notification'
+  if (entry.isCompactSummary) return 'compact_summary'
+  if ('isMeta' in entry && entry.isMeta) return 'injected'
+  const content = entry.message.content
+  const text = typeof content === 'string'
+    ? content
+    : content.map((block) => (block.type === 'text' ? block.text : '')).join('')
+  if (isSystemMessageText(text) || parseSignInMethodRequestMessage(text)) return 'system'
+  if (text.startsWith(INTERRUPT_PREFIX)) return 'interrupt'
+  if (parseCommandMessage(text)?.type === 'command-output') return 'command_output'
+  return undefined
+}
+
+function lineFacts(entry: JsonlMessageEntry | JsonlSystemEntry): Omit<TranscriptViewLine, 'role' | 'content'> {
+  const kind = entry.type === 'user' ? lineKind(entry) : undefined
+  const at = integrationTimestamp(entry.timestamp)
+  return {
+    ...(entry.uuid ? { id: entry.uuid } : {}),
+    ...(at ? { at } : {}),
+    ...(kind ? { kind } : {}),
+    ...(entry.forkedFrom ? { forked: true as const } : {}),
+  }
+}
+
 /**
  * Convert a JSONL message entry into a compact { role, content, spoken } shape.
  * Strips internal SDK fields. `content` is today's compact view (tool stubs
@@ -128,11 +189,12 @@ export function compactMessage(entry: JsonlMessageEntry | JsonlSystemEntry): Com
     const content = entry.subtype === 'compact_boundary'
       ? '[context compacted]'
       : `[system: ${entry.subtype ?? 'unknown'}]`
-    return { role: 'system', content, spoken: content }
+    return { role: 'system', ...lineFacts(entry), content, spoken: content }
   }
   const msg = entry.message
+  const facts = lineFacts(entry)
   if (typeof msg.content === 'string') {
-    return { role: entry.type, content: msg.content, spoken: msg.content }
+    return { role: entry.type, ...facts, content: msg.content, spoken: msg.content }
   }
   const parts: string[] = []
   const spokenParts: string[] = []
@@ -165,24 +227,24 @@ export function compactMessage(entry: JsonlMessageEntry | JsonlSystemEntry): Com
   }
   return {
     role: entry.type,
+    ...facts,
     content,
     spoken: spokenParts.join('\n').trim(),
     ...(firstToolName ? { toolName: firstToolName } : {}),
   }
 }
 
+const fullLine = ({ spoken: _spoken, ...line }: CompactedMessage): TranscriptViewLine => line
+const spokenLine = ({ spoken, toolName: _toolName, ...line }: CompactedMessage): TranscriptViewLine => ({ ...line, content: spoken })
+
 export function toTranscriptView(
   compacted: CompactedMessage[],
   fullTranscript: boolean,
-): TranscriptMessage[] {
+): TranscriptViewLine[] {
   if (fullTranscript) {
-    return compacted.map(({ role, content, toolName }) => ({
-      role,
-      content,
-      ...(toolName ? { toolName } : {}),
-    }))
+    return compacted.map(fullLine)
   }
-  const out: TranscriptMessage[] = []
+  const out: TranscriptViewLine[] = []
   let pendingInternal = false
   for (const message of compacted) {
     if (message.spoken.length > 0) {
@@ -190,7 +252,7 @@ export function toTranscriptView(
         out.push(INTERNAL_STUB)
         pendingInternal = false
       }
-      out.push({ role: message.role, content: message.spoken })
+      out.push(spokenLine(message))
       continue
     }
     pendingInternal = true
@@ -213,10 +275,27 @@ export async function readTranscriptView(
   const compacted: CompactedMessage[] = []
   const deliveryLines: TranscriptEntry[] = []
   const deliveryCalls = new Set<string>()
+  const seen = new Set<string>()
+  let previousEntry: TranscriptEntry | undefined
   for await (const entry of entries) {
+    if (isDeliveryLine(entry, deliveryCalls)) deliveryLines.push(entry)
+    // A hook stop's user echo, by the app's rule (message-transform), checked before the replay drop.
+    if (
+      entry.type === 'system' && entry.subtype === 'informational' &&
+      previousEntry?.type === 'user' && previousEntry.message.content === entry.content
+    ) {
+      const echo = compacted.at(-1)
+      if (echo?.id === previousEntry.uuid) echo.kind = 'system'
+    }
+    previousEntry = entry
+    // Dropped as the app drops them: placeholder replies and replayed lines.
+    if (isSyntheticPlaceholderMessage(entry)) continue
+    if (entry.uuid) {
+      if (seen.has(entry.uuid)) continue
+      seen.add(entry.uuid)
+    }
     const message = compactMessage(entry)
     if (message) compacted.push(message)
-    if (isDeliveryLine(entry, deliveryCalls)) deliveryLines.push(entry)
   }
   const view = toTranscriptView(compacted, opts.fullTranscript === true)
   return {

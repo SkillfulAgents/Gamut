@@ -5,7 +5,7 @@ import { getSessionsResultSchema } from './host-response-schemas'
 
 export const getSessionsTool = tool(
   'get_agent_sessions',
-  `List the sessions of another agent in this workspace, newest first. Returns each session's id, name, last activity time, and whether it is currently running.
+  `List the sessions of another agent in this workspace, newest first. Returns each session's id, name, start and last activity times, how it started (its origin, with the agent's slug when an agent started it), and whether it is currently running.
 
 Returns up to 50 sessions by default. If more exist, the response includes a hint with the next offset to pass back in for the next page.
 
@@ -27,7 +27,8 @@ Use the returned session ID with get_session_transcript to read the conversation
       }
       const lines = data.sessions.map((s) => {
         const running = s.isRunning ? ' [running]' : ''
-        return `- ${s.id}${running} · ${s.name} · last ${s.lastActivityAt}`
+        const origin = s.origin ? ` · origin ${s.origin}${s.invokedBy ? ` ${s.invokedBy}` : ''}` : ''
+        return `- ${s.id}${running} · ${JSON.stringify(s.name)} · started ${s.createdAt} · last ${s.lastActivityAt}${origin}`
       })
       const shown = data.offset + data.sessions.length
       const header = `Sessions for "${args.slug}" (${data.sessions.length} of ${data.total}):`
