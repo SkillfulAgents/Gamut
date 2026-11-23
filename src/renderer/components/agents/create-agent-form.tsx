@@ -39,6 +39,7 @@ import { DREAM_SETUP_PROMPT } from '@shared/lib/skillset-provider/dream-skill'
 import { DEFAULT_PUBLIC_SKILLSET } from '@shared/lib/skillset-provider/default-public-skillset'
 import type { ApiAgent, ApiAgentTemplateInstallResult, ApiDiscoverableAgent } from '@shared/lib/types/api'
 import type { CreateAgentSurface } from '@renderer/router/search-schemas'
+import { AgentDefaultFooter } from '@renderer/components/messages/agent-default-footer'
 import type { RuntimeOptions } from '@shared/lib/container/runtime-options'
 
 /**
@@ -571,7 +572,15 @@ export function CreateAgentForm({ header, onAgentCreated, onNavigateAway, surfac
           dataTestId="create-agent-prompt"
           textareaClassName={namedFlow ? 'min-h-[80px] sm:min-h-[60px]' : 'min-h-[60px] sm:min-h-[40px]'}
           leftActions={(
-            <ComposerOptions state={composerOptions} disabled={isDisabled} size="sm" />
+            <ComposerOptions
+              state={composerOptions}
+              disabled={isDisabled}
+              size="sm"
+              // Only the named flow has an agent yet; agent home would leave the wizard.
+              footer={existingAgent
+                ? <AgentDefaultFooter agentSlug={existingAgent.slug} state={composerOptions} agentHomeLink={false} />
+                : undefined}
+            />
           )}
           rightActions={(
             <>

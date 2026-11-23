@@ -113,7 +113,7 @@ A service needs no `stop()` just to clear a timer, since the manager owns those.
 | Service | Scheduled work | Starts |
 | -- | -- | -- |
 | `webhook-relay` | Tick (30 s while online), each consumer's retry, the ack retry | eager, critical |
-| `container-host` | Status sync (300 s), health check (30 s). Initializes the agents and watches the relay | eager, critical |
+| `container-host` | None: wakes every agent's actor, which reads its container, and watches the relay | eager, critical |
 | `platform-notifications` | JWT refresh or reconnect (50 min) | background, startup slot |
 | `agent-integrations` | Health check (5 min), a chat's stream restore (30 s after a failure), the delivery pump's wakeups | background, startup slot |
 | `container-image` | None: pulls or checks the image | background, startup slot |
@@ -134,9 +134,9 @@ The stale-upload sweep (`src/shared/lib/utils/chunked-upload.ts`) is a task with
 
 A local agent's session index stores its recorded activity on a `session-index.store-activity` wakeup (`src/shared/lib/agent-actor/session-activity-wakeup.ts`), also a task with no service: it registers itself the first time an index sets one, and is set 5 s after a write the index has not stored. It asks `taskManager().accepts()` first: once dispatch has stopped the wakeup would be taken and dropped, so the index stores the write itself. See [session-index.md](session-index.md#last-activity).
 
-**A pass that must not count as running.** The integration and container health checks start their work and return, rather than being awaited. A connect that hangs holds up only its own integration (`reconcilingIds`), and a runtime that hangs on one agent holds up only that pass; if the manager saw a pass as running, it would skip all the later ones. Reach for this only when later passes are safe to run alongside a stuck one.
+**A pass that must not count as running.** The integration health check starts its work and returns, rather than being awaited. A connect that hangs holds up only its own integration (`reconcilingIds`); if the manager saw a pass as running, it would skip all the later ones. Reach for this only when later passes are safe to run alongside a stuck one.
 
-**Left where they are.** Browser profile maintenance is going away and is not migrated. An agent's auto-sleep is its `IdleAlarm`. Transport heartbeats, request-local timeouts, typing indicators and renderer timers are not background jobs. Neither is the wait between the follow-up passes of a reconnect after system resume (`reconnectAll`), which is one pass in progress.
+**Left where they are.** Browser profile maintenance is going away and is not migrated. An agent's auto-sleep is its `IdleAlarm`, and its container checks are its `ContainerWatch` (`src/shared/lib/container/container-watch.ts`): the agent's actor owns both. Everything about auto-sleep is in the alarm: activity only moves the container's clock, and the alarm waits for one wake-up, set when the container comes up, then reads the timeout and either sleeps the container or waits for when it would be idle. Nothing outside the actor reads the timeout or re-arms the alarm, so a changed timeout applies at each agent's next wake-up (or, when auto-sleep was off, at its next start or status check). The wake-up is the actor's own: `LocalAgentActor` uses a timer of this process, and an actor that outlives its process overrides `wakeToCheckIdleAt` and `cancelIdleWake` with a wake-up that does too, and runs `checkIdle()` when it goes off. The watch waits on this process's timers. The watch reads whether the container runs when the actor is made and then every 300 s, until a later pass confirms the container stopped (a start turns it back on, also one that failed), and its health every 30 s while it is seen running; each kind runs at most 4 checks at once across the process's agents. Transport heartbeats, request-local timeouts, typing indicators and renderer timers are not background jobs. Neither is the wait between the follow-up passes of a reconnect after system resume (`reconnectAll`), which is one pass in progress.
 
 ## Scheduled tasks
 

@@ -54,12 +54,15 @@ class ReleasedAtShutdown implements Service {
   constructor(readonly id: string, readonly stop: () => void | Promise<void>) {}
 }
 
-/** Brings up the agents' containers once boot knows the agents, and keeps watch on them. */
+/**
+ * Wakes every agent's actor once boot knows the agents, so each reads its
+ * container and sees one still running from before this launch. From then on
+ * each actor watches its own.
+ */
 class ContainerHostService implements Service {
   readonly id = 'container-host'
   readonly phase = 'eager' as const
   readonly critical = true
-  readonly tasks = containerHost.tasks
 
   async start(): Promise<void> {
     await containerHost.initializeAgents(discoveredAgentSlugs)
@@ -75,15 +78,11 @@ class ContainerHostService implements Service {
         await provider.stop(agentId)
       }
     }
-    containerHost.startStatusSync()
-    containerHost.startHealthMonitor()
   }
 
   stop(): void {
     stopWatchingWebhookRelay?.()
     stopWatchingWebhookRelay = null
-    containerHost.stopStatusSync()
-    containerHost.stopHealthMonitor()
   }
 }
 

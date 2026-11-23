@@ -9,7 +9,7 @@ import { useElapsedTimer } from '@renderer/hooks/use-elapsed-timer'
 import { useAgent } from '@renderer/hooks/use-agents'
 import { usePendingUserRequests } from '@shared/lib/tools/requests/use-pending-user-requests'
 import { apiFetch } from '@renderer/lib/api'
-import { labelBackgroundTasks } from '@renderer/lib/background-task-label'
+import { useSessionBackgroundTasks } from '@renderer/context/session-background-tasks-context'
 import { resolveProviderError } from '@renderer/components/provider-error/provider-error-registry'
 import { isProviderFacingError } from '@shared/lib/types/api'
 import { isTurnStartingUserMessage } from './pending-message'
@@ -30,11 +30,11 @@ interface AgentActivityIndicatorProps {
 export function AgentActivityIndicator({ sessionId, agentSlug }: AgentActivityIndicatorProps) {
   const {
     isActive, error, apiErrorCode, errorPresentation, activeStartTime, isCompacting,
-    apiRetry, computerUseApp, computerUseAppIcon, backgroundTasks,
+    apiRetry, computerUseApp, computerUseAppIcon,
     isThinking,
   } = useMessageStream(sessionId, agentSlug, [
     'isActive', 'error', 'apiErrorCode', 'errorPresentation', 'activeStartTime', 'isCompacting',
-    'apiRetry', 'computerUseApp', 'computerUseAppIcon', 'backgroundTasks', 'isThinking',
+    'apiRetry', 'computerUseApp', 'computerUseAppIcon', 'isThinking',
   ])
   const { data: pendingUserRequests } = usePendingUserRequests(agentSlug, sessionId)
   const { data: agent } = useAgent(agentSlug)
@@ -110,12 +110,7 @@ export function AgentActivityIndicator({ sessionId, agentSlug }: AgentActivityIn
     progressSummary: entry.waitingForChildren || (entry.backgroundRunning && entry.isCompleted) ? 'background work still running' : entry.activeSubagent?.progressSummary ?? null,
   }))
 
-  // Name each background task after the tool call that launched it (the
-  // command, the subagent's description) so the rows say what would be stopped.
-  const labeledBackgroundTasks = useMemo(
-    () => labelBackgroundTasks(backgroundTasks, messages),
-    [backgroundTasks, messages]
-  )
+  const tasks = useSessionBackgroundTasks()
 
   // Derive the todo/task list from TaskCreate/TaskUpdate (newer SDK) or fall back
   // to TodoWrite (older SDK). Memoized on [messages] so it doesn't re-scan the
@@ -180,7 +175,7 @@ export function AgentActivityIndicator({ sessionId, agentSlug }: AgentActivityIn
       } : undefined}
       subagents={subagentRows}
       onOpenSubagent={tray ? item => tray.openUtility('subagents', item.id) : undefined}
-      backgroundTasks={labeledBackgroundTasks}
+      backgroundTasks={tasks?.running}
       todos={todos}
       onStopTask={handleStopTask}
     />

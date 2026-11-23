@@ -1,7 +1,10 @@
 import pLimit from 'p-limit'
 import { readSessionToolHistory } from '@shared/lib/services/session-tool-history'
 import type { containerHost } from '@shared/lib/container/container-host'
-import { processIdleTimer, type IdleTimer } from '@shared/lib/container/idle-alarm'
+import { autoSleepTimeoutMsFrom } from '@shared/lib/container/idle-alarm'
+import { processTimer } from '@shared/lib/container/process-timer'
+import { getSettings } from '@shared/lib/config/settings'
+import type { ContainerRuntime } from '@shared/lib/container/container-runtime'
 import type { userInputRequestManager } from '@shared/lib/tools/requests/request-manager'
 import type { reviewManager } from '@shared/lib/proxy/review-manager'
 import type { accountReauthManager } from '@shared/lib/proxy/account-reauth-manager'
@@ -31,6 +34,7 @@ import { createAgentState, releaseAgentState, releaseSessionState, settleStopped
 import { createLocalSessionStore } from './local-session-store'
 import { exportSessionMetadata, ingestSessionMetadataFile } from '@shared/lib/services/session-metadata-file'
 import { transcriptPath, type SessionStore } from './session-store'
+import { readSessionContext } from './session-context'
 import { sessionEvents, sessionFrames } from './session-streams'
 import type { UserInputRequestOutcome } from '@shared/lib/tools/requests/request-schema'
 import type {
@@ -62,8 +66,8 @@ import type {
  *
  * Every op reads its dependency from `deps` at call time, never at
  * construction, so a dependency is only touched by the call that uses it.
- * The container host hands out this agent's `ContainerRuntime`, which holds
- * the client and every cached fact about the container.
+ * The container host makes this agent's `ContainerRuntime`, which holds the
+ * client and every cached fact about the container; the agent's state keeps it.
  *
  * The user-input, review, re-auth and computer-use managers are routers over
  * state the actors own: the registry hands them the way to every actor's stores.
@@ -86,11 +90,6 @@ export interface LocalActorDeps {
   readonly loadSessionUsageTotals: typeof loadSessionUsageTotals
   /** The host this agent asks for host tools, machine work and side effects. */
   readonly host: HostPort
-  /**
-   * What the agent's idle alarm waits with, for a deployment whose process
-   * can end while the container runs. Absent: this process's timer.
-   */
-  readonly idleTimer?: (slug: AgentSlug) => IdleTimer
 }
 
 // Dev-only capture of the sessions' frames for fixture replays: one per
@@ -137,6 +136,14 @@ export class LocalAgentActor implements AgentActor {
    * computer-use grants. Created with the handle and released by `dispose`.
    */
   readonly state: AgentState
+  /**
+   * The actor's first read of its container, begun when the actor is made:
+   * until it lands, the actor does not know whether its container runs. A
+   * handle that adopts state an earlier one made has nothing to read.
+   */
+  readonly firstRead: Promise<void>
+  /** What wakes this actor to check whether its container is idle: a timer of this process (see `wakeToCheckIdleAt`). */
+  private readonly idleWake = processTimer()
 
   /**
    * `state` is given when the handle is wrapping state that outlived an
@@ -148,26 +155,37 @@ export class LocalAgentActor implements AgentActor {
     // container's idle clock learns of session activity — the live sessions'
     // stream frames, the transcript appends and `sessions.recordActivity`
     // all record through it.
+    const runtime = () => this.state.runtime()
     this.state =
       state ??
       createAgentState(slug, {
         sessions: {
           store: createLocalSessionStore(slug, deps, {
-            onActivity: (at) => deps.containerHost.runtime(slug).noteSessionActivity(at),
+            onActivity: (at) => runtime().noteSessionActivity(at),
           }),
           host: deps.host,
-          runtime: createSessionsRuntime(slug, deps),
+          runtime: createSessionsRuntime(slug, runtime),
           capture: subagentCapture,
         },
-        idle: createIdleAlarmHooks(slug, deps),
+        idle: {
+          // The setting, read by the actor itself at every decision.
+          timeoutMs: async () => autoSleepTimeoutMsFrom(await getSettings()),
+          lastActivityAt: () => runtime().sleepableSince(),
+          sleep: (timeoutMs) => runtime().sleepIdle(timeoutMs),
+          wakeAt: (at) => this.wakeToCheckIdleAt(at),
+          cancelWake: () => this.cancelIdleWake(),
+        },
+        watch: createContainerWatchHooks(slug, () => this.state),
+        runtime: (agent) => deps.containerHost.createRuntime(slug, agent),
       })
+    this.firstRead = state ? Promise.resolve() : this.state.containerWatch.readNow()
     this.store = this.state.store
     this.files = this.store.files
     this.memories = createMemoryOps(this.store.files)
     this.config = this.store.config
     this.live = async () => liveSummary(slug, this.state, deps)
-    this.container = createContainerOps(slug, deps)
-    const delivery = createSessionDelivery(slug, this.store, this.state.sessions, deps)
+    this.container = createContainerOps(slug, runtime, deps)
+    const delivery = createSessionDelivery(slug, this.store, this.state.sessions, runtime, deps)
     this.sessions = createSessionOps(slug, this.store, this.state, delivery, deps)
     this.messages = createMessageOps(slug, this.store, this.state, delivery, deps)
     this.inputs = createInputOps(slug, this.state, deps)
@@ -189,25 +207,79 @@ export class LocalAgentActor implements AgentActor {
     })
   }
 
+  /**
+   * Decides whether the container sleeps now: what this actor's idle wake-up
+   * runs when it goes off. The idle alarm sleeps the container, or sets the
+   * next wake-up.
+   */
+  checkIdle(): Promise<void> {
+    return this.state.idleAlarm.fire()
+  }
+
+  /**
+   * Has `checkIdle()` run at `at` (epoch ms), in place of any wake-up set
+   * before. Here that is a timer of this process, which is all an actor that
+   * lives and dies with its process needs. An actor that outlives its process
+   * overrides this and `cancelIdleWake` with a wake-up that does too (a
+   * Durable Object, with its own alarm), and runs `checkIdle()` when it goes off.
+   */
+  protected wakeToCheckIdleAt(at: number): void {
+    this.idleWake.set(at - Date.now(), () => background(this.checkIdle(), { name: 'agent-actor.check-idle' }))
+  }
+
+  /** Drops the wake-up `wakeToCheckIdleAt` set, if any. */
+  protected cancelIdleWake(): void {
+    this.idleWake.clear()
+  }
+
   /** The registry is dropping this handle: release everything it owns. */
   dispose(): void {
     releaseAgentState(this.state)
   }
 }
 
-/** What the agent's idle alarm reads and does: the auto-sleep timeout, and the agent's container runtime. */
-function createIdleAlarmHooks(slug: AgentSlug, deps: LocalActorDeps): AgentStateHooks['idle'] {
-  const runtime = () => deps.containerHost.runtime(slug)
+/**
+ * What the agent's container watch checks: the agent's container runtime. A
+ * failed check is logged, and the next pass runs as usual. The status check
+ * ends once the runner confirms the container stopped (`isDefinitelyStopped`):
+ * a read that failed reads as stopped too, so until then it is read again. The
+ * actor's first read only reads: startup waits for every agent's first read,
+ * so the next pass confirms a stop. A start turns the checks back on.
+ */
+function createContainerWatchHooks(slug: AgentSlug, self: () => AgentState): AgentStateHooks['watch'] {
+  let firstRead = true
   return {
-    timeoutMs: () => deps.containerHost.autoSleepTimeoutMs(),
-    lastActivityAt: () => runtime().sleepableSince(),
-    sleep: (timeoutMs) => runtime().sleepIdle(timeoutMs),
-    timer: () => deps.idleTimer?.(slug) ?? processIdleTimer(),
+    checkHealth: async () => {
+      try {
+        await self().runtime().runHealthCheck()
+      } catch (error) {
+        console.error(`[ContainerWatch] Health check failed for ${slug}:`, error)
+      }
+    },
+    checkStatus: async () => {
+      const state = self()
+      const runtime = state.runtime()
+      const confirmsStop = !firstRead
+      firstRead = false
+      // A stop in flight sets the status itself.
+      if (runtime.isStopping()) return
+      const info = await runtime.syncAgentStatus().catch((error: unknown) => {
+        console.error(`[ContainerWatch] Failed to sync status for ${slug}:`, error)
+        runtime.markAsStopped()
+        return null
+      })
+      // Dropped during the read (the agent evicted): asking it for a client would make one and restart the watch.
+      if (state.peekRuntime() !== runtime) return
+      if (!info || info.status === 'running' || !confirmsStop) return
+      const confirmed = await runtime.getClient().then((client) => client.isDefinitelyStopped()).catch(() => false)
+      // Reading was an await: a start may have begun meanwhile, and it turns the checks back on.
+      if (confirmed && !runtime.isStarting() && runtime.getCachedInfo().status !== 'running') state.containerWatch.stop()
+    },
   }
 }
 
 function liveSummary(slug: AgentSlug, state: AgentState, deps: LocalActorDeps): AgentLiveSummary {
-  const runtime = deps.containerHost.runtime(slug)
+  const runtime = state.runtime()
   return {
     container: {
       ...runtime.getCachedInfo(),
@@ -224,8 +296,7 @@ function liveSummary(slug: AgentSlug, state: AgentState, deps: LocalActorDeps): 
   }
 }
 
-function createContainerOps(slug: AgentSlug, deps: LocalActorDeps): ContainerOps {
-  const runtime = () => deps.containerHost.runtime(slug)
+function createContainerOps(slug: AgentSlug, runtime: () => ContainerRuntime, deps: LocalActorDeps): ContainerOps {
   const client = () => runtime().getClient()
   return {
     start: async () => {
@@ -269,7 +340,7 @@ function createSessionOps(
   delivery: SessionDelivery,
   deps: LocalActorDeps,
 ): SessionOps {
-  const client = async () => deps.containerHost.runtime(slug).getClient()
+  const client = async () => state.runtime().getClient()
   const live = state.sessions
   // The container's CLI process rewrites the transcript on exit, so the container drops the session before the files go.
   const release = async (sessionId: string) => {
@@ -387,10 +458,14 @@ function createSessionOps(
     markActive: async (sessionId) => live.markActive(sessionId),
     markIdle: async (sessionId) => {
       // Going idle is the last moment the session was busy.
-      deps.containerHost.runtime(slug).noteSessionActivity()
+      state.runtime().noteSessionActivity()
       live.markIdle(sessionId)
     },
     stopTask: async (sessionId, taskId) => (await client()).stopTask(sessionId, taskId),
+    contextBreakdown: (sessionId, refresh) => readSessionContext(store, sessionId, refresh, async () => {
+      if (deps.containerHost.runtime(slug).getCachedInfo().status !== 'running') return { breakdown: null }
+      return (await client()).getContextBreakdown(sessionId)
+    }),
     waitForIdle: (sessionId, opts) => live.waitForIdle(sessionId, opts),
     broadcastUpdate: async (sessionId) => live.emit(sessionId, { type: 'session_updated' }),
     reconcileTranscript: async (sessionId, toolCalls) => live.reconcileTranscript(sessionId, toolCalls),
@@ -413,7 +488,7 @@ function createMessageOps(
   delivery: SessionDelivery,
   deps: LocalActorDeps,
 ): MessageOps {
-  const client = async () => deps.containerHost.runtime(slug).getClient()
+  const client = async () => state.runtime().getClient()
   const live = state.sessions
   return {
     deliver: (request) => delivery.deliver(request),
@@ -494,7 +569,7 @@ async function answerRequest(
   const claim = requests.claimRequest(id)
   if (!claim) return 'claimed'
   try {
-    const runtime = deps.containerHost.runtime(slug)
+    const runtime = state.runtime()
     await runtime.ensureRunning()
     // A decision on another surface settles the request without the claim.
     // Settled while the container started, the container has nothing parked:
@@ -568,8 +643,7 @@ function createComputerUseOps(state: AgentState, deps: LocalActorDeps): Computer
 }
 
 /** The agent's container runtime, as its live sessions reach it. */
-function createSessionsRuntime(slug: AgentSlug, deps: LocalActorDeps): SessionsRuntime {
-  const runtime = () => deps.containerHost.runtime(slug)
+function createSessionsRuntime(slug: AgentSlug, runtime: () => ContainerRuntime): SessionsRuntime {
   return {
     client: () => runtime().getClient(),
     fatalResult: (client, kind) => runtime().fatalResult(client, kind),

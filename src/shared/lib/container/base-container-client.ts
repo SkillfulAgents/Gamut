@@ -50,6 +50,7 @@ import { getPlatformProxyBaseUrl } from '../platform-auth/config'
 import { rewriteLoopbackForContainer } from '../llm-provider/container-url'
 import { runsInAppSandbox } from '../facts/capabilities'
 import { getServerFacts } from '../facts/server-facts'
+import { contextBreakdownResponseSchema, type RuntimeContext } from './context-breakdown-schema'
 import { dockerStoppedInspectSchema } from './container-stop-schema'
 
 /**
@@ -306,6 +307,10 @@ const HEALTH_PROBE_TIMEOUT_MS = 2000
 const WARM_SESSION_TIMEOUT_MS = 5000
 // Max wait for the container to drop a session. Its dispose gives the CLI 5 s to exit.
 const DELETE_SESSION_TIMEOUT_MS = 10000
+// Max time for one read of the container's state from the runtime CLI
+// (inspect, stats). The container watch runs these on a few slots shared by
+// every agent, so a read that hangs must give its slot back.
+const RUNTIME_READ_TIMEOUT_MS = 30_000
 
 // Reads stderr only: an exec error's message repeats the command line, flags included.
 export function refusedVolumeFlags(error: { stderr?: unknown } | null | undefined, flags: string): boolean {
@@ -554,6 +559,11 @@ export abstract class BaseContainerClient extends EventEmitter implements Contai
     return undefined
   }
 
+  /** Exec bound for a read of the container's state (inspect, stats). */
+  protected getRuntimeReadTimeoutMs(): number {
+    return RUNTIME_READ_TIMEOUT_MS
+  }
+
   /**
    * Whether a run failure is a host-port allocation race. The chosen port passed
    * findAvailablePort()'s pre-flight bind but was grabbed (or published on a
@@ -642,14 +652,15 @@ export abstract class BaseContainerClient extends EventEmitter implements Contai
 
   /**
    * Query the container runtime for the current container state.
-   * This spawns a CLI process - prefer the runtime's cached status (containerHost.runtime(slug).getCachedInfo()) instead.
+   * This spawns a CLI process - prefer the cached status the agent's runtime holds (`actor.container.status()`) instead.
    */
   async getInfoFromRuntime(): Promise<ContainerInfo> {
     const containerName = this.getContainerName()
     const runner = this.getRunnerShellCommand()
     try {
       const { stdout } = await execWithPath(
-        `${runner} inspect ${containerName}`
+        `${runner} inspect ${containerName}`,
+        { timeoutMs: this.getRuntimeReadTimeoutMs() },
       )
       const inspectData = JSON.parse(stdout.trim())
       const container = Array.isArray(inspectData) ? inspectData[0] : inspectData
@@ -687,7 +698,7 @@ export abstract class BaseContainerClient extends EventEmitter implements Contai
 
   /**
    * Alias for getInfoFromRuntime().
-   * @deprecated Use the runtime's cached status (containerHost.runtime(slug).getCachedInfo()) instead.
+   * @deprecated Use the cached status the agent's runtime holds (`actor.container.status()`) instead.
    */
   async getInfo(): Promise<ContainerInfo> {
     return this.getInfoFromRuntime()
@@ -719,7 +730,8 @@ export abstract class BaseContainerClient extends EventEmitter implements Contai
     const runner = this.getRunnerShellCommand()
     try {
       const { stdout } = await execWithPath(
-        `${runner} stats ${containerName} --no-stream --format ${shellQuote('{{json .}}')}`
+        `${runner} stats ${containerName} --no-stream --format ${shellQuote('{{json .}}')}`,
+        { timeoutMs: this.getRuntimeReadTimeoutMs() },
       )
       const stats = JSON.parse(stdout.trim())
 
@@ -1793,6 +1805,15 @@ export abstract class BaseContainerClient extends EventEmitter implements Contai
       return false
     }
     return true
+  }
+
+  async getContextBreakdown(sessionId: string): Promise<RuntimeContext> {
+    const response = await this.fetch(`/sessions/${encodeURIComponent(sessionId)}/context`, { method: 'GET' })
+    // A missing route on an older agent image and a non-resident session
+    // both mean that detailed usage is unavailable.
+    if (response.status === 404) return { breakdown: null }
+    if (!response.ok) throw new Error(`Context breakdown returned HTTP ${response.status}`)
+    return contextBreakdownResponseSchema.parse(await response.json())
   }
 
   async forkSession(sessionId: string): Promise<{ id: string } | null> {

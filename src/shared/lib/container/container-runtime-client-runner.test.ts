@@ -111,13 +111,14 @@ vi.mock('@shared/lib/services/mount-service', () => ({
 
 import { containerHost } from './container-host'
 import { createAgentRegistry } from '@shared/lib/agent-actor/registry'
-import type { LocalActorDeps } from '@shared/lib/agent-actor/local-agent-actor'
+import type { LocalActorDeps, LocalAgentActor } from '@shared/lib/agent-actor/local-agent-actor'
 
 // The agents' actors own their idle alarms; the registry hands the runtimes the way to them.
 const routers = { userInputRequestManager: {}, reviewManager: {}, accountReauthManager: {}, mcpReauthManager: {}, computerUsePermissionManager: {} }
-createAgentRegistry({ containerHost, ...routers } as unknown as LocalActorDeps)
-// A start reads no display name here.
-containerHost.attachAgentWorkspaces(null)
+const registry = createAgentRegistry({ containerHost, ...routers } as unknown as LocalActorDeps)
+// Each agent's actor holds its runtime.
+const actorOf = (slug: string) => registry.get(slug) as LocalAgentActor
+const agents = { runtime: (slug: string) => actorOf(slug).state.runtime(), drop: (slug: string) => actorOf(slug).state.dropRuntime() }
 
 const SLUG = 'agent-runner'
 
@@ -136,11 +137,11 @@ describe('ContainerRuntime client for the configured runner', () => {
     built.length = 0
     storedRunner = 'docker'
     readSettings.mockClear()
-    containerHost.dropRuntime(SLUG)
+    agents.drop(SLUG)
   })
 
   it('builds one client for the configured runner and keeps it while the runner stays', async () => {
-    const runtime = containerHost.runtime(SLUG)
+    const runtime = agents.runtime(SLUG)
     const first = await runtime.getClient()
     expect(await runtime.getClient()).toBe(first)
     expect(built.map((b) => b.runner)).toEqual(['docker'])
@@ -149,7 +150,7 @@ describe('ContainerRuntime client for the configured runner', () => {
   })
 
   it('replaces the client on its next use when the runner changed elsewhere', async () => {
-    const runtime = containerHost.runtime(SLUG)
+    const runtime = agents.runtime(SLUG)
     const docker = await runtime.getClient()
 
     storedRunner = 'podman'
@@ -161,7 +162,7 @@ describe('ContainerRuntime client for the configured runner', () => {
   })
 
   it('a slow read of the old runner never replaces the client a newer read built', async () => {
-    const runtime = containerHost.runtime(SLUG)
+    const runtime = agents.runtime(SLUG)
     await runtime.getClient()
 
     // The first read sees docker but lands late; the second sees podman.
@@ -180,7 +181,7 @@ describe('ContainerRuntime client for the configured runner', () => {
   })
 
   it('keeps the client of a running container through every use after the runner changed, until the container stops', async () => {
-    const runtime = containerHost.runtime(SLUG)
+    const runtime = agents.runtime(SLUG)
     const docker = await runtime.ensureRunning()
     const starter = built[0].client
 
@@ -202,7 +203,7 @@ describe('ContainerRuntime client for the configured runner', () => {
   })
 
   it('keeps the client of a running container without reading the runner: a change applies at the next start', async () => {
-    const runtime = containerHost.runtime(SLUG)
+    const runtime = agents.runtime(SLUG)
     const client = await runtime.ensureRunning()
     readSettings.mockClear()
 
@@ -223,7 +224,7 @@ describe('ContainerRuntime client for the configured runner', () => {
   })
 
   it('a start reads the settings once for itself, besides the runner and the idle alarm', async () => {
-    const runtime = containerHost.runtime(SLUG)
+    const runtime = agents.runtime(SLUG)
     readSettings.mockClear()
     await runtime.ensureRunning()
     // The runner (the container is not running yet), the start's own read,
@@ -234,35 +235,8 @@ describe('ContainerRuntime client for the configured runner', () => {
     }))
   })
 
-  it('a status sweep reads the settings once, however many agents it syncs', async () => {
-    const readsFor = async (count: number) => {
-      const slugs = Array.from({ length: count }, (_, i) => `sweep-${count}-${i}`)
-      await containerHost.initializeAgents(slugs)
-      // Some running, some not: a running one keeps its client, a stopped one too.
-      await containerHost.runtime(slugs[0]).ensureRunning()
-      readSettings.mockClear()
-      await containerHost.syncAllStatuses()
-      const reads = readSettings.mock.calls.length
-      for (const slug of slugs) containerHost.dropRuntime(slug)
-      return reads
-    }
-    const one = await readsFor(1)
-    expect(one).toBe(1)
-    expect(await readsFor(6)).toBe(one)
-  })
-
-  it('initializes every agent from one read of the runner', async () => {
-    readSettings.mockClear()
-    const slugs = ['init-a', 'init-b', 'init-c', 'init-d']
-    await containerHost.initializeAgents(slugs)
-    // One for the clients, shared with the sync that follows.
-    expect(readSettings).toHaveBeenCalledTimes(1)
-    expect(built.map((b) => b.runner)).toEqual(['docker', 'docker', 'docker', 'docker'])
-    for (const slug of slugs) containerHost.dropRuntime(slug)
-  })
-
   it('a stop goes through the client that started the container, even after the runner changed', async () => {
-    const runtime = containerHost.runtime(SLUG)
+    const runtime = agents.runtime(SLUG)
     await runtime.ensureRunning()
     const starter = built[0].client
 

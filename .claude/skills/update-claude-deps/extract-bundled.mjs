@@ -221,10 +221,22 @@ function runSandboxed(code, sandbox, entry) {
 }
 
 function extractWorkflow(entry) {
-  const start = text.indexOf(`var i="${entry.name}",e=i,`);
-  if (start < 0) fail(`no bundled workflow named "${entry.name}" in the binary (marker not found)`);
-  const { source } = chunkAt(start);
-  if (!/export\{\w+ as initBundledWorkflows\}\s*$/.test(source)) fail('bundled-workflows chunk does not end with `export{<fn> as initBundledWorkflows}` — the bundle layout changed');
+  // The name is the first `var` of its declaration. Up to 2.1.325 one chunk
+  // held every workflow (`var i="<name>",e=i,t="<description>",...`); 2.1.330
+  // gives each its own chunk (`var e="<name>",t="<description>",...`). Both
+  // end with `export{<fn> as initBundledWorkflows}`, which tells the workflow
+  // chunk apart from other code that names the same string.
+  const name = entry.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const hits = [...text.matchAll(new RegExp(`var [\\w$]+="${name}",[\\w$]+=`, 'g'))]
+    .map((m) => m.index)
+    .filter((at) => {
+      const exp = text.indexOf('export{', at);
+      const end = exp < 0 ? -1 : text.indexOf('}', exp);
+      return end >= 0 && /export\{\w+ as initBundledWorkflows\}$/.test(text.slice(exp, end + 1));
+    });
+  if (hits.length === 0) fail(`no bundled workflow named "${entry.name}" in the binary (no \`var x="${entry.name}",\` declaration in a chunk ending in initBundledWorkflows)`);
+  if (hits.length > 1) fail(`${hits.length} bundled-workflow chunks declare "${entry.name}" — the bundle layout changed`);
+  const { source } = chunkAt(hits[0]);
   const init = source.match(/export\{(\w+) as initBundledWorkflows\}/)[1];
   // The registration helper is a minified import whose name may contain `$`
   // (2.1.280: `q$r(`), so match beyond \w.

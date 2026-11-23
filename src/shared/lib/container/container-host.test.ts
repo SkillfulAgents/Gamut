@@ -194,14 +194,17 @@ vi.mock('@shared/lib/services/mount-service', () => ({
 }))
 
 import { containerHost } from './container-host'
+import { attachTestRuntimes } from './testing/test-runtimes'
+
+const agents = attachTestRuntimes(containerHost)
 import { IdleAlarm } from './idle-alarm'
-import { registerTasks } from '@shared/lib/background-work/testing/register-tasks'
+import { ContainerWatch } from './container-watch'
 
 describe('ContainerRuntime.ensureRunning — env var construction', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     // Clear internal state by dropping the runtime
-    containerHost.dropRuntime('test-agent')
+    agents.drop('test-agent')
     mockSettingsState.hostBrowserProvider = undefined
     mockSettingsState.containerBrowserHighDpi = false
 
@@ -213,7 +216,7 @@ describe('ContainerRuntime.ensureRunning — env var construction', () => {
     mockListVolumes.mockResolvedValue({ volumes: [], notMounted: [] })
 
     // Default: container not running
-    containerHost.runtime('test-agent').updateCachedStatus('stopped', null)
+    agents.runtime('test-agent').updateCachedStatus('stopped', null)
 
     // Mock start + sync
     mockStart.mockResolvedValue(undefined)
@@ -250,7 +253,7 @@ describe('ContainerRuntime.ensureRunning — env var construction', () => {
   it('sets PROXY_BASE_URL with correct format', async () => {
     setupAccountMocks([])
 
-    await containerHost.runtime('test-agent').ensureRunning()
+    await agents.runtime('test-agent').ensureRunning()
 
     expect(mockStart).toHaveBeenCalledOnce()
     const startOpts = mockStart.mock.calls[0][0]
@@ -263,10 +266,10 @@ describe('ContainerRuntime.ensureRunning — env var construction', () => {
     setupAccountMocks([])
     mockStart.mockResolvedValue({ status: 'running', port: 4567 })
 
-    await containerHost.runtime('test-agent').ensureRunning()
+    await agents.runtime('test-agent').ensureRunning()
 
     expect(mockGetInfoFromRuntime).not.toHaveBeenCalled()
-    expect(containerHost.runtime('test-agent').getCachedInfo()).toEqual({
+    expect(agents.runtime('test-agent').getCachedInfo()).toEqual({
       status: 'running',
       port: 4567,
     })
@@ -276,7 +279,7 @@ describe('ContainerRuntime.ensureRunning — env var construction', () => {
     setupAccountMocks([])
     mockGetOrCreateProxyToken.mockResolvedValue('custom-proxy-token')
 
-    await containerHost.runtime('test-agent').ensureRunning()
+    await agents.runtime('test-agent').ensureRunning()
 
     const startOpts = mockStart.mock.calls[0][0]
     expect(startOpts.envVars.PROXY_TOKEN).toBe('custom-proxy-token')
@@ -286,30 +289,33 @@ describe('ContainerRuntime.ensureRunning — env var construction', () => {
   it('sets SUPERAGENT_HOST_TOKEN so the container can authenticate host API calls', async () => {
     setupAccountMocks([])
 
-    await containerHost.runtime('test-agent').ensureRunning()
+    await agents.runtime('test-agent').ensureRunning()
 
     const startOpts = mockStart.mock.calls[0][0]
     expect(startOpts.envVars.SUPERAGENT_HOST_TOKEN).toBe('hostc_test-token')
     expect(mockGetOrCreateHostToken).toHaveBeenCalledWith('test-agent')
   })
 
-  describe('what a start takes from the agent workspace, through the attached access', () => {
+  describe('what a start takes from the agent workspace, through its actor', () => {
     const instructions = vi.fn<(slug: string) => Promise<string | null>>()
+    let previous: TestRuntimeParts
 
     beforeEach(() => {
       instructions.mockReset().mockResolvedValue(null)
-      containerHost.attachAgentWorkspaces({ instructions })
+      agents.drop('test-agent')
+      previous = agents.use((slug) => ({ ...previous(slug, () => agents.runtime(slug)), instructions: () => instructions(slug) }))
     })
 
     afterEach(() => {
-      containerHost.attachAgentWorkspaces(null)
+      agents.use(previous)
+      agents.drop('test-agent')
     })
 
     it('points a workspace that uses the host browser at the host', async () => {
       setupAccountMocks([])
       mockSettingsState.hostBrowserProvider = 'chrome'
 
-      await containerHost.runtime('test-agent').ensureRunning()
+      await agents.runtime('test-agent').ensureRunning()
 
       expect(mockStart.mock.calls[0][0].envVars.AGENT_BROWSER_USE_HOST).toBe('1')
     })
@@ -317,42 +323,35 @@ describe('ContainerRuntime.ensureRunning — env var construction', () => {
     it('asks for 2x rendering only when the setting is on and the agent uses the container browser', async () => {
       setupAccountMocks([])
       mockSettingsState.containerBrowserHighDpi = true
-      await containerHost.runtime('test-agent').ensureRunning()
+      await agents.runtime('test-agent').ensureRunning()
       expect(mockStart.mock.calls[0][0].envVars.BROWSER_HIGH_DPI).toBe('1')
 
-      containerHost.dropRuntime('test-agent')
+      agents.drop('test-agent')
       mockStart.mockClear()
       mockSettingsState.hostBrowserProvider = 'chrome'
-      await containerHost.runtime('test-agent').ensureRunning()
+      await agents.runtime('test-agent').ensureRunning()
       expect(mockStart.mock.calls[0][0].envVars.BROWSER_HIGH_DPI).toBeUndefined()
 
-      containerHost.dropRuntime('test-agent')
+      agents.drop('test-agent')
       mockStart.mockClear()
       mockSettingsState.hostBrowserProvider = undefined
       mockSettingsState.containerBrowserHighDpi = false
-      await containerHost.runtime('test-agent').ensureRunning()
+      await agents.runtime('test-agent').ensureRunning()
       expect(mockStart.mock.calls[0][0].envVars.BROWSER_HIGH_DPI).toBeUndefined()
     })
 
     it('hands the display name from the instructions to the start, and starts without one when reading fails', async () => {
       setupAccountMocks([])
       instructions.mockResolvedValue('---\nname: My Agent\n---\nBody')
-      await containerHost.runtime('test-agent').ensureRunning()
+      await agents.runtime('test-agent').ensureRunning()
       expect(instructions).toHaveBeenCalledWith('test-agent')
       expect(mockStart.mock.calls[0][0].agentName).toBe('My Agent')
 
-      containerHost.dropRuntime('test-agent')
+      agents.drop('test-agent')
       mockStart.mockClear()
       instructions.mockRejectedValue(new Error('workspace unreachable'))
-      await containerHost.runtime('test-agent').ensureRunning()
+      await agents.runtime('test-agent').ensureRunning()
       expect(mockStart).toHaveBeenCalledOnce()
-      expect(mockStart.mock.calls[0][0].agentName).toBeUndefined()
-    })
-
-    it('starts bare when no registry has attached the agent workspaces', async () => {
-      setupAccountMocks([])
-      containerHost.attachAgentWorkspaces(null)
-      await containerHost.runtime('test-agent').ensureRunning()
       expect(mockStart.mock.calls[0][0].agentName).toBeUndefined()
     })
   })
@@ -365,7 +364,7 @@ describe('ContainerRuntime.ensureRunning — env var construction', () => {
       { id: 'acc-4', toolkitSlug: 'github', displayName: 'My GH', status: 'expired', providerConnectionId: 'c4', providerName: 'composio' },
     ])
 
-    await containerHost.runtime('test-agent').ensureRunning()
+    await agents.runtime('test-agent').ensureRunning()
 
     const startOpts = mockStart.mock.calls[0][0]
     const metadata = JSON.parse(startOpts.envVars.CONNECTED_ACCOUNTS)
@@ -382,7 +381,7 @@ describe('ContainerRuntime.ensureRunning — env var construction', () => {
       { id: 'acc-1', toolkitSlug: 'gmail', displayName: 'user@gmail.com', status: 'active', providerConnectionId: 'c1', providerName: 'composio' },
     ])
 
-    await containerHost.runtime('test-agent').ensureRunning()
+    await agents.runtime('test-agent').ensureRunning()
 
     const startOpts = mockStart.mock.calls[0][0]
     const metadata = JSON.parse(startOpts.envVars.CONNECTED_ACCOUNTS)
@@ -393,7 +392,7 @@ describe('ContainerRuntime.ensureRunning — env var construction', () => {
   it('empty CONNECTED_ACCOUNTS ({}) when no accounts exist', async () => {
     setupAccountMocks([])
 
-    await containerHost.runtime('test-agent').ensureRunning()
+    await agents.runtime('test-agent').ensureRunning()
 
     const startOpts = mockStart.mock.calls[0][0]
     const metadata = JSON.parse(startOpts.envVars.CONNECTED_ACCOUNTS)
@@ -408,7 +407,7 @@ describe('ContainerRuntime.ensureRunning — env var construction', () => {
       { id: 'acc-4', toolkitSlug: 'notion', displayName: 'revoked-notion', status: 'revoked', providerConnectionId: 'c4', providerName: 'composio' },
     ])
 
-    await containerHost.runtime('test-agent').ensureRunning()
+    await agents.runtime('test-agent').ensureRunning()
 
     const startOpts = mockStart.mock.calls[0][0]
     const metadata = JSON.parse(startOpts.envVars.CONNECTED_ACCOUNTS)
@@ -443,7 +442,7 @@ describe('ContainerRuntime.ensureRunning — env var construction', () => {
       ],
     )
 
-    await containerHost.runtime('test-agent').ensureRunning()
+    await agents.runtime('test-agent').ensureRunning()
 
     const envVars = mockStart.mock.calls[0][0].envVars
     expect(JSON.parse(envVars.CONNECTED_ACCOUNTS)).toEqual({
@@ -463,7 +462,7 @@ describe('ContainerRuntime.ensureRunning — env var construction', () => {
   it('sets TZ env var from resolveTimezoneForAgent', async () => {
     setupAccountMocks([])
 
-    await containerHost.runtime('test-agent').ensureRunning()
+    await agents.runtime('test-agent').ensureRunning()
 
     const startOpts = mockStart.mock.calls[0][0]
     expect(startOpts.envVars.TZ).toBe('America/New_York')
@@ -472,7 +471,7 @@ describe('ContainerRuntime.ensureRunning — env var construction', () => {
   it('disables Claude Code attribution header injection for stable prompt caching', async () => {
     setupAccountMocks([])
 
-    await containerHost.runtime('test-agent').ensureRunning()
+    await agents.runtime('test-agent').ensureRunning()
 
     const startOpts = mockStart.mock.calls[0][0]
     expect(startOpts.envVars.CLAUDE_CODE_ATTRIBUTION_HEADER).toBe('0')
@@ -491,7 +490,7 @@ describe('ContainerRuntime.ensureRunning — mount volumes', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
-    containerHost.dropRuntime('test-agent')
+    agents.drop('test-agent')
     mockListVolumes.mockResolvedValue({ volumes: [], notMounted: [] })
     mockHealth.mockResolvedValue(null)
 
@@ -499,7 +498,7 @@ describe('ContainerRuntime.ensureRunning — mount volumes', () => {
     mockGetContainerHostUrl.mockReturnValue('127.0.0.1')
     mockGetAppPort.mockReturnValue(3000)
 
-    containerHost.runtime('test-agent').updateCachedStatus('stopped', null)
+    agents.runtime('test-agent').updateCachedStatus('stopped', null)
     mockStart.mockResolvedValue(undefined)
     mockGetInfoFromRuntime.mockResolvedValue({ status: 'running', port: 8080 })
 
@@ -511,13 +510,13 @@ describe('ContainerRuntime.ensureRunning — mount volumes', () => {
   })
 
   it('sends no volumes and reads no report when nothing is mounted', async () => {
-    await containerHost.runtime('test-agent').ensureRunning()
+    await agents.runtime('test-agent').ensureRunning()
 
     expect(mockStart.mock.calls[0][0].volumes).toEqual([])
     expect(mountWarnings()).toEqual([[]])
     expect(mockHealth).not.toHaveBeenCalled()
     mockStop.mockResolvedValueOnce({ forceStopUsed: false, stopped: true })
-    await containerHost.runtime('test-agent').stopContainer()
+    await agents.runtime('test-agent').stopContainer()
     expect(mockVolumeStop).not.toHaveBeenCalled()
   })
 
@@ -529,7 +528,7 @@ describe('ContainerRuntime.ensureRunning — mount volumes', () => {
     })
     mockHealth.mockResolvedValueOnce({ status: 'ok', volumes: ['m1'] })
 
-    await containerHost.runtime('test-agent').ensureRunning()
+    await agents.runtime('test-agent').ensureRunning()
 
     const opts = mockStart.mock.calls[0][0]
     expect(opts.volumes).toEqual([{ volumeId: 'm1', name: 'ok' }, { volumeId: 'm2', name: 'stuck' }])
@@ -546,7 +545,7 @@ describe('ContainerRuntime.ensureRunning — mount volumes', () => {
     mockFirstCopies.mockReturnValueOnce(new Promise<void>((resolve) => { copied = resolve }))
     mockListVolumes.mockResolvedValueOnce({ volumes: [], notMounted: [{ name: 'repo', reason }] })
       .mockResolvedValueOnce({ volumes: [{ volumeId: 'm1', name: 'repo' }], notMounted: [] })
-    const runtime = containerHost.runtime('test-agent')
+    const runtime = agents.runtime('test-agent')
 
     await runtime.ensureRunning()
     expect(mountWarnings()).toEqual([[{ name: 'repo', reason }]])
@@ -561,7 +560,7 @@ describe('ContainerRuntime.ensureRunning — mount volumes', () => {
     mockFirstCopies.mockResolvedValueOnce(undefined)
     mockListVolumes.mockResolvedValueOnce({ volumes: [], notMounted: [{ name: 'repo', reason: 'preparing' }] })
       .mockResolvedValueOnce({ volumes: [], notMounted: [{ name: 'repo', reason: 'preparing: GitHub is busy' }] })
-    const runtime = containerHost.runtime('test-agent')
+    const runtime = agents.runtime('test-agent')
 
     await runtime.ensureRunning()
     await vi.waitFor(() => expect(mockListVolumes).toHaveBeenCalledTimes(2))
@@ -576,7 +575,7 @@ describe('ContainerRuntime.ensureRunning — mount volumes', () => {
     mockListVolumes.mockResolvedValue({ volumes: [{ volumeId: 'm1', name: 'ok' }], notMounted: [{ name: 'gone', reason: 'not found' }] })
     answer()
 
-    await containerHost.runtime('test-agent').ensureRunning()
+    await agents.runtime('test-agent').ensureRunning()
 
     expect(mountWarnings()).toEqual([[{ name: 'gone', reason: 'not found' }, { name: 'ok', reason: 'not confirmed' }]])
   })
@@ -587,7 +586,7 @@ describe('ContainerRuntime.ensureRunning — mount volumes', () => {
     let answer: (report: unknown) => void = () => {}
     mockHealth.mockReturnValueOnce(new Promise((resolve) => { answer = resolve }))
     mockStop.mockResolvedValueOnce({ forceStopUsed: false, stopped: true })
-    const runtime = containerHost.runtime('test-agent')
+    const runtime = agents.runtime('test-agent')
 
     const first = runtime.ensureRunning()
     await vi.waitFor(() => expect(mockHealth).toHaveBeenCalled())
@@ -619,7 +618,7 @@ describe('ContainerRuntime.ensureRunning — mount volumes', () => {
       release = () => { during(options); resolve({ status: 'running', port: 3000 }) }
     }))
     mockStop.mockResolvedValueOnce({ forceStopUsed: false, stopped: true })
-    const runtime = containerHost.runtime('test-agent')
+    const runtime = agents.runtime('test-agent')
 
     const started = runtime.ensureRunning()
     await vi.waitFor(() => expect(mockStart).toHaveBeenCalled())
@@ -638,10 +637,11 @@ describe('ContainerRuntime.ensureRunning — mount volumes', () => {
     let answer: (report: unknown) => void = () => {}
     mockHealth.mockReturnValueOnce(new Promise((resolve) => { answer = resolve }))
     mockStop.mockResolvedValueOnce({ forceStopUsed: false, stopped: false })
-    const runtime = containerHost.runtime('test-agent')
     // The agent's alarm, as its actor would hold it.
-    const alarm = new IdleAlarm({ timeoutMs: async () => 30 * 60_000, lastActivityAt: () => runtime.sleepableSince(), isBusy: () => false, sleep: async () => {} })
-    containerHost.attachAgentIdleAlarms({ get: () => alarm, peek: () => alarm })
+    const alarm = new IdleAlarm({ timeoutMs: async () => 30 * 60_000, lastActivityAt: () => agents.runtime('test-agent').sleepableSince(), isBusy: () => false, sleep: async () => {}, wakeAt: () => {}, cancelWake: () => {} })
+    agents.drop('test-agent')
+    const previous: TestRuntimeParts = agents.use((slug, self) => ({ ...previous(slug, self), idleAlarm: alarm }))
+    const runtime = agents.runtime('test-agent')
 
     try {
       const started = runtime.ensureRunning()
@@ -652,8 +652,33 @@ describe('ContainerRuntime.ensureRunning — mount volumes', () => {
 
       await vi.waitFor(() => expect(alarm.isArmed()).toBe(true))
     } finally {
-      alarm.cancel()
-      containerHost.attachAgentIdleAlarms(null)
+      alarm.disarm()
+      agents.use(previous)
+      agents.drop('test-agent')
+    }
+  })
+
+  it('reads the status from the first client until the runtime is dropped, and checks health while it runs', async () => {
+    mockStop.mockResolvedValueOnce({ forceStopUsed: false, stopped: true })
+    // The agent's watch, as its actor would hold it.
+    const watch = new ContainerWatch({ checkHealth: async () => {}, checkStatus: async () => {} })
+    agents.drop('test-agent')
+    const previous: TestRuntimeParts = agents.use((slug, self) => ({ ...previous(slug, self), containerWatch: watch }))
+    const runtime = agents.runtime('test-agent')
+
+    try {
+      await runtime.ensureRunning()
+      expect(watch.isWatching()).toBe(true)
+      expect(watch.isCheckingHealth()).toBe(true)
+      await runtime.stopContainer()
+      expect(watch.isCheckingHealth()).toBe(false)
+      expect(watch.isWatching()).toBe(true)
+      agents.drop('test-agent')
+      expect(watch.isWatching()).toBe(false)
+    } finally {
+      watch.stop()
+      agents.use(previous)
+      agents.drop('test-agent')
     }
   })
 
@@ -674,9 +699,9 @@ describe('ContainerRuntime.ensureRunning — mount volumes', () => {
     mockListVolumes.mockResolvedValue({ volumes: [{ volumeId: 'm1', name: 'ok' }], notMounted: [] })
     const { reached, release } = hold()
 
-    const started = containerHost.runtime('test-agent').ensureRunning()
+    const started = agents.runtime('test-agent').ensureRunning()
     await vi.waitFor(reached)
-    containerHost.dropRuntime('test-agent')
+    agents.drop('test-agent')
     release()
     await started.catch(() => {})
 
@@ -692,7 +717,7 @@ describe('ContainerRuntime.ensureRunning — mount volumes', () => {
       return { status: 'running', port: 3000 }
     })
 
-    await containerHost.runtime('test-agent').ensureRunning()
+    await agents.runtime('test-agent').ensureRunning()
 
     expect(mockHealth).not.toHaveBeenCalled()
     expect(mountWarnings()).toEqual([])
@@ -706,7 +731,7 @@ describe('ContainerRuntime.ensureRunning — mount volumes', () => {
       return { status: 'running', port: 3000 }
     })
 
-    await containerHost.runtime('test-agent').ensureRunning()
+    await agents.runtime('test-agent').ensureRunning()
 
     expect(mountWarnings().at(-1)).toEqual([{ name: 'gone', reason: 'not found' }, { name: 'ok', reason: 'start failed with folders' }])
     expect(mockHealth).not.toHaveBeenCalled()
@@ -717,7 +742,7 @@ describe('ContainerRuntime.ensureRunning — mount volumes', () => {
     mockListVolumes.mockResolvedValue({ volumes: [{ volumeId: 'm1', name: 'ok' }], notMounted: [] })
     mockHealth.mockResolvedValueOnce({ status: 'ok', volumes: ['m1'] })
 
-    await containerHost.runtime('test-agent').ensureRunning()
+    await agents.runtime('test-agent').ensureRunning()
 
     expect(mockHealth).toHaveBeenCalled()
     expect(mountWarnings()).toEqual([[]])
@@ -727,7 +752,7 @@ describe('ContainerRuntime.ensureRunning — mount volumes', () => {
     mockVolumeRunFlags.mockReturnValueOnce(null)
     mockListVolumes.mockResolvedValue({ volumes: [{ volumeId: 'm1', name: 'ok' }], notMounted: [] })
 
-    await containerHost.runtime('test-agent').ensureRunning()
+    await agents.runtime('test-agent').ensureRunning()
 
     expect(mockStart.mock.calls[0][0].volumes).toEqual([])
     expect(mountWarnings()).toEqual([[{ name: 'ok', reason: 'not supported here' }]])
@@ -741,7 +766,7 @@ describe('ContainerRuntime.ensureRunning — mount volumes', () => {
 describe('ContainerRuntime.restartContainer', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    containerHost.dropRuntime('test-agent')
+    agents.drop('test-agent')
     mockListVolumes.mockResolvedValue({ volumes: [], notMounted: [] })
     mockGetOrCreateProxyToken.mockResolvedValue('token')
     mockGetContainerHostUrl.mockReturnValue('127.0.0.1')
@@ -753,13 +778,13 @@ describe('ContainerRuntime.restartContainer', () => {
   })
 
   it('calls stop then ensureRunning', async () => {
-    containerHost.runtime('test-agent').getClient()
-    containerHost.runtime('test-agent').updateCachedStatus('running', 4001)
+    agents.runtime('test-agent').getClient()
+    agents.runtime('test-agent').updateCachedStatus('running', 4001)
     mockStop.mockResolvedValue({ forceStopUsed: false })
     mockGetInfoFromRuntime.mockResolvedValue({ status: 'running', port: 4002 })
     mockStart.mockResolvedValue(undefined)
 
-    await containerHost.runtime('test-agent').restartContainer()
+    await agents.runtime('test-agent').restartContainer()
 
     expect(mockStop).toHaveBeenCalledOnce()
     expect(mockStart).toHaveBeenCalledOnce()
@@ -781,44 +806,44 @@ describe('ContainerRuntime — status caching', () => {
   })
 
   it('getCachedInfo returns stopped when agent has no cached status', () => {
-    const info = containerHost.runtime('unknown-agent').getCachedInfo()
+    const info = agents.runtime('unknown-agent').getCachedInfo()
     expect(info).toEqual({ status: 'stopped', port: null })
   })
 
   it('getCachedInfo returns cached status after updateCachedStatus', () => {
-    containerHost.runtime('agent-1').updateCachedStatus('running', 4001)
-    const info = containerHost.runtime('agent-1').getCachedInfo()
+    agents.runtime('agent-1').updateCachedStatus('running', 4001)
+    const info = agents.runtime('agent-1').getCachedInfo()
     expect(info).toEqual({ status: 'running', port: 4001 })
   })
 
   it('updateCachedStatus overwrites previous status', () => {
-    containerHost.runtime('agent-1').updateCachedStatus('running', 4001)
-    containerHost.runtime('agent-1').updateCachedStatus('stopped', null)
-    const info = containerHost.runtime('agent-1').getCachedInfo()
+    agents.runtime('agent-1').updateCachedStatus('running', 4001)
+    agents.runtime('agent-1').updateCachedStatus('stopped', null)
+    const info = agents.runtime('agent-1').getCachedInfo()
     expect(info).toEqual({ status: 'stopped', port: null })
   })
 
   it('markAsStopped sets status to stopped with null port', () => {
-    containerHost.runtime('agent-1').updateCachedStatus('running', 4001)
-    containerHost.runtime('agent-1').markAsStopped()
-    const info = containerHost.runtime('agent-1').getCachedInfo()
+    agents.runtime('agent-1').updateCachedStatus('running', 4001)
+    agents.runtime('agent-1').markAsStopped()
+    const info = agents.runtime('agent-1').getCachedInfo()
     expect(info).toEqual({ status: 'stopped', port: null })
   })
 
   it('clearRuntimes removes all cached statuses', () => {
-    containerHost.runtime('agent-1').updateCachedStatus('running', 4001)
-    containerHost.runtime('agent-2').updateCachedStatus('running', 4002)
+    agents.runtime('agent-1').updateCachedStatus('running', 4001)
+    agents.runtime('agent-2').updateCachedStatus('running', 4002)
     containerHost.clearRuntimes()
-    expect(containerHost.runtime('agent-1').getCachedInfo()).toEqual({ status: 'stopped', port: null })
-    expect(containerHost.runtime('agent-2').getCachedInfo()).toEqual({ status: 'stopped', port: null })
+    expect(agents.runtime('agent-1').getCachedInfo()).toEqual({ status: 'stopped', port: null })
+    expect(agents.runtime('agent-2').getCachedInfo()).toEqual({ status: 'stopped', port: null })
   })
 
   it('dropRuntime clears cache for specific agent only', () => {
-    containerHost.runtime('agent-1').updateCachedStatus('running', 4001)
-    containerHost.runtime('agent-2').updateCachedStatus('running', 4002)
-    containerHost.dropRuntime('agent-1')
-    expect(containerHost.runtime('agent-1').getCachedInfo()).toEqual({ status: 'stopped', port: null })
-    expect(containerHost.runtime('agent-2').getCachedInfo()).toEqual({ status: 'running', port: 4002 })
+    agents.runtime('agent-1').updateCachedStatus('running', 4001)
+    agents.runtime('agent-2').updateCachedStatus('running', 4002)
+    agents.drop('agent-1')
+    expect(agents.runtime('agent-1').getCachedInfo()).toEqual({ status: 'stopped', port: null })
+    expect(agents.runtime('agent-2').getCachedInfo()).toEqual({ status: 'running', port: 4002 })
   })
 })
 
@@ -829,7 +854,7 @@ describe('ContainerRuntime — status caching', () => {
 describe('ContainerRuntime.ensureRunning — cached running liveness TTL', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    containerHost.dropRuntime('test-agent')
+    agents.drop('test-agent')
 
     mockGetOrCreateProxyToken.mockResolvedValue('synth-token-123')
     mockGetContainerHostUrl.mockReturnValue('192.168.1.100')
@@ -850,9 +875,9 @@ describe('ContainerRuntime.ensureRunning — cached running liveness TTL', () =>
   })
 
   it('does not probe or restart when the cached running status is fresh', async () => {
-    containerHost.runtime('test-agent').updateCachedStatus('running', 4001)
+    agents.runtime('test-agent').updateCachedStatus('running', 4001)
 
-    await containerHost.runtime('test-agent').ensureRunning()
+    await agents.runtime('test-agent').ensureRunning()
 
     expect(mockIsHealthy).not.toHaveBeenCalled()
     expect(mockStart).not.toHaveBeenCalled()
@@ -860,28 +885,28 @@ describe('ContainerRuntime.ensureRunning — cached running liveness TTL', () =>
 
   it('re-probes once the cached running status ages past the TTL and keeps it when healthy', async () => {
     vi.useFakeTimers()
-    containerHost.runtime('test-agent').updateCachedStatus('running', 4001)
+    agents.runtime('test-agent').updateCachedStatus('running', 4001)
     mockIsHealthy.mockResolvedValue(true)
 
     // Age the cache past the 10s TTL
     vi.advanceTimersByTime(11_000)
 
-    await containerHost.runtime('test-agent').ensureRunning()
+    await agents.runtime('test-agent').ensureRunning()
 
     expect(mockIsHealthy).toHaveBeenCalledWith(4001)
     expect(mockStart).not.toHaveBeenCalled()
     // Cache stays 'running'
-    expect(containerHost.runtime('test-agent').getCachedInfo()).toEqual({ status: 'running', port: 4001 })
+    expect(agents.runtime('test-agent').getCachedInfo()).toEqual({ status: 'running', port: 4001 })
   })
 
   it('restarts when the stale cached running status fails the liveness probe', async () => {
     vi.useFakeTimers()
-    containerHost.runtime('test-agent').updateCachedStatus('running', 4001)
+    agents.runtime('test-agent').updateCachedStatus('running', 4001)
     mockIsHealthy.mockResolvedValue(false)
 
     vi.advanceTimersByTime(11_000)
 
-    await containerHost.runtime('test-agent').ensureRunning()
+    await agents.runtime('test-agent').ensureRunning()
 
     expect(mockIsHealthy).toHaveBeenCalledWith(4001)
     expect(mockStart).toHaveBeenCalledOnce()
@@ -903,26 +928,26 @@ describe('ContainerHost — hasRunningAgents / getRunningAgentIds', () => {
   })
 
   it('hasRunningAgents returns false when all agents are stopped', () => {
-    containerHost.runtime('agent-1').updateCachedStatus('stopped', null)
-    containerHost.runtime('agent-2').updateCachedStatus('stopped', null)
+    agents.runtime('agent-1').updateCachedStatus('stopped', null)
+    agents.runtime('agent-2').updateCachedStatus('stopped', null)
     expect(containerHost.hasRunningAgents()).toBe(false)
   })
 
   it('hasRunningAgents returns true when at least one agent is running', () => {
-    containerHost.runtime('agent-1').updateCachedStatus('stopped', null)
-    containerHost.runtime('agent-2').updateCachedStatus('running', 4002)
+    agents.runtime('agent-1').updateCachedStatus('stopped', null)
+    agents.runtime('agent-2').updateCachedStatus('running', 4002)
     expect(containerHost.hasRunningAgents()).toBe(true)
   })
 
   it('getRunningAgentIds returns empty array when none are running', () => {
-    containerHost.runtime('agent-1').updateCachedStatus('stopped', null)
+    agents.runtime('agent-1').updateCachedStatus('stopped', null)
     expect(containerHost.getRunningAgentIds()).toEqual([])
   })
 
   it('getRunningAgentIds returns only running agent IDs', () => {
-    containerHost.runtime('agent-1').updateCachedStatus('stopped', null)
-    containerHost.runtime('agent-2').updateCachedStatus('running', 4002)
-    containerHost.runtime('agent-3').updateCachedStatus('running', 4003)
+    agents.runtime('agent-1').updateCachedStatus('stopped', null)
+    agents.runtime('agent-2').updateCachedStatus('running', 4002)
+    agents.runtime('agent-3').updateCachedStatus('running', 4003)
     const running = containerHost.getRunningAgentIds()
     expect(running).toHaveLength(2)
     expect(running).toContain('agent-2')
@@ -930,10 +955,10 @@ describe('ContainerHost — hasRunningAgents / getRunningAgentIds', () => {
   })
 
   it('getRunningAgentIds reflects status changes', () => {
-    containerHost.runtime('agent-1').updateCachedStatus('running', 4001)
+    agents.runtime('agent-1').updateCachedStatus('running', 4001)
     expect(containerHost.getRunningAgentIds()).toContain('agent-1')
 
-    containerHost.runtime('agent-1').markAsStopped()
+    agents.runtime('agent-1').markAsStopped()
     expect(containerHost.getRunningAgentIds()).not.toContain('agent-1')
   })
 })
@@ -965,24 +990,24 @@ describe('ContainerHost.clearRuntimes', () => {
     let finishStart!: () => void
     mockStart.mockReturnValue(new Promise<void>((resolve) => { finishStart = resolve }))
     mockGetInfoFromRuntime.mockResolvedValue({ status: 'running', port: 4001 })
-    const runtime = containerHost.runtime('agent-1')
+    const runtime = agents.runtime('agent-1')
     const started = runtime.ensureRunning()
     await vi.waitFor(() => expect(mockStart).toHaveBeenCalledOnce())
 
     containerHost.clearRuntimes()
 
-    expect(containerHost.peekRuntime('agent-1')).toBe(runtime)
+    expect(agents.peek('agent-1')).toBe(runtime)
     finishStart()
     await started
     expect(containerHost.hasRunningAgents()).toBe(true)
-    expect(containerHost.runtime('agent-1').getCachedInfo()).toEqual({ status: 'running', port: 4001 })
+    expect(agents.runtime('agent-1').getCachedInfo()).toEqual({ status: 'running', port: 4001 })
   })
 
   it('drops the kept runtime\'s client so the next one is built for the new runner', async () => {
     let finishStart!: () => void
     mockStart.mockReturnValue(new Promise<void>((resolve) => { finishStart = resolve }))
     mockGetInfoFromRuntime.mockResolvedValue({ status: 'running', port: 4001 })
-    const runtime = containerHost.runtime('agent-1')
+    const runtime = agents.runtime('agent-1')
     const started = runtime.ensureRunning()
     await vi.waitFor(() => expect(mockStart).toHaveBeenCalledOnce())
 
@@ -995,12 +1020,12 @@ describe('ContainerHost.clearRuntimes', () => {
   })
 
   it('drops a runtime whose container is not starting (control)', () => {
-    const runtime = containerHost.runtime('agent-1')
+    const runtime = agents.runtime('agent-1')
     runtime.updateCachedStatus('running', 4001)
 
     containerHost.clearRuntimes()
 
-    expect(containerHost.peekRuntime('agent-1')).toBeUndefined()
+    expect(agents.peek('agent-1')).toBeUndefined()
     expect(containerHost.hasRunningAgents()).toBe(false)
   })
 })
@@ -1010,15 +1035,16 @@ describe('ContainerHost.clearRuntimes', () => {
 // ============================================================================
 
 import { healthMonitor } from './health-monitor'
-import { NO_LIVE_SESSIONS } from './agent-sessions-access'
+import { NO_LIVE_SESSIONS, type TestRuntimeParts } from './testing/test-runtimes'
+import type { RuntimeSessions } from './agent-sessions-access'
 import { globalFeed } from '@shared/lib/notifications/global-feed'
 
 // The agents' live sessions, as the runtimes mark them when a container stops:
 // every agent's marks land on one mock, under the agent's slug.
 const markAllInactive = vi.fn()
-containerHost.attachAgentSessions({
-  peek: (slug) => ({ ...NO_LIVE_SESSIONS, markAllInactive: (...args) => markAllInactive(slug, ...args) }),
-})
+agents.use((slug) => ({
+  sessions: { ...NO_LIVE_SESSIONS, markAllInactive: (...args: Parameters<RuntimeSessions['markAllInactive']>) => markAllInactive(slug, ...args) },
+}))
 
 describe('ContainerRuntime — health warnings', () => {
   beforeEach(() => {
@@ -1027,19 +1053,19 @@ describe('ContainerRuntime — health warnings', () => {
   })
 
   it('getHealthWarnings returns empty array for unknown agent', () => {
-    expect(containerHost.runtime('unknown').getHealthWarnings()).toEqual([])
+    expect(agents.runtime('unknown').getHealthWarnings()).toEqual([])
   })
 
   it('getHealthWarnings returns empty array after clearRuntimes', () => {
     // We can't directly set healthWarnings, but clearRuntimes clears them
     containerHost.clearRuntimes()
-    expect(containerHost.runtime('any-agent').getHealthWarnings()).toEqual([])
+    expect(agents.runtime('any-agent').getHealthWarnings()).toEqual([])
   })
 
   it('dropRuntime clears health warnings for that agent', () => {
     // Create a client first (so it registers internally)
-    containerHost.runtime('health-agent').getClient()
-    containerHost.runtime('health-agent').updateCachedStatus('running', 4001)
+    agents.runtime('health-agent').getClient()
+    agents.runtime('health-agent').updateCachedStatus('running', 4001)
 
     // Run health checks with a warning
     const mockWarning = { checkName: 'memory', status: 'warning' as const, message: 'High mem' }
@@ -1051,8 +1077,8 @@ describe('ContainerRuntime — health warnings', () => {
       cpuPercent: 50,
     })
 
-    containerHost.dropRuntime('health-agent')
-    expect(containerHost.runtime('health-agent').getHealthWarnings()).toEqual([])
+    agents.drop('health-agent')
+    expect(agents.runtime('health-agent').getHealthWarnings()).toEqual([])
   })
 })
 
@@ -1434,24 +1460,24 @@ describe('ContainerRuntime.syncAgentStatus', () => {
   })
 
   it('updates cached status from runtime', async () => {
-    containerHost.runtime('sync-agent').getClient()
-    containerHost.runtime('sync-agent').updateCachedStatus('stopped', null)
+    agents.runtime('sync-agent').getClient()
+    agents.runtime('sync-agent').updateCachedStatus('stopped', null)
     mockGetInfoFromRuntime.mockResolvedValue({ status: 'running', port: 4005 })
 
-    await containerHost.runtime('sync-agent').syncAgentStatus()
+    await agents.runtime('sync-agent').syncAgentStatus()
 
-    expect(containerHost.runtime('sync-agent').getCachedInfo()).toEqual({
+    expect(agents.runtime('sync-agent').getCachedInfo()).toEqual({
       status: 'running',
       port: 4005,
     })
   })
 
   it('broadcasts status change when runtime status differs from cache', async () => {
-    containerHost.runtime('sync-agent').getClient()
-    containerHost.runtime('sync-agent').updateCachedStatus('running', 4005)
+    agents.runtime('sync-agent').getClient()
+    agents.runtime('sync-agent').updateCachedStatus('running', 4005)
     mockGetInfoFromRuntime.mockResolvedValue({ status: 'stopped', port: null })
 
-    await containerHost.runtime('sync-agent').syncAgentStatus()
+    await agents.runtime('sync-agent').syncAgentStatus()
 
     expect(globalFeed.publish).toHaveBeenCalledWith({
       type: 'agent_status_changed',
@@ -1461,48 +1487,30 @@ describe('ContainerRuntime.syncAgentStatus', () => {
   })
 
   it('does not broadcast when status has not changed', async () => {
-    containerHost.runtime('sync-agent').getClient()
-    containerHost.runtime('sync-agent').updateCachedStatus('running', 4005)
+    agents.runtime('sync-agent').getClient()
+    agents.runtime('sync-agent').updateCachedStatus('running', 4005)
     mockGetInfoFromRuntime.mockResolvedValue({ status: 'running', port: 4005 })
 
-    await containerHost.runtime('sync-agent').syncAgentStatus()
+    await agents.runtime('sync-agent').syncAgentStatus()
 
     expect(globalFeed.publish).not.toHaveBeenCalled()
   })
 
-  it('syncs every agent with at most four runner calls at once', async () => {
-    const slugs = ['sync-1', 'sync-2', 'sync-3', 'sync-4', 'sync-5', 'sync-6']
-    for (const slug of slugs) await containerHost.runtime(slug).getClient()
-    let active = 0
-    let peak = 0
-    const waiting: Array<() => void> = []
-    mockGetInfoFromRuntime.mockImplementation(async () => {
-      active++
-      peak = Math.max(peak, active)
-      await new Promise<void>((resolve) => waiting.push(resolve))
-      active--
-      return { status: 'running', port: 4005 }
-    })
+  it('wakes every agent at startup, and waits until each has read its container', async () => {
+    mockGetInfoFromRuntime.mockResolvedValue({ status: 'running', port: 4005 })
 
-    const sync = containerHost.syncAllStatuses()
-    await vi.waitFor(() => expect(waiting).toHaveLength(4))
-    while (waiting.length > 0) {
-      waiting.shift()!()
-      await new Promise((resolve) => setImmediate(resolve))
-    }
-    await sync
+    await containerHost.initializeAgents(['wake-1', 'wake-2'])
 
-    expect(peak).toBe(4)
-    expect(mockGetInfoFromRuntime).toHaveBeenCalledTimes(6)
-    for (const slug of slugs) expect(containerHost.runtime(slug).getCachedInfo()?.status).toBe('running')
+    for (const slug of ['wake-1', 'wake-2']) expect(agents.peek(slug)?.getCachedInfo()).toEqual({ status: 'running', port: 4005 })
+    expect(containerHost.getRunningAgentIds().sort()).toEqual(['wake-1', 'wake-2'])
   })
 
   it('marks sessions inactive when container transitions to stopped', async () => {
-    containerHost.runtime('sync-agent').getClient()
-    containerHost.runtime('sync-agent').updateCachedStatus('running', 4005)
+    agents.runtime('sync-agent').getClient()
+    agents.runtime('sync-agent').updateCachedStatus('running', 4005)
     mockGetInfoFromRuntime.mockResolvedValue({ status: 'stopped', port: null })
 
-    await containerHost.runtime('sync-agent').syncAgentStatus()
+    await agents.runtime('sync-agent').syncAgentStatus()
 
     expect(markAllInactive).toHaveBeenCalledWith('sync-agent')
   })
@@ -1631,10 +1639,10 @@ describe('ContainerHost.stopAll', () => {
   })
 
   it('stops all containers and clears state', async () => {
-    containerHost.runtime('agent-1').getClient()
-    containerHost.runtime('agent-2').getClient()
-    containerHost.runtime('agent-1').updateCachedStatus('running', 4001)
-    containerHost.runtime('agent-2').updateCachedStatus('running', 4002)
+    agents.runtime('agent-1').getClient()
+    agents.runtime('agent-2').getClient()
+    agents.runtime('agent-1').updateCachedStatus('running', 4001)
+    agents.runtime('agent-2').updateCachedStatus('running', 4002)
     mockStop.mockResolvedValue({ forceStopUsed: false })
     mockGetInfoFromRuntime.mockResolvedValue({ status: 'stopped', port: null })
 
@@ -1644,14 +1652,14 @@ describe('ContainerHost.stopAll', () => {
 
     expect(mockStop).toHaveBeenCalledTimes(2)
     // After stopAll, clients and statuses are cleared — getCachedInfo returns default 'stopped'
-    expect(containerHost.runtime('agent-1').getCachedInfo()).toEqual({ status: 'stopped', port: null })
+    expect(agents.runtime('agent-1').getCachedInfo()).toEqual({ status: 'stopped', port: null })
   })
 
   it('does not throw when individual container stop fails', async () => {
-    containerHost.runtime('agent-1').getClient()
-    containerHost.runtime('agent-2').getClient()
-    containerHost.runtime('agent-1').updateCachedStatus('running', 4001)
-    containerHost.runtime('agent-2').updateCachedStatus('running', 4002)
+    agents.runtime('agent-1').getClient()
+    agents.runtime('agent-2').getClient()
+    agents.runtime('agent-1').updateCachedStatus('running', 4001)
+    agents.runtime('agent-2').updateCachedStatus('running', 4002)
     // First stop fails, second succeeds
     mockStop.mockRejectedValueOnce(new Error('connection refused'))
     mockStop.mockResolvedValueOnce({ forceStopUsed: false })
@@ -1664,10 +1672,10 @@ describe('ContainerHost.stopAll', () => {
   })
 
   it('times out individual containers without blocking others', async () => {
-    containerHost.runtime('fast-agent').getClient()
-    containerHost.runtime('slow-agent').getClient()
-    containerHost.runtime('fast-agent').updateCachedStatus('running', 4001)
-    containerHost.runtime('slow-agent').updateCachedStatus('running', 4002)
+    agents.runtime('fast-agent').getClient()
+    agents.runtime('slow-agent').getClient()
+    agents.runtime('fast-agent').updateCachedStatus('running', 4001)
+    agents.runtime('slow-agent').updateCachedStatus('running', 4002)
 
     let callCount = 0
     mockStop.mockImplementation(() => {
@@ -1701,7 +1709,7 @@ describe('ContainerRuntime.stopContainer force stop recovery', () => {
   })
 
   it('reports unfinished uploads and still stops the runtime', async () => {
-    const runtime = containerHost.runtime('pending-agent')
+    const runtime = agents.runtime('pending-agent')
     runtime.updateCachedStatus('running', 4001)
     mockVolumeStop.mockResolvedValueOnce(Response.json({ drained: false, recovered: 1, recoveryErrors: 0 }))
     mockStop.mockResolvedValueOnce({ forceStopUsed: false, stopped: true })
@@ -1713,24 +1721,24 @@ describe('ContainerRuntime.stopContainer force stop recovery', () => {
   })
 
   it('marks all other running agents as stopped when forceStopUsed', async () => {
-    containerHost.runtime('stuck-agent').getClient()
-    containerHost.runtime('other-agent-1').getClient()
-    containerHost.runtime('other-agent-2').getClient()
+    agents.runtime('stuck-agent').getClient()
+    agents.runtime('other-agent-1').getClient()
+    agents.runtime('other-agent-2').getClient()
 
     // Simulate other agents as running
-    containerHost.runtime('stuck-agent').updateCachedStatus('running', 4001)
-    containerHost.runtime('other-agent-1').updateCachedStatus('running', 4002)
-    containerHost.runtime('other-agent-2').updateCachedStatus('running', 4003)
+    agents.runtime('stuck-agent').updateCachedStatus('running', 4001)
+    agents.runtime('other-agent-1').updateCachedStatus('running', 4002)
+    agents.runtime('other-agent-2').updateCachedStatus('running', 4003)
 
     // The stuck agent required force stop
     mockStop.mockResolvedValue({ forceStopUsed: true })
 
-    await containerHost.runtime('stuck-agent').stopContainer()
+    await agents.runtime('stuck-agent').stopContainer()
 
     // All agents should now be stopped
-    expect(containerHost.runtime('stuck-agent').getCachedInfo()).toEqual({ status: 'stopped', port: null })
-    expect(containerHost.runtime('other-agent-1').getCachedInfo()).toEqual({ status: 'stopped', port: null })
-    expect(containerHost.runtime('other-agent-2').getCachedInfo()).toEqual({ status: 'stopped', port: null })
+    expect(agents.runtime('stuck-agent').getCachedInfo()).toEqual({ status: 'stopped', port: null })
+    expect(agents.runtime('other-agent-1').getCachedInfo()).toEqual({ status: 'stopped', port: null })
+    expect(agents.runtime('other-agent-2').getCachedInfo()).toEqual({ status: 'stopped', port: null })
 
     // Sessions should be marked inactive for all agents
     expect(markAllInactive).toHaveBeenCalledWith('stuck-agent', {
@@ -1745,14 +1753,14 @@ describe('ContainerRuntime.stopContainer force stop recovery', () => {
   })
 
   it('broadcasts agent_status_changed for all affected agents', async () => {
-    containerHost.runtime('stuck-agent').getClient()
-    containerHost.runtime('other-agent').getClient()
-    containerHost.runtime('stuck-agent').updateCachedStatus('running', 4001)
-    containerHost.runtime('other-agent').updateCachedStatus('running', 4002)
+    agents.runtime('stuck-agent').getClient()
+    agents.runtime('other-agent').getClient()
+    agents.runtime('stuck-agent').updateCachedStatus('running', 4001)
+    agents.runtime('other-agent').updateCachedStatus('running', 4002)
 
     mockStop.mockResolvedValue({ forceStopUsed: true })
 
-    await containerHost.runtime('stuck-agent').stopContainer()
+    await agents.runtime('stuck-agent').stopContainer()
 
     const broadcasts = vi.mocked(globalFeed.publish).mock.calls
     const statusEvents = broadcasts
@@ -1764,12 +1772,12 @@ describe('ContainerRuntime.stopContainer force stop recovery', () => {
   })
 
   it('broadcasts system_alert when forceStopUsed', async () => {
-    containerHost.runtime('stuck-agent').getClient()
-    containerHost.runtime('stuck-agent').updateCachedStatus('running', 4001)
+    agents.runtime('stuck-agent').getClient()
+    agents.runtime('stuck-agent').updateCachedStatus('running', 4001)
 
     mockStop.mockResolvedValue({ forceStopUsed: true })
 
-    await containerHost.runtime('stuck-agent').stopContainer()
+    await agents.runtime('stuck-agent').stopContainer()
 
     const broadcasts = vi.mocked(globalFeed.publish).mock.calls
     const alertEvents = broadcasts.filter(([msg]: any) => msg.type === 'system_alert')
@@ -1782,29 +1790,29 @@ describe('ContainerRuntime.stopContainer force stop recovery', () => {
   })
 
   it('clears runner availability cache when forceStopUsed', async () => {
-    containerHost.runtime('stuck-agent').getClient()
-    containerHost.runtime('stuck-agent').updateCachedStatus('running', 4001)
+    agents.runtime('stuck-agent').getClient()
+    agents.runtime('stuck-agent').updateCachedStatus('running', 4001)
 
     mockStop.mockResolvedValue({ forceStopUsed: true })
 
-    await containerHost.runtime('stuck-agent').stopContainer()
+    await agents.runtime('stuck-agent').stopContainer()
 
     expect(mockClearRunnerAvailabilityCache).toHaveBeenCalled()
   })
 
   it('does not trigger recovery when forceStopUsed is false', async () => {
-    containerHost.runtime('normal-agent').getClient()
-    containerHost.runtime('other-agent').getClient()
-    containerHost.runtime('normal-agent').updateCachedStatus('running', 4001)
-    containerHost.runtime('other-agent').updateCachedStatus('running', 4002)
+    agents.runtime('normal-agent').getClient()
+    agents.runtime('other-agent').getClient()
+    agents.runtime('normal-agent').updateCachedStatus('running', 4001)
+    agents.runtime('other-agent').updateCachedStatus('running', 4002)
 
     mockStop.mockResolvedValue({ forceStopUsed: false })
 
-    await containerHost.runtime('normal-agent').stopContainer()
+    await agents.runtime('normal-agent').stopContainer()
 
     // Only the stopped agent should be marked stopped
-    expect(containerHost.runtime('normal-agent').getCachedInfo()).toEqual({ status: 'stopped', port: null })
-    expect(containerHost.runtime('other-agent').getCachedInfo()).toEqual({ status: 'running', port: 4002 })
+    expect(agents.runtime('normal-agent').getCachedInfo()).toEqual({ status: 'stopped', port: null })
+    expect(agents.runtime('other-agent').getCachedInfo()).toEqual({ status: 'running', port: 4002 })
 
     // No system_alert
     const broadcasts = vi.mocked(globalFeed.publish).mock.calls
@@ -1819,18 +1827,18 @@ describe('ContainerRuntime.stopContainer force stop recovery', () => {
     // Auto-sleep path: stop+kill timed out and force-stop was disabled, so the
     // container is still alive. We must NOT mark it stopped, broadcast a stop,
     // or trigger VM-restart recovery — the next sweep retries.
-    containerHost.runtime('stuck-agent').getClient()
-    containerHost.runtime('other-agent').getClient()
-    containerHost.runtime('stuck-agent').updateCachedStatus('running', 4001)
-    containerHost.runtime('other-agent').updateCachedStatus('running', 4002)
+    agents.runtime('stuck-agent').getClient()
+    agents.runtime('other-agent').getClient()
+    agents.runtime('stuck-agent').updateCachedStatus('running', 4001)
+    agents.runtime('other-agent').updateCachedStatus('running', 4002)
 
     mockStop.mockResolvedValue({ forceStopUsed: false, stopped: false })
 
-    await containerHost.runtime('stuck-agent').stopContainer({ escalateToForceStop: false })
+    await agents.runtime('stuck-agent').stopContainer({ escalateToForceStop: false })
 
     // Still running — status untouched
-    expect(containerHost.runtime('stuck-agent').getCachedInfo()).toEqual({ status: 'running', port: 4001 })
-    expect(containerHost.runtime('other-agent').getCachedInfo()).toEqual({ status: 'running', port: 4002 })
+    expect(agents.runtime('stuck-agent').getCachedInfo()).toEqual({ status: 'running', port: 4001 })
+    expect(agents.runtime('other-agent').getCachedInfo()).toEqual({ status: 'running', port: 4002 })
 
     // No stopped broadcast for the stuck agent, no system_alert, no recovery
     const broadcasts = vi.mocked(globalFeed.publish).mock.calls
@@ -1844,15 +1852,15 @@ describe('ContainerRuntime.stopContainer force stop recovery', () => {
   })
 
   it('still cleans up even when stop() throws', async () => {
-    containerHost.runtime('error-agent').getClient()
-    containerHost.runtime('error-agent').updateCachedStatus('running', 4001)
+    agents.runtime('error-agent').getClient()
+    agents.runtime('error-agent').updateCachedStatus('running', 4001)
 
     mockStop.mockRejectedValue(new Error('unexpected error'))
 
-    await expect(containerHost.runtime('error-agent').stopContainer()).rejects.toThrow('unexpected error')
+    await expect(agents.runtime('error-agent').stopContainer()).rejects.toThrow('unexpected error')
 
     // Should still be marked as stopped despite the error
-    expect(containerHost.runtime('error-agent').getCachedInfo()).toEqual({ status: 'stopped', port: null })
+    expect(agents.runtime('error-agent').getCachedInfo()).toEqual({ status: 'stopped', port: null })
     expect(markAllInactive).toHaveBeenCalledWith('error-agent', {
       settleRecovering: true,
     })
@@ -1867,10 +1875,10 @@ describe('ContainerHost stale agents', () => {
   })
 
   function running(...slugs: string[]) {
-    for (const slug of slugs) containerHost.runtime(slug).updateCachedStatus('running', 4000)
+    for (const slug of slugs) agents.runtime(slug).updateCachedStatus('running', 4000)
   }
 
-  const stale = () => ['a', 'b', 'c'].map((s) => containerHost.runtime(s).isStale())
+  const stale = () => ['a', 'b', 'c'].map((s) => agents.runtime(s).isStale())
 
   it('markAgentsStale marks every running agent; a stop or a drop clears one', () => {
     running('a', 'b')
@@ -1880,97 +1888,8 @@ describe('ContainerHost stale agents', () => {
     containerHost.markAgentsStale()
     expect(stale()).toEqual([true, true, true])
 
-    containerHost.runtime('a').updateCachedStatus('stopped', null)
-    containerHost.dropRuntime('b')
+    agents.runtime('a').updateCachedStatus('stopped', null)
+    agents.drop('b')
     expect(stale()).toEqual([false, false, true])
-  })
-})
-
-describe('ContainerHost periodic passes', () => {
-  const STATUS_SYNC_MS = 300_000
-  const HEALTH_CHECK_MS = 30_000
-
-  beforeEach(() => {
-    vi.useFakeTimers()
-    registerTasks(containerHost)
-  })
-
-  afterEach(() => {
-    containerHost.stopStatusSync()
-    containerHost.stopHealthMonitor()
-    vi.restoreAllMocks()
-    vi.useRealTimers()
-  })
-
-  it('syncs statuses on its interval, with no sync at the start, until stopped', async () => {
-    const sync = vi.spyOn(containerHost, 'syncAllStatuses').mockResolvedValue(undefined)
-    containerHost.startStatusSync()
-    containerHost.startStatusSync()
-    await vi.advanceTimersByTimeAsync(STATUS_SYNC_MS - 1)
-    expect(sync).not.toHaveBeenCalled()
-    await vi.advanceTimersByTimeAsync(1)
-    expect(sync).toHaveBeenCalledTimes(1)
-    await vi.advanceTimersByTimeAsync(STATUS_SYNC_MS)
-    expect(sync).toHaveBeenCalledTimes(2)
-
-    containerHost.stopStatusSync()
-    await vi.advanceTimersByTimeAsync(STATUS_SYNC_MS * 2)
-    expect(sync).toHaveBeenCalledTimes(2)
-    expect(vi.getTimerCount()).toBe(0)
-  })
-
-  it('can start the status sync again after it stopped', async () => {
-    const sync = vi.spyOn(containerHost, 'syncAllStatuses').mockResolvedValue(undefined)
-    containerHost.startStatusSync()
-    containerHost.stopStatusSync()
-    containerHost.startStatusSync()
-    await vi.advanceTimersByTimeAsync(STATUS_SYNC_MS)
-    expect(sync).toHaveBeenCalledTimes(1)
-  })
-
-  it('logs a failed status sync and goes on', async () => {
-    const error = vi.spyOn(console, 'error').mockImplementation(() => {})
-    const sync = vi.spyOn(containerHost, 'syncAllStatuses').mockRejectedValue(new Error('runtime gone'))
-    containerHost.startStatusSync()
-    await vi.advanceTimersByTimeAsync(STATUS_SYNC_MS * 2)
-    expect(sync).toHaveBeenCalledTimes(2)
-    expect(error).toHaveBeenCalledWith('[ContainerHost] Periodic sync failed:', expect.objectContaining({ message: 'runtime gone' }))
-  })
-
-  it('checks health on its own interval, past a pass that hangs, until stopped', async () => {
-    const check = vi.spyOn(containerHost as never as { runHealthChecks(): Promise<void> }, 'runHealthChecks')
-      .mockImplementationOnce(() => new Promise<void>(() => {}))
-      .mockResolvedValue(undefined)
-    containerHost.startHealthMonitor()
-    await vi.advanceTimersByTimeAsync(HEALTH_CHECK_MS - 1)
-    expect(check).not.toHaveBeenCalled()
-    await vi.advanceTimersByTimeAsync(1)
-    expect(check).toHaveBeenCalledTimes(1)
-    await vi.advanceTimersByTimeAsync(HEALTH_CHECK_MS * 2)
-    expect(check).toHaveBeenCalledTimes(3)
-
-    containerHost.stopHealthMonitor()
-    await vi.advanceTimersByTimeAsync(HEALTH_CHECK_MS * 3)
-    expect(check).toHaveBeenCalledTimes(3)
-  })
-
-  it('logs a failed health check and goes on', async () => {
-    const error = vi.spyOn(console, 'error').mockImplementation(() => {})
-    const check = vi.spyOn(containerHost as never as { runHealthChecks(): Promise<void> }, 'runHealthChecks').mockRejectedValue(new Error('runtime gone'))
-    containerHost.startHealthMonitor()
-    await vi.advanceTimersByTimeAsync(HEALTH_CHECK_MS * 2)
-    expect(check).toHaveBeenCalledTimes(2)
-    expect(error).toHaveBeenCalledWith('[ContainerHost] Health check failed:', expect.objectContaining({ message: 'runtime gone' }))
-  })
-
-  it('runs the status sync and the health check as separate jobs', async () => {
-    const sync = vi.spyOn(containerHost, 'syncAllStatuses').mockResolvedValue(undefined)
-    const check = vi.spyOn(containerHost as never as { runHealthChecks(): Promise<void> }, 'runHealthChecks').mockResolvedValue(undefined)
-    containerHost.startStatusSync()
-    containerHost.startHealthMonitor()
-    containerHost.stopStatusSync()
-    await vi.advanceTimersByTimeAsync(HEALTH_CHECK_MS)
-    expect(check).toHaveBeenCalledTimes(1)
-    expect(sync).not.toHaveBeenCalled()
   })
 })

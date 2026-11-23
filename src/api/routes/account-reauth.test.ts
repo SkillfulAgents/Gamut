@@ -25,12 +25,13 @@ vi.mock('@shared/lib/agent-actor/live/live-sessions', async () => ({
 }))
 vi.mock('@shared/lib/container/container-host', () => ({
   containerHost: {
-    attachAgentWorkspaces: () => {},
-    attachAgentSessions: () => {},
-    attachAgentIdleAlarms: () => {},
+    attachAgentRuntimes: () => {},
     clearRuntimes: () => {},
-    runtime: () => ({
+    createRuntime: () => ({
       slug: 'shared-agent',
+      isStopping: () => false,
+      syncAgentStatus: async () => ({ status: 'running' }),
+      dispose: () => {},
       getCachedInfo: () => ({ status: 'running' }),
       getHealthWarnings: () => [],
       isStale: () => false,

@@ -4,6 +4,7 @@ import { ChevronDown, ChevronRight, Circle, CircleCheckBig, Loader2, Monitor, X 
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from 'react'
 
 import { useElapsedTimer } from '@renderer/hooks/use-elapsed-timer'
+import { useSessionTray } from '@renderer/context/session-tray-context'
 import { RequestError } from '@shared/lib/tools/requests/request-error'
 import { ACTIVITY_TREE_CONNECTORS, ACTIVITY_TREE_TRACER } from '@renderer/components/ui/tree-connectors'
 import { HoverScrollText } from '@renderer/components/ui/hover-scroll-text'
@@ -12,6 +13,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@rende
 import type { Todo } from '@shared/lib/utils/derive-task-list'
 import { AgentAvatar, type AvatarMotionState } from '@renderer/components/agents/agent-avatar/agent-avatar'
 import type { ApiAgent } from '@shared/lib/types/api'
+import { CANVAS_FLOAT_SHADOW_CLASS } from './chat-composer-box'
 import { ActivityOrb, type ActivityOrbState } from './activity-orb'
 
 /**
@@ -181,7 +183,8 @@ export function ActivityCard({
           card until it pushes the chat history off screen. */}
       <div
         className={cn(
-          'relative max-h-[30vh] overflow-y-auto border border-border/70 bg-background/85 px-3 pt-3 shadow-[0_0_24px_rgba(15,23,42,0.07),0_2px_10px_-4px_rgba(15,23,42,0.08)] backdrop-blur-md supports-[backdrop-filter]:bg-background/65 dark:shadow-[0_0_26px_rgba(0,0,0,0.22),0_2px_12px_-4px_rgba(0,0,0,0.16)]',
+          'relative max-h-[30vh] overflow-y-auto border border-border/70 bg-background/85 px-3 pt-3 backdrop-blur-md supports-[backdrop-filter]:bg-background/65',
+          CANVAS_FLOAT_SHADOW_CLASS,
           isAwaitingInput || detached
             ? 'rounded-dialog pb-3'
             : 'rounded-t-dialog border-b-0 pb-8',
@@ -676,9 +679,16 @@ function BackgroundTaskRow({ task, tracerRow, onStop }: {
   tracerRow: number
   onStop?: (taskId: string) => Promise<void>
 }) {
+  const tray = useSessionTray()
   const elapsed = useElapsedTimer(new Date(task.startedAt))
   const title = task.title ?? (task.isWorkflow ? 'Background workflow' : 'Background command')
   const fullText = task.detail ? `${title}: ${task.detail}` : title
+  const label = (
+    <>
+      <span className="text-muted-foreground">{title}</span>
+      {task.detail && <span className={cn('text-muted-foreground/80', !task.isMonitor && 'font-mono')}>{' '}{task.detail}</span>}
+    </>
+  )
   return (
     <li
       style={tracerRowStyle(tracerRow)}
@@ -690,12 +700,21 @@ function BackgroundTaskRow({ task, tracerRow, onStop }: {
         {/* flex-1 like the subagent label, so the elapsed time and the stop
             control sit at the row's right edge in line with the subagent rows'
             instead of trailing the text. */}
-        <span className="min-w-0 flex-1 truncate" title={fullText}>
-          <span className="text-muted-foreground">{title}</span>
-          {task.detail && (
-            <span className={cn('text-muted-foreground/80', !task.isMonitor && 'font-mono')}>{' '}{task.detail}</span>
-          )}
-        </span>
+        {tray && !task.isWorkflow && !task.isSubagent ? (
+          <button
+            type="button"
+            className="group/task flex min-w-0 flex-1 items-center gap-1 rounded-icon text-left hover:bg-muted"
+            title={fullText}
+            aria-label={`Open ${fullText}`}
+            data-testid="background-task-open"
+            onClick={() => tray.openUtility('background', task.taskId)}
+          >
+            <span className="truncate">{label}</span>
+            <ChevronRight aria-hidden className="h-3 w-3 shrink-0 opacity-0 group-hover/task:opacity-100 group-focus-visible/task:opacity-100" />
+          </button>
+        ) : (
+          <span className="min-w-0 flex-1 truncate" title={fullText}>{label}</span>
+        )}
         {elapsed && (
           <span className="shrink-0 text-muted-foreground tabular-nums">{elapsed}</span>
         )}

@@ -46,7 +46,7 @@ vi.mock('@shared/lib/platform-attribution', () => ({
 }))
 
 // Manager-shaped mock behind the container host — returns our mock client. The
-// actor reaches an agent's runtime through containerHost.runtime(slug), and the
+// actor gets its agent's runtime from containerHost.createRuntime(slug), and the
 // adapter forwards each runtime method here with the slug prepended.
 const containerManager = vi.hoisted(() => ({
   ensureRunning: vi.fn(),

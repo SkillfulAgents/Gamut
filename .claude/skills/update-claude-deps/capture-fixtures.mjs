@@ -180,7 +180,12 @@ async function capture(scenario) {
       settingSources: [],
       settings: { disableBundledSkills: true, autoDreamEnabled: false, enableArtifact: false },
       env: {
-        ...process.env,
+        // Run from inside a Claude session (Claude Code, the desktop app), the
+        // environment carries that session's CLAUDE_CODE_* variables, among
+        // them CLAUDE_CODE_USER_EMAIL: the CLI writes it into the conversation
+        // ("The user's email address is ...") and the fork scenarios commit
+        // the conversation as lead-transcript.jsonl. None of them belong here.
+        ...Object.fromEntries(Object.entries(process.env).filter(([k]) => k !== 'CLAUDECODE' && !k.startsWith('CLAUDE_CODE_'))),
         CLAUDE_CONFIG_DIR: configDir,
         CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS: '1',
         CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',

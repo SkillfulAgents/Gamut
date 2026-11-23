@@ -4,6 +4,7 @@
  * Type definitions for file-based agent storage
  */
 
+import type { SavedContext } from '../container/context-breakdown-schema'
 import type { RuntimeOptions } from '../container/runtime-options'
 import type { SlashCommandInfo } from '../container/types'
 import type { LlmProviderId } from '../llm-provider/provider-types'
@@ -124,6 +125,8 @@ export interface SessionMetadata extends RuntimeOptions {
   lastWake?: { taskId: string; executionAt: string }
   // Context window usage from the last completed turn
   lastUsage?: SessionUsage
+  /** Private details for the context panel; omitted from ordinary session responses. */
+  lastContext?: SavedContext
   // Available slash commands from the agent SDK
   slashCommands?: SlashCommandInfo[]
   // The inherited RuntimeOptions are the last ones the user used on this

@@ -105,6 +105,9 @@ vi.mock('@shared/lib/services/session-service', () => ({
 
 import { finalizeAutomationStatus } from '@shared/lib/services/session-service'
 import { containerHost } from './container-host'
+import { attachTestRuntimes } from './testing/test-runtimes'
+
+const agents = attachTestRuntimes(containerHost)
 import { resetRuntimeRecoveryForTests } from './runtime-recovery'
 import { attachLiveSessionsHarness, createStreamClient } from '@shared/lib/agent-actor/testing/live-sessions-harness'
 
@@ -122,20 +125,19 @@ const live = attachLiveSessionsHarness()
 
 describe('ContainerRuntime.stopContainer with a session mid-turn', () => {
   beforeEach(() => {
-    containerHost.dropRuntime(SLUG)
-    containerHost.attachAgentSessions({ peek: (slug) => (slug === SLUG ? live.sessions(SLUG) : undefined) })
+    agents.drop(SLUG)
+    agents.use((slug) => (slug === SLUG ? { sessions: live.sessions(SLUG) } : {}))
   })
 
   afterEach(() => {
-    containerHost.attachAgentSessions(null)
-    containerHost.dropRuntime(SLUG)
+    agents.reset()
     live.reset()
     resetRuntimeRecoveryForTests()
     vi.clearAllMocks()
   })
 
   it('ends the turn as stopped, with no crash error, when the socket drops during the stop', async () => {
-    const runtime = containerHost.runtime(SLUG)
+    const runtime = agents.runtime(SLUG)
     runtime.updateCachedStatus('running', 4001)
     // The sessions reach the runtime's own recovery, as the actor wires them.
     live.runtime.unexpectedDeath.mockImplementation((sessionId) => runtime.handleUnexpectedDeath(sessionId ? [sessionId] : undefined))
@@ -163,7 +165,7 @@ describe('ContainerRuntime.stopContainer with a session mid-turn', () => {
   })
 
   it('records an automation the stop cut short as failed: its run did not finish', async () => {
-    const runtime = containerHost.runtime(SLUG)
+    const runtime = agents.runtime(SLUG)
     runtime.updateCachedStatus('running', 4001)
     const stream = createStreamClient()
     await live.sessions(SLUG).subscribe(SESSION, stream, SESSION)
@@ -175,7 +177,7 @@ describe('ContainerRuntime.stopContainer with a session mid-turn', () => {
   })
 
   it('leaves a session mid-turn to the crash path when a fatal error takes the container down', async () => {
-    const runtime = containerHost.runtime(SLUG)
+    const runtime = agents.runtime(SLUG)
     runtime.updateCachedStatus('running', 4001)
     const stream = createStreamClient()
     await live.sessions(SLUG).subscribe(SESSION, stream, SESSION)

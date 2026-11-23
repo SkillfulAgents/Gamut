@@ -39,6 +39,14 @@ const NO_CONTAINER_IDLE: AgentStateHooks['idle'] = {
   timeoutMs: async () => 0,
   lastActivityAt: () => undefined,
   sleep: async () => {},
+  wakeAt: () => {},
+  cancelWake: () => {},
+}
+
+/** An agent with no container: its watch has nothing to check. */
+const NO_CONTAINER_WATCH: AgentStateHooks['watch'] = {
+  checkHealth: async () => {},
+  checkStatus: async () => {},
 }
 
 /** A runtime with no container: there is no client, and nothing recovers. */
@@ -75,6 +83,10 @@ export function createInMemoryAgentState(options: InMemoryAgentStateOptions = {}
           ...options.sessions?.(slug),
         },
         idle: NO_CONTAINER_IDLE,
+        watch: NO_CONTAINER_WATCH,
+        runtime: () => {
+          throw new Error('No container in this test')
+        },
       })
       states.set(slug, state)
     }

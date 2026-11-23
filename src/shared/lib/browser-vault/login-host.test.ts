@@ -449,10 +449,11 @@ describe('decideLoginRequest', () => {
     expect((await heldLoginFor('agent-a', 's-1', 'github.com'))?.values).toEqual({ password: 'held-pw' })
   })
 
-  it('leaves the request to the user when the page refuses the saved account\'s fill', async () => {
+  it('returns the saved account for another try when the prepared form is gone', async () => {
     const account = await grantedAccount('octocat', { password: 'pw' })
     container.fillStatus = 409
-    expect(await decide({ username: 'octocat' })).toMatchObject({ action: 'ask', vault: { mode: 'complete', accountId: account.id, covered: [0, 1] } })
+    expect(await decide({ username: 'octocat' })).toEqual({ action: 'settled' })
+    expect(answers()[0].value).toMatchObject({ type: 'accounts', named: true, fillUnconfirmed: true, accounts: [{ username: 'octocat' }] })
     expect((await getOwnedAccount(null, account.id))?.lastUsedAt).toBeNull()
   })
 

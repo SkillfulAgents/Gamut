@@ -8,12 +8,23 @@
  * settles what the previous one held.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { AgentSessionsAccess } from '@shared/lib/container/agent-sessions-access'
 import type { LocalAgentActor } from './local-agent-actor'
 import { drain, drained } from './testing/drain'
 
 vi.mock('@shared/lib/container/container-host', () => ({
-  containerHost: { attachAgentWorkspaces: vi.fn(), attachAgentSessions: vi.fn(), attachAgentIdleAlarms: vi.fn(), dropRuntime: vi.fn(), clearRuntimes: vi.fn() },
+  containerHost: {
+    attachAgentRuntimes: vi.fn(),
+    clearRuntimes: vi.fn(),
+    // A runtime that reads its container as running and does nothing else.
+    createRuntime: vi.fn(() => ({
+      isStopping: () => false,
+      isStarting: () => false,
+      syncAgentStatus: async () => ({ status: 'running', port: 1 }),
+      getCachedInfo: () => ({ status: 'running', port: 1 }),
+      noteSessionActivity: () => {},
+      dispose: () => {},
+    })),
+  },
 }))
 // What the agents' live sessions hand the host (feed events, notifications)
 // is not what these tests are about: a recording port keeps it in the test.
@@ -101,6 +112,7 @@ describe('the actors\' state survives a backend module reload', () => {
     const heard: unknown[] = []
     drain(await original.agentRegistry.get('a').messages.subscribe('s'), (event) => heard.push(event))
     const sessions = (original.agentRegistry.get('a') as LocalAgentActor).state.sessions
+    const runtime = (original.agentRegistry.get('a') as LocalAgentActor).state.runtime()
 
     const reloaded = await reload()
 
@@ -109,10 +121,8 @@ describe('the actors\' state survives a backend module reload', () => {
     await reloaded.agentRegistry.get('a').sessions.broadcastUpdate('s')
     await drained()
     expect(heard).toEqual([{ type: 'session_updated' }])
-    // The reloaded registry attached the reloaded host to the same sessions.
-    const { containerHost } = await import('@shared/lib/container/container-host')
-    const access = vi.mocked(containerHost.attachAgentSessions).mock.calls.at(-1)![0] as AgentSessionsAccess
-    expect(access.peek('a')).toBe(sessions)
+    // The runtime goes with the state: the reloaded actor keeps the container the old one knew.
+    expect((reloaded.agentRegistry.get('a') as LocalAgentActor).state.runtime()).toBe(runtime)
   })
 
   it('an id open in two agents is answered by the agent the router names, before and after the reload', async () => {

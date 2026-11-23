@@ -178,10 +178,10 @@ test.describe('File Preview', () => {
     )
     await expect(year).toHaveAttribute('aria-expanded', 'false')
     await year.click({ button: 'right' })
-    await expect(page.getByRole('menuitem', { name: 'Bookmark' })).toBeVisible()
+    await expect(page.getByRole('menuitem', { name: 'Pin' })).toBeVisible()
     await expect(page.getByRole('menuitem', { name: 'Rename' })).toBeVisible()
     await expect(page.getByRole('menuitem', { name: 'Delete' })).toBeVisible()
-    await page.getByRole('menuitem', { name: 'Bookmark' }).click()
+    await page.getByRole('menuitem', { name: 'Pin' }).click()
     await expect.poll(async () => {
       const response = await page.request.get(`/api/agents/${agentSlug}/bookmarks`)
       return await response.json()
@@ -205,7 +205,7 @@ test.describe('File Preview', () => {
     )
     await overview.click({ button: 'right' })
     await expect(page.getByRole('menuitem', { name: 'Copy contents' })).toBeVisible()
-    await expect(page.getByRole('menuitem', { name: 'Bookmark' })).toBeVisible()
+    await expect(page.getByRole('menuitem', { name: 'Pin' })).toBeVisible()
     await expect(page.getByRole('menuitem', { name: 'Rename' })).toBeVisible()
     await expect(page.getByRole('menuitem', { name: 'Delete' })).toBeVisible()
 

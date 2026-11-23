@@ -1,11 +1,17 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, act } from '@testing-library/react'
+import { render as renderView, screen, act } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { AgentActivityIndicator } from './agent-activity-indicator'
 import type { BackgroundTaskRef } from '@renderer/lib/background-task-label'
 import { parsePlatformErrorResponse } from '@shared/lib/llm-provider/platform-error-presentation'
 import type { ProviderErrorPresentation } from '@shared/lib/llm-provider/error-presentation'
+
+import { SessionBackgroundTasksProvider } from '@renderer/context/session-background-tasks-context'
+import type { ReactElement } from 'react'
+const render = (ui: ReactElement) => renderView(ui, {
+  wrapper: ({ children }) => <SessionBackgroundTasksProvider sessionId="s-1" agentSlug="agent-1">{children}</SessionBackgroundTasksProvider>,
+})
 
 vi.mock('@renderer/hooks/use-turn-agent-calls', () => ({ useTurnAgentCalls: () => [] }))
 

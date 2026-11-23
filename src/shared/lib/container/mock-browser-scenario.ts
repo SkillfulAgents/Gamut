@@ -256,10 +256,12 @@ export class BrowserScenario implements MockScenario {
 
     // 10. Update the runtime's cached status to point to the mock WS server's port.
     //     browser-stream-proxy reads the cached status to know where to connect.
-    //     Dynamic import to avoid a circular dependency (mock-container-client ← client-factory ← container-host).
-    const { containerHost } = await import('./container-host')
+    //     The agent's actor holds the runtime. Dynamic imports: the actor package imports this one.
+    const { agentRegistry } = await import('@shared/lib/agent-actor/registry')
+    const { LocalAgentActor } = await import('@shared/lib/agent-actor/local-agent-actor')
     const agentId = client.getAgentId()
-    containerHost.runtime(agentId).updateCachedStatus('running', mockPort)
+    const actor = agentRegistry.get(agentId)
+    if (actor instanceof LocalAgentActor) actor.state.runtime().updateCachedStatus('running', mockPort)
 
     // 11. Track active browser on the mock client (for /browser/status responses)
     client.setActiveBrowserSession(sessionId)

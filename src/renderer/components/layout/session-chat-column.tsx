@@ -16,6 +16,7 @@ import { useScreenWakeLock } from '@renderer/hooks/use-screen-wake-lock'
 import { useStaleSession } from '@renderer/hooks/use-stale-session'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@renderer/components/ui/tooltip'
 import { DonutChart } from '@renderer/components/ui/donut-chart'
+import { useRequiredTray } from '@renderer/context/session-tray-context'
 import type { RuntimeOptions } from '@shared/lib/container/runtime-options'
 import type { PendingMessage } from '@renderer/components/messages/pending-message'
 import type { PendingMessagesContextValue } from '@renderer/context/pending-messages-context'
@@ -187,7 +188,7 @@ export function SessionChatColumn({
 // gradient under a mask that faded out from 55%), sampled every tenth.
 const HINT_FADE_STOPS = [
   [1, 0], [0.75, 50], [0.675, 55], [0.533, 60], [0.3, 70], [0.133, 80], [0.033, 90], [0, 100],
-].map(([alpha, at]) => `hsl(var(--background) / ${alpha}) ${at}%`).join(', ')
+].map(([alpha, at]) => `hsl(var(--canvas) / ${alpha}) ${at}%`).join(', ')
 
 function SessionComposerHints({ contextPercent, isActive = false, voiceModeActive = false, notifiesOnly = null }: {
   contextPercent: number | null
@@ -196,8 +197,9 @@ function SessionComposerHints({ contextPercent, isActive = false, voiceModeActiv
   /** The message only notifies this teammate: said instead of the context usage. */
   notifiesOnly?: string | null
 }) {
+  const tray = useRequiredTray()
   return (
-    <div className="relative isolate flex flex-wrap items-center justify-between gap-x-1.5 gap-y-0.5 overflow-hidden px-6 py-3">
+    <div className="relative isolate flex flex-wrap items-center justify-between gap-x-1.5 gap-y-0.5 overflow-hidden px-6 py-3 has-[button]:py-2">
       <div
         aria-hidden="true"
         className="pointer-events-none absolute inset-y-0 left-0 z-0 w-[52%]"
@@ -218,15 +220,20 @@ function SessionComposerHints({ contextPercent, isActive = false, voiceModeActiv
         <TooltipProvider delayDuration={0}>
           <Tooltip>
             <TooltipTrigger asChild>
-              <div className="relative z-10 flex cursor-default items-center gap-1.5 whitespace-nowrap">
-                <span className="text-xs text-muted-foreground">Context Usage</span>
+              <button
+                type="button"
+                aria-label={`Open Context Usage, ${contextPercent}% used`}
+                onClick={() => tray.openUtility('context')}
+                className="relative z-10 flex items-center gap-1.5 whitespace-nowrap rounded-icon py-1 text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <span>Context Usage</span>
                 <DonutChart
                   percent={contextPercent}
                   animated={isActive}
                   size="sm"
                   showLabel={false}
                 />
-              </div>
+              </button>
             </TooltipTrigger>
             <TooltipContent>
               <p>{contextPercent}%</p>

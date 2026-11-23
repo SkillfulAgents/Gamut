@@ -1,17 +1,17 @@
 /**
  * The container host: what is not per-agent about running containers on this
- * machine. Runtime readiness and image pulls, the status-sync and
- * health-monitor loops, start-all and stop-all, shutdown, and the fallout of a
- * force-stop that kills the shared VM.
+ * machine. Runtime readiness and image pulls, waking every agent's actor at
+ * startup so the containers still running from before are seen, stop-all,
+ * shutdown, and the fallout of a force-stop that kills the shared VM.
  *
- * It owns one `ContainerRuntime` per agent; the agent actor reaches its
- * agent's runtime through `runtime(slug)`. Only the actor package imports
- * this module — everything else asks the actor for its agent and imports
- * `containerHost` from `@shared/lib/agent-actor` for the host-level calls.
+ * Each agent's actor holds its own `ContainerRuntime`, which the host makes
+ * (`createRuntime`), and watches its own container (`ContainerWatch`). What
+ * the host does across agents it asks of the actors' runtimes, through
+ * `AgentRuntimes`. Only the actor package imports this module: everything
+ * else asks the actor for its agent and imports `containerHost` from
+ * `@shared/lib/agent-actor` for the host-level calls.
  */
-import { autoSleepTimeoutMsFrom, ContainerRuntime, type RuntimeHost } from './container-runtime'
-import type { AgentWorkspaceAccess } from './agent-workspace-access'
-import type { AgentSessionsAccess } from './agent-sessions-access'
+import { ContainerRuntime, type RuntimeAgent, type RuntimeHost } from './container-runtime'
 import {
   checkAllRunnersAvailability,
   checkImageExists,
@@ -32,87 +32,37 @@ import {
 import { ensureLimaReady } from './lima-container-client'
 import type { ImagePullProgress, RuntimeReadiness } from './types'
 import { globalFeed } from '@shared/lib/notifications/global-feed'
-import { WEBHOOK_RELAY_CHANGED_EVENT, watchWebhookRelay, type WebhookRelayService } from '@shared/lib/webhook-relay'
-import { getSettings, mutateSettings, type AppSettings } from '@shared/lib/config/settings'
+import { WEBHOOK_RELAY_CHANGED_EVENT, getWebhookRelay, watchWebhookRelay, type WebhookRelayService } from '@shared/lib/webhook-relay'
+import { getSettings, mutateSettings } from '@shared/lib/config/settings'
 import path from 'path'
-import pLimit from 'p-limit'
 import { getAgentWorkspaceDir, getAgentsDataDir } from '@shared/lib/config/data-dir'
 import { captureException, captureMessage, addErrorBreadcrumb } from '@shared/lib/error-reporting'
 import { background } from '@shared/lib/background'
-import { PassTask, taskManager } from '@shared/lib/background-work'
-import type { AgentIdleAlarms } from './idle-alarm'
 
-/** Interval for syncing container status with reality (in ms). Default: 300 seconds */
-const STATUS_SYNC_INTERVAL_MS = parseInt(
-  process.env.CONTAINER_STATUS_SYNC_INTERVAL_SECONDS || '300',
-  10
-) * 1000
-
-/** Interval for health monitoring (in ms). Default: 30 seconds */
-const HEALTH_CHECK_INTERVAL_MS = parseInt(
-  process.env.CONTAINER_HEALTH_CHECK_INTERVAL_SECONDS || '30',
-  10
-) * 1000
-
-/** Agents the status sync reads at once, one runner call each: enough to overlap them without crowding the VM. */
-const STATUS_SYNC_CONCURRENCY = 4
+/**
+ * The agents' runtimes, which their actors hold: the way the host asks every
+ * agent on the machine. Attached by the agent registry.
+ */
+export interface AgentRuntimes {
+  /** Wake the agent's actor, made if none is held, and wait for its first read of its container. */
+  wake(slug: string): Promise<void>
+  /** The runtimes the held actors have made. */
+  held(): ContainerRuntime[]
+  /** Forget the agent's runtime: its actor makes a new one on its next use. Does not stop the container. */
+  drop(slug: string): void
+}
 
 export class ContainerHost {
-  private runtimes: Map<string, ContainerRuntime> = new Map()
-  private statusSyncScheduled = false
-  private isSyncing = false
-  private healthMonitorScheduled = false
-  private readonly statusSyncTask = new PassTask('container-host.status-sync', () => this.syncAllStatuses().catch((error) => {
-    console.error('[ContainerHost] Periodic sync failed:', error)
-  }))
-  // Not waited for, so a pass does not count as running until it settles: a
-  // runtime that hangs on one agent holds up that pass, never the later ones.
-  private readonly healthCheckTask = new PassTask('container-host.health-check', async () => {
-    background(this.runHealthChecks().catch((error) => {
-      console.error('[ContainerHost] Health check failed:', error)
-    }), { name: 'container-host.run-health-checks' })
-  })
-  readonly tasks = [this.statusSyncTask, this.healthCheckTask]
+  /** The agents' runtimes, attached by the agent registry when it is created. */
+  private agents: AgentRuntimes | null = null
 
-  /** The agents' workspaces, attached by the agent registry when it is created. */
-  private agentWorkspaces: AgentWorkspaceAccess | null = null
-
-  /**
-   * Give runtimes access to the agents' workspaces. Called once by the agent
-   * registry; a start before that (only possible in a test without a
-   * registry) runs without the workspace-dependent steps.
-   */
-  attachAgentWorkspaces(access: AgentWorkspaceAccess | null): void {
-    this.agentWorkspaces = access
+  /** Give the host the way to the agents' runtimes. Called once by the agent registry. */
+  attachAgentRuntimes(access: AgentRuntimes | null): void {
+    this.agents = access
   }
 
-  /** The agents' live sessions, attached by the agent registry when it is created. */
-  private agentSessions: AgentSessionsAccess | null = null
-
-  /**
-   * Give runtimes the way to their agents' live sessions. Called once by the
-   * agent registry; before that (only in a test without a registry) a runtime
-   * sees no live sessions.
-   */
-  attachAgentSessions(access: AgentSessionsAccess | null): void {
-    this.agentSessions = access
-  }
-
-  /** The agents' idle alarms, attached by the agent registry when it is created. */
-  private agentIdleAlarms: AgentIdleAlarms | null = null
-
-  /**
-   * Give runtimes the way to their agents' idle alarms, which the actors own.
-   * Called once by the agent registry; before that (only in a test without a
-   * registry) no container is put to sleep.
-   */
-  attachAgentIdleAlarms(access: AgentIdleAlarms | null): void {
-    this.agentIdleAlarms = access
-  }
-
-  /** The auto-sleep timeout in the settings, in ms; zero or less disables. */
-  async autoSleepTimeoutMs(): Promise<number> {
-    return autoSleepTimeoutMsFrom(await getSettings())
+  private heldRuntimes(): ContainerRuntime[] {
+    return this.agents?.held() ?? []
   }
 
   /** Optional callback invoked before a container is stopped (e.g. to close host browser) */
@@ -127,42 +77,17 @@ export class ContainerHost {
   private readonly hooks: RuntimeHost = (() => {
     const self = this
     return {
-      // Getters, so what is attached after the first runtime exists still applies.
-      get agentWorkspaces() {
-        return self.agentWorkspaces
-      },
-      get agentSessions() {
-        return self.agentSessions
-      },
+      // A getter, so a hook set after the first runtime exists still applies.
       get onBeforeContainerStop() {
         return self.onBeforeContainerStop
-      },
-      get agentIdleAlarms() {
-        return self.agentIdleAlarms
       },
       afterForceStop: (slug: string) => self.afterForceStop(slug),
     }
   })()
 
-  /** The runtime for an agent, created on first use. Never does I/O. */
-  runtime(slug: string): ContainerRuntime {
-    let runtime = this.runtimes.get(slug)
-    if (!runtime) {
-      runtime = new ContainerRuntime(slug, this.hooks)
-      this.runtimes.set(slug, runtime)
-    }
-    return runtime
-  }
-
-  /** The runtime if one exists for this agent. */
-  peekRuntime(slug: string): ContainerRuntime | undefined {
-    return this.runtimes.get(slug)
-  }
-
-  /** Forget an agent's runtime (client and cached state). Does not stop the container. */
-  dropRuntime(slug: string): void {
-    this.runtimes.get(slug)?.dispose()
-    this.runtimes.delete(slug)
+  /** A runtime for the agent whose actor hands over `agent`, for this machine's runner. Never does I/O. */
+  createRuntime(slug: string, agent: RuntimeAgent): ContainerRuntime {
+    return new ContainerRuntime(slug, this.hooks, agent, getWebhookRelay().kind !== 'unavailable')
   }
 
   /**
@@ -192,219 +117,70 @@ export class ContainerHost {
   // would count it as running or stop it on quit. Only its client is dropped,
   // so the next one is built for the runner configured now.
   clearRuntimes(): void {
-    for (const [slug, runtime] of this.runtimes) {
-      if (runtime.isStarting()) {
-        runtime.resetClient()
-        continue
-      }
-      runtime.dispose()
-      this.runtimes.delete(slug)
+    for (const runtime of this.heldRuntimes()) {
+      if (runtime.isStarting()) runtime.resetClient()
+      else this.agents?.drop(runtime.slug)
     }
   }
 
   // Check if any agents have running containers (uses cached status)
   hasRunningAgents(): boolean {
-    for (const runtime of this.runtimes.values()) {
-      if (runtime.getCachedInfo().status === 'running') {
-        return true
-      }
-    }
-    return false
+    return this.runningRuntimes().length > 0
   }
 
   // Get list of running agent slugs (uses cached status)
   getRunningAgentIds(): string[] {
-    const running: string[] = []
-    for (const [slug, runtime] of this.runtimes.entries()) {
-      if (runtime.getCachedInfo().status === 'running') {
-        running.push(slug)
-      }
-    }
-    return running
+    return this.runningRuntimes().map((runtime) => runtime.slug)
+  }
+
+  private runningRuntimes(): ContainerRuntime[] {
+    return this.heldRuntimes().filter((runtime) => runtime.getCachedInfo().status === 'running')
   }
 
   /** Agents a drive change reaches only through a restart, and with `orStarting` every start not yet at its drive read too. */
   getAgentIdsHoldingDrives(options?: { orStarting?: boolean }): string[] {
-    return [...this.runtimes].filter(([, runtime]) => runtime.holdsDrives() || (options?.orStarting && runtime.isStarting())).map(([slug]) => slug)
+    return this.heldRuntimes().filter((runtime) => runtime.holdsDrives() || (options?.orStarting && runtime.isStarting())).map((runtime) => runtime.slug)
   }
 
   /** Record every running agent as stale. */
   markAgentsStale(): void {
-    for (const slug of this.getRunningAgentIds()) this.runtime(slug).markStale()
+    for (const runtime of this.runningRuntimes()) runtime.markStale()
   }
 
-  /** Record as stale every running agent whose webhook tools no longer match availability. */
-  reconcileWebhookRelay(available: boolean): void {
-    for (const slug of this.getRunningAgentIds()) this.runtime(slug).reconcileWebhookRelay(available)
-  }
-
-  /**
-   * Publishes the webhook relay's status to clients, and keeps running
-   * agents' webhook tools in step with it (their env says whether webhooks
-   * can be received).
-   */
+  /** Publishes the webhook relay's status to clients. */
   watchWebhookRelay(relay: WebhookRelayService): () => void {
     return watchWebhookRelay(relay, {
       broadcast: (status) => globalFeed.publish({ type: WEBHOOK_RELAY_CHANGED_EVENT, status }),
-      reconcileAgents: (available) => this.reconcileWebhookRelay(available),
     })
   }
 
   /**
-   * Create runtimes for the given agent slugs and sync their statuses.
-   * Call this on app startup with the list of all agent slugs.
+   * Wake every agent's actor once at startup, and wait for each to read its
+   * container: actors are made on first use, so without this an agent nobody
+   * opens would never see a container still running from before this launch.
+   * From then on each actor watches its own.
    */
   async initializeAgents(agentSlugs: string[]): Promise<void> {
     console.log(`[ContainerHost] Initializing ${agentSlugs.length} agents...`)
-
-    // One read for every agent: the runner their clients are built for, and
-    // what the sync below needs.
-    const settings = await getSettings()
-    const runner = settings.container.containerRunner as ContainerRunner
-
-    // Create clients for all agents (this registers them for sync)
-    for (const slug of agentSlugs) {
-      await this.runtime(slug).getClient(runner)
-    }
-
-    // Sync all statuses
-    await this.syncAllStatuses(settings)
-
+    const agents = this.agents
+    if (agents) await Promise.all(agentSlugs.map((slug) => agents.wake(slug)))
     console.log(`[ContainerHost] Initialized ${agentSlugs.length} agents`)
-  }
-
-  /**
-   * Sync every known agent's status with reality.
-   * Called on startup and periodically.
-   *
-   * One settings read for the sweep, however many agents (`settings`, when
-   * the caller read them for the same operation): each runtime asks the
-   * client it holds without reading the runner, and an idle alarm the sync
-   * finds disarmed is armed with the sweep's timeout.
-   */
-  async syncAllStatuses(settings?: Pick<AppSettings, 'app'>): Promise<void> {
-    if (this.isSyncing) {
-      console.log('[ContainerHost] Sync already in progress, skipping')
-      return
-    }
-
-    this.isSyncing = true
-    console.log('[ContainerHost] Syncing container statuses with the runtime...')
-
-    try {
-      const runtimes = Array.from(this.runtimes.values()).filter((runtime) => runtime.hasClient())
-
-      let idleTimeoutMs: number | undefined
-      if (runtimes.length > 0) {
-        try {
-          idleTimeoutMs = autoSleepTimeoutMsFrom(settings ?? await getSettings())
-        } catch (error) {
-          // The sync goes on; an alarm it arms reads the timeout for itself.
-          console.warn('[ContainerHost] Could not read the auto-sleep timeout for the status sync:', error)
-        }
-      }
-
-      const limit = pLimit(STATUS_SYNC_CONCURRENCY)
-      await Promise.all(runtimes.map((runtime) => limit(async () => {
-        // Skip agents currently being stopped
-        if (runtime.isStopping()) return
-
-        try {
-          await runtime.syncAgentStatus({ idleTimeoutMs })
-        } catch (error) {
-          console.error(`[ContainerHost] Failed to sync status for ${runtime.slug}:`, error)
-          // Mark as stopped on error
-          runtime.markAsStopped()
-        }
-      })))
-
-      console.log(`[ContainerHost] Synced ${runtimes.length} container statuses`)
-    } finally {
-      this.isSyncing = false
-    }
-  }
-
-  /**
-   * Start the periodic status sync.
-   * Note: Does not do an initial sync - call initializeAgents() first for that.
-   */
-  startStatusSync(): void {
-    if (this.statusSyncScheduled) {
-      return // Already running
-    }
-    this.statusSyncScheduled = true
-
-    console.log(`[ContainerHost] Starting status sync (interval: ${STATUS_SYNC_INTERVAL_MS / 1000}s)`)
-
-    // Set up periodic sync (initial sync is done by initializeAgents)
-    background(taskManager().ensureEvery(this.statusSyncTask.type, this.statusSyncTask.spec, { intervalMs: STATUS_SYNC_INTERVAL_MS }), { name: 'container-host.schedule-status-sync' })
-  }
-
-  /**
-   * Stop the periodic status sync.
-   */
-  stopStatusSync(): void {
-    if (this.statusSyncScheduled) {
-      this.statusSyncScheduled = false
-      background(taskManager().cancel(this.statusSyncTask.type), { name: 'container-host.cancel-status-sync' })
-      console.log('[ContainerHost] Stopped status sync')
-    }
-  }
-
-  /**
-   * Start periodic health monitoring for running containers.
-   */
-  startHealthMonitor(): void {
-    if (this.healthMonitorScheduled) {
-      return // Already running
-    }
-    this.healthMonitorScheduled = true
-
-    console.log(`[ContainerHost] Starting health monitor (interval: ${HEALTH_CHECK_INTERVAL_MS / 1000}s)`)
-
-    background(taskManager().ensureEvery(this.healthCheckTask.type, this.healthCheckTask.spec, { intervalMs: HEALTH_CHECK_INTERVAL_MS }), { name: 'container-host.schedule-health-monitor' })
-  }
-
-  /**
-   * Stop the periodic health monitor.
-   */
-  stopHealthMonitor(): void {
-    if (this.healthMonitorScheduled) {
-      this.healthMonitorScheduled = false
-      background(taskManager().cancel(this.healthCheckTask.type), { name: 'container-host.cancel-health-monitor' })
-      console.log('[ContainerHost] Stopped health monitor')
-    }
-  }
-
-  /**
-   * Run health checks on all running containers.
-   */
-  private async runHealthChecks(): Promise<void> {
-    const runningIds = this.getRunningAgentIds()
-    if (runningIds.length === 0) return
-
-    for (const slug of runningIds) {
-      try {
-        await this.runtime(slug).runHealthCheck()
-      } catch (error) {
-        console.error(`[ContainerHost] Health check failed for ${slug}:`, error)
-      }
-    }
   }
 
   // Stop all containers (with per-container timeout to prevent blocking shutdown)
   async stopAll(): Promise<void> {
     // Only stop containers that are actually running (based on cached status)
     // to avoid spawning unnecessary CLI processes during shutdown
-    const runningIds = this.getRunningAgentIds()
-    if (runningIds.length > 0) {
+    const running = this.runningRuntimes()
+    if (running.length > 0) {
       // Timeout must accommodate the full escalation chain:
       // Volume preparation (20s), then the existing stop/kill/force chain (25s).
       const STOP_TIMEOUT_MS = 50000
-      const stopPromises = runningIds.map(async (slug) => {
+      const stopPromises = running.map(async (runtime) => {
+        const slug = runtime.slug
         try {
           await Promise.race([
-            this.runtime(slug).stopContainer(),
+            runtime.stopContainer(),
             new Promise<never>((_, reject) =>
               setTimeout(() => reject(new Error('Container stop timed out')), STOP_TIMEOUT_MS)
             ),
@@ -420,9 +196,7 @@ export class ContainerHost {
 
   // Synchronous stop - used for exit handlers where async isn't available
   stopAllSync(): void {
-    this.stopStatusSync() // Stop the sync interval
-    this.stopHealthMonitor() // Stop the health monitor
-    for (const runtime of this.runtimes.values()) {
+    for (const runtime of this.heldRuntimes()) {
       runtime.stopSync()
     }
     this.clearRuntimes()
@@ -435,13 +209,13 @@ export class ContainerHost {
    * 3. Re-check runtime readiness so the VM restarts in the background
    */
   private afterForceStop(slug: string): void {
-    for (const otherId of this.getRunningAgentIds()) {
-      if (otherId === slug) continue
-      this.runtime(otherId).markAsStopped()
-      this.runtime(otherId).sessions().markAllInactive({ settleRecovering: true })
+    for (const other of this.runningRuntimes()) {
+      if (other.slug === slug) continue
+      other.markAsStopped()
+      other.sessions().markAllInactive({ settleRecovering: true })
       globalFeed.publish({
         type: 'agent_status_changed',
-        agentSlug: otherId,
+        agentSlug: other.slug,
         status: 'stopped',
       })
     }
