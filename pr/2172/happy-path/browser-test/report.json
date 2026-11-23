@@ -1,0 +1,23 @@
+{
+  "storyId": "browser-test",
+  "passed": true,
+  "reason": "Sent the \"Open a browser...\" prompt to agent QA-20261123-221149-7bhp and confirmed the reply names \"Example Domain\" as the page title.",
+  "steps": [
+    "Step 1: Navigated to http://localhost:47891 — Gamut app loaded with the sidebar listing QA-20261123-221149-7bhp and QA-20261123-221148-pcdy under \"Your Agents\". No errors.",
+    "Step 2: Clicked the QA-20261123-221149-7bhp agent — its agent page opened at /agents/qa-20261123-221149-7bhp-wfmeuchh0l, showing an idle status and an empty message box. Screenshot taken (step1-agent-selected.png).",
+    "Step 3: Typed \"Open a browser and go to https://example.com. Tell me the page title.\" and clicked Send — a new session \"Check Example.com Page Title\" started, the agent showed \"working\", and an \"Open Browser https://example.com\" tool card appeared. Screenshot taken before sending (step3-message-typed.png).",
+    "Step 4: Waited up to 180 seconds for \"Example Domain\" to appear — it matched within the window. The agent finished, the status returned to idle, and the turn showed \"Worked for 4s · 2 tool calls · 121,818 tokens\".",
+    "Step 5: Verified the response — the agent replied: 'The page title is \"Example Domain\".' The right-hand browser preview panel showed the example.com page with the \"Example Domain\" tab title and the \"Open Browser\" action. Screenshot taken (step5-response-verified.png)."
+  ],
+  "bugs": [],
+  "durationMs": 71252,
+  "sessionId": "7a2b9b91-4980-4c92-93a6-e478434b03b7",
+  "cost": {
+    "inputTokens": 8443,
+    "outputTokens": 5378,
+    "cacheCreationTokens": 70524,
+    "cacheReadTokens": 764250,
+    "model": "claude-haiku-5-5",
+    "totalCostUsd": 0.199913
+  }
+}
