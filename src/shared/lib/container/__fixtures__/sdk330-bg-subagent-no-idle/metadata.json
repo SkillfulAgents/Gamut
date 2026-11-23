@@ -1,0 +1,39 @@
+{
+  "sessionId": "c566bcef-d169-45e5-a074-c24032fa64f0",
+  "agentSlug": "probe",
+  "sdkVersion": "0.3.330",
+  "cliVersion": "2.1.330",
+  "capturedAt": "2026-11-23",
+  "model": "claude-haiku-4-5-20251001",
+  "startActive": true,
+  "subagents": [
+    {
+      "parentToolId": "toolu_01CcKzJTry8errgdWMy7hpMU",
+      "taskId": "a992b51866076e6c9",
+      "agentId": "a992b51866076e6c9",
+      "subagentType": "general-purpose",
+      "description": "bg probe"
+    }
+  ],
+  "source": "capture-fixtures.mjs (.claude/skills/update-claude-deps): direct Agent SDK query() with streaming input, CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS=1, includePartialMessages, perTaskStopAffordance; host capture wrapper (t = ms since start, message.content = SDK frame)",
+  "description": "Real capture (SDK 0.3.330 / CLI 2.1.330). Explicit run_in_background:true subagent that runs a foreground `sleep 5`; the lead turn ends while it runs, then the completion wake turn.",
+  "backgroundTasks": [
+    {
+      "taskId": "a992b51866076e6c9",
+      "taskType": "local_agent",
+      "startedT": 2050,
+      "prematureIdleT": null,
+      "realCompletionT": 10237
+    },
+    {
+      "taskId": "bwe1ye5zy",
+      "taskType": "local_bash",
+      "startedT": 7497,
+      "prematureIdleT": null,
+      "realCompletionT": 9515,
+      "parentTaskId": "a992b51866076e6c9"
+    }
+  ],
+  "settledT": 11368,
+  "totalEntries": 93
+}

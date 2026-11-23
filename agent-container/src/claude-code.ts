@@ -1175,6 +1175,13 @@ export class ClaudeCodeProcess extends EventEmitter {
         // `disableBundledSkills` (below) removes — without it the tool is dead
         // weight in every session's tool list.
         'ReportFindings',
+        // CLI 2.1.330's built-in easel plugin: a chart tool for the model
+        // (mcp__easel__chart) that draws in Claude Code's own transcript, not
+        // ours. It loads only behind a server-side flag, which
+        // CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC (env below) keeps us from
+        // fetching; this server-wide rule keeps its tools out if a later CLI
+        // turns it on by default.
+        'mcp__easel',
         // Suppress native WebSearch only when a host vendor is active; it's replaced by mcp__web__web_search.
         ...(this.webSearchProvider ? ['WebSearch'] : []),
         // Same for native WebFetch → mcp__web__web_fetch when a host fetch vendor is active.

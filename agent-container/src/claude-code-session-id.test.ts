@@ -224,6 +224,15 @@ describe('ClaudeCodeProcess CLI feature opt-outs', () => {
     expect((options.env as Record<string, string>).CLAUDE_CODE_DISABLE_ARTIFACT).toBe('1')
   })
 
+  // CLI 2.1.330's built-in chart plugin: blocked server-wide in case a later
+  // CLI turns it on without the feature flag we never fetch.
+  it('keeps the built-in easel chart tools out of the session', async () => {
+    const process = new ClaudeCodeProcess({ sessionId: 'easel', workingDirectory: '/tmp' })
+    await process.start()
+
+    expect(calls[0].options.disallowedTools).toContain('mcp__easel')
+  })
+
   // Empty attribution is what stops the CLI adding its commit/PR attribution
   // system-reminder to the first turn. See createQuery.
   it('sets commit and PR attribution to empty', async () => {
