@@ -245,6 +245,8 @@ function createContainerWatchHooks(slug: AgentSlug, self: () => AgentState): Age
         runtime.markAsStopped()
         return null
       })
+      // Dropped during the read (the agent evicted): asking it for a client would make one and restart the watch.
+      if (state.peekRuntime() !== runtime) return
       if (!info || info.status === 'running' || !confirmsStop) return
       const confirmed = await runtime.getClient().then((client) => client.isDefinitelyStopped()).catch(() => false)
       // Reading was an await: a start may have begun meanwhile, and it turns the checks back on.
