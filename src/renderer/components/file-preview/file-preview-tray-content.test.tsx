@@ -16,8 +16,8 @@ const mocks = vi.hoisted((): { openTabs: PreviewTab[] } => ({
   }],
 }))
 
-vi.mock('@renderer/context/file-preview-context', async importOriginal => ({
-  ...await importOriginal<typeof import('@renderer/context/file-preview-context')>(),
+vi.mock('@renderer/context/file-preview-context', async () => ({
+  ...await import('@renderer/lib/preview-tab-key'),
   useFilePreview: () => ({
     openTabs: mocks.openTabs,
     activeTabIndex: 0,
