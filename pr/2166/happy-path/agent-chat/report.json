@@ -1,26 +1,24 @@
 {
   "storyId": "agent-chat",
   "passed": true,
-  "reason": "Opened the QA-20261123-202817-aouc agent, sent \"Hello! What is 2+2?\", and confirmed the reply contains \"4\".\n  Bugs found:\n    - Minor, not reproduced: the session link in the sidebar has href /agents/2791l16z9b/sessions/30faf98f-b4df-42f3-ada7-2e143e25f147, which omits the agent slug prefix used by the agent link (/agents/qa-20261123-202817-aouc-2791l16z9b). I saw this in the accessibility snapshot only and did not click it, since it was outside the listed steps.",
+  "reason": "Opened the QA-20261123-205334-84sr agent, confirmed it was idle, sent \"Hello! What is 2+2?\", and verified the reply contains \"4\".",
   "steps": [
-    "Navigated to http://localhost:47891 — page loaded titled \"Gamut\" with the sidebar listing QA-20261123-202818-uveb and QA-20261123-202817-aouc under Your Agents.",
-    "Clicked the QA-20261123-202817-aouc entry in the sidebar — agent page opened at /agents/qa-20261123-202817-aouc-2791l16z9b with its name in the header.",
-    "Verified agent status — the status indicator in the header reads \"idle\" (also shown as \"Idle\" in the sidebar card). Screenshot taken.",
-    "Typed \"Hello! What is 2+2?\" into the message box and clicked Send — the app navigated to a new session (\"Simple Arithmetic Question Check\") and the message appeared in the message list.",
-    "Waited for the response — the activity indicator showed \"Working...\" briefly, then the reply \"2 + 2 = 4.\" appeared and the header returned to \"idle\". The wait was well under the 3-minute limit.",
-    "Verified the response mentions \"4\" — it reads \"2 + 2 = 4.\" Screenshot taken showing the question and answer."
+    "Navigated to http://localhost:47891 — the Gamut home page loaded with the sidebar listing both QA agents, both idle.",
+    "Clicked the QA-20261123-205334-84sr agent in the sidebar — its agent page opened at /agents/qa-20261123-205334-84sr-r55fnsuw46.",
+    "Checked the agent status — the header status indicator reads \"idle\", which is an allowed status.",
+    "Typed \"Hello! What is 2+2?\" into the message box and clicked Send — the message was sent and the page navigated to a new session titled \"Basic Arithmetic Greeting\".",
+    "Waited for a response — \"2 + 2 = 4.\" appeared right away, well within the 3-minute limit. The activity indicator was no longer showing.",
+    "Verified the response mentions \"4\" and took a screenshot — the chat shows the user message \"Hello! What is 2+2?\" followed by the assistant reply \"2 + 2 = 4.\", and the agent is still idle."
   ],
-  "bugs": [
-    "Minor, not reproduced: the session link in the sidebar has href /agents/2791l16z9b/sessions/30faf98f-b4df-42f3-ada7-2e143e25f147, which omits the agent slug prefix used by the agent link (/agents/qa-20261123-202817-aouc-2791l16z9b). I saw this in the accessibility snapshot only and did not click it, since it was outside the listed steps."
-  ],
-  "durationMs": 37797,
-  "sessionId": "6a176548-ec3e-424c-a496-ffc9f4c7e925",
+  "bugs": [],
+  "durationMs": 47178,
+  "sessionId": "6b678d82-25ed-4868-97ce-3882c48f8c72",
   "cost": {
-    "inputTokens": 8171,
-    "outputTokens": 7764,
-    "cacheCreationTokens": 78341,
-    "cacheReadTokens": 711081,
+    "inputTokens": 8396,
+    "outputTokens": 5798,
+    "cacheCreationTokens": 147389,
+    "cacheReadTokens": 591309,
     "model": "claude-haiku-5-5",
-    "totalCostUsd": 0.216025
+    "totalCostUsd": 0.280753
   }
 }
