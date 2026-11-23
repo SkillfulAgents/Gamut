@@ -4,6 +4,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { renderWithProviders } from '@renderer/test/test-utils'
 import { SessionThread } from './session-thread'
 
+vi.mock('@renderer/context/session-background-tasks-context', () => ({
+  SessionBackgroundTasksProvider: ({ children }: { children: React.ReactNode }) => children,
+}))
+
 let footerHeight = 0
 let resizeCallback: ResizeObserverCallback | undefined
 

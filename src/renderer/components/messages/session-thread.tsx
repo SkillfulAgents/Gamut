@@ -1,3 +1,4 @@
+import { SessionBackgroundTasksProvider } from '@renderer/context/session-background-tasks-context'
 import { useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { cn } from '@shared/lib/utils'
 import { MessageList } from '@renderer/components/messages/message-list'
@@ -37,7 +38,15 @@ interface SessionThreadProps {
  * always sit together under the same FilePreviewProvider, which each caller
  * supplies above this component.
  */
-export function SessionThread({
+export function SessionThread(props: SessionThreadProps) {
+  return (
+    <SessionBackgroundTasksProvider sessionId={props.sessionId} agentSlug={props.agentSlug}>
+      <SessionThreadContent {...props} />
+    </SessionBackgroundTasksProvider>
+  )
+}
+
+function SessionThreadContent({
   sessionId,
   agentSlug,
   footer,
