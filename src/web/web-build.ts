@@ -24,6 +24,11 @@ export const CONSENT_PAGE_HEADERS = {
   'X-Frame-Options': 'DENY',
 } as const
 
+/** The consent page's paths, as the renderer's case-insensitive router matches them. */
+export function isConsentPagePath(path: string): boolean {
+  return /^\/oauth(?:\/|$)/i.test(path)
+}
+
 /** Serve the built renderer in `root`: its files, and its HTML entry for every other route. */
 export function mountWebBuild(app: Hono, root: string): void {
   // The HTML entry carries this server's facts, so a page knows them before its
@@ -61,13 +66,16 @@ export function mountWebBuild(app: Hono, root: string): void {
       onFound: (filePath, c) => c.header('Cache-Control', staticCacheControl(filePath)),
     }),
   )
-  // The MCP consent page grants a client access to the person's account, so
-  // no other origin may frame it (clickjacking). Narrow on purpose: only this
-  // route's document; the PWA never answers it from cache (vite.config.ts).
-  app.get('/oauth/*', (c) => {
-    for (const [name, value] of Object.entries(CONSENT_PAGE_HEADERS)) c.header(name, value)
+  // SPA fallback: any unmatched route serves the HTML entry. The MCP consent
+  // page grants a client access to the person's account, so no other origin
+  // may frame it (clickjacking): its document, in any letter case (the
+  // renderer's router matches paths case-insensitively), carries
+  // CONSENT_PAGE_HEADERS. Narrow on purpose: only that route; the PWA never
+  // answers it from cache (vite.config.ts).
+  app.get('*', (c) => {
+    if (isConsentPagePath(c.req.path)) {
+      for (const [name, value] of Object.entries(CONSENT_PAGE_HEADERS)) c.header(name, value)
+    }
     return serveIndex(c)
   })
-  // SPA fallback: any unmatched route serves the HTML entry.
-  app.get('*', serveIndex)
 }

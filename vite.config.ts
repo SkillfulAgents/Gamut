@@ -54,7 +54,7 @@ export default defineConfig({
         // the MCP OAuth discovery documents (/.well-known) and the consent page
         // (/oauth, served with frame-ancestors 'none') must hit the network.
         navigateFallback: 'index.html',
-        navigateFallbackDenylist: [/^\/api\//, /^\/auth\//, /^\/mcp(?:$|[/?])/, /^\/\.well-known\//, /^\/oauth\//],
+        navigateFallbackDenylist: [/^\/api\//, /^\/auth\//, /^\/mcp(?:$|[/?])/, /^\/\.well-known\//, /^\/oauth(?:\/|$)/i],
         // Vendor chunk exceeds workbox's 2MB default before compression.
         maximumFileSizeToCacheInBytes: 8 * 1024 * 1024,
         inlineWorkboxRuntime: true, // single sw.js file, nothing extra at the dist root
@@ -117,7 +117,7 @@ export default defineConfig({
         }
         // The dev server's half of web-build.ts's consent-page headers.
         server.middlewares.use((req, res, next) => {
-          if (req.url?.startsWith('/oauth/')) {
+          if (/^\/oauth(?:\/|$|\?)/i.test(req.url ?? '')) {
             res.setHeader('Content-Security-Policy', "frame-ancestors 'none'")
             res.setHeader('X-Frame-Options', 'DENY')
           }

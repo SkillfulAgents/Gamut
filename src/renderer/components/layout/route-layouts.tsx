@@ -69,7 +69,7 @@ function RootLayoutContent() {
   // The MCP consent page stands alone: a person signing in there for the first
   // time is connecting a client, not setting up, so the wizard waits, and the
   // signup handoff does not read the OAuth query's `prompt` as its own.
-  const standalone = useRouterState({ select: (s) => s.location.pathname === '/oauth/consent' })
+  const standalone = useRouterState({ select: (s) => /^\/oauth\/consent\/?$/i.test(s.location.pathname) })
   const { prompt, template_slug } = lenient(homeSearchSchema)(search)
   const hasAutoOpened = useRef(false)
   // Latched from the URL on first sighting so stripping the params cannot
