@@ -9,7 +9,7 @@ import { resolveAgentRuntimeErrorPreview } from '@shared/lib/agent-runtime-error
 import { Button } from '@renderer/components/ui/button'
 import { LoginButton, useFocusAfterCancel } from '@renderer/components/connections/login-button'
 import { LoginWindowCancel } from '@renderer/components/connections/login-window-cancel'
-import { VolumeDetailsFields, VolumeSetupFooter } from './volume-setup-layout'
+import { useVolumeSaveLabel, VolumeDetailsFields, VolumeSetupFooter } from './volume-setup-layout'
 import type { VolumeDetails } from './volume-details-schema'
 
 /** The account step of a remote source's setup: choose a connected account of its
@@ -130,12 +130,13 @@ export function VolumeRemoteDetailsStep({ label, accountName, active, details, o
   onCancel: () => void
   children: ReactNode
 }) {
+  const submitLabel = useVolumeSaveLabel(attachToAgent ? 'Create and add' : 'Create drive')
   return <form className="space-y-4" onSubmit={event => { event.preventDefault(); if (active && canSave) onSave() }}>
     <p className="rounded-item bg-muted/50 px-3 py-2 text-sm" data-testid="selected-volume-account">{accountName ?? `${label} account`}</p>
     {!active && <p role="alert" className="text-sm text-destructive">This account is unavailable. Go back to choose or connect a {label} account.</p>}
     <VolumeDetailsFields value={details} onChange={onDetailsChange} disabled={isSaving}>{children}</VolumeDetailsFields>
     {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
     <VolumeSetupFooter onBack={onBack} onCancel={onCancel} isSaving={isSaving}
-      disabled={!active || !details.name.trim() || !canSave} submitLabel={attachToAgent ? 'Create and add' : 'Create drive'} />
+      disabled={!active || !details.name.trim() || !canSave} submitLabel={submitLabel} />
   </form>
 }

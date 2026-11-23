@@ -1,8 +1,9 @@
-import { useState } from 'react'
+import { useContext, useState } from 'react'
 import { cn } from '@shared/lib/utils/cn'
 import { storedPlatformVolumeConfigSchema } from '@shared/lib/volumes/volume-config-schema'
 import { VolumeFolderPicker, type VolumeFolderSource } from './volume-folder-picker'
-import { VolumeDetailsFields, VolumeSetupFooter, VolumeSetupHeader } from './volume-setup-layout'
+import { VolumeNewFolderStep } from './volume-new-folder-step'
+import { useVolumeSaveLabel, VolumeDetailsFields, VolumeSetupFolderContext, VolumeSetupFooter, VolumeSetupHeader } from './volume-setup-layout'
 import type { VolumeSetupDefinition, VolumeSetupProps } from './volume-setup'
 
 // The app icon carries its own light square, like Notion's service icon, so it reads on every tile.
@@ -24,11 +25,20 @@ const gamutDrives: VolumeFolderSource<DriveCursor> = {
 }
 
 function PlatformVolumeSetup({ initialDetails, onSubmit, onBack, onCancel, isSaving, error, clearError, attachToAgent }: VolumeSetupProps) {
+  const mode = useContext(VolumeSetupFolderContext)
   const [drive, setDrive] = useState<DriveCursor>(null)
   const [details, setDetails] = useState(initialDetails)
+  const submitLabel = useVolumeSaveLabel(attachToAgent ? 'Add' : 'Add drive', { noun: 'drive' })
+
+  if (mode === 'new') return <>
+    <VolumeSetupHeader title="Create a Gamut drive" description="Make a new drive your org shares." Logo={GamutLogo} steps={['Source', 'Details']} step={1} />
+    <VolumeNewFolderStep source={gamutDrives} noun="drive" accountId="" defaultName={initialDetails.name} where={{ initial: null, pick: false }}
+      toConfig={made => ({ volumeId: made.id })} onSubmit={made => onSubmit(made, details)} onBack={onBack} onCancel={onCancel}
+      isSaving={isSaving} error={error} clearError={clearError} />
+  </>
 
   return <>
-    <VolumeSetupHeader title="Set up Gamut drive" description="Choose a drive your org shares, or make one. Agents you add it to get read/write access."
+    <VolumeSetupHeader title={mode === 'existing' ? 'Choose a Gamut drive' : 'Set up Gamut drive'} description="Choose a drive your org shares, or make one. Agents you add it to get read/write access."
       Logo={GamutLogo} steps={['Source', 'Details']} step={1} />
     <form className="space-y-4" onSubmit={event => { event.preventDefault(); if (drive) void onSubmit({ volumeId: drive.id }, details) }}>
       <VolumeFolderPicker source={gamutDrives} accountId="" initial={null} selected={drive?.name ?? null} disabled={isSaving} onChange={picked => {
@@ -41,7 +51,7 @@ function PlatformVolumeSetup({ initialDetails, onSubmit, onBack, onCancel, isSav
       {drive && <VolumeDetailsFields value={details} onChange={value => { setDetails(value); clearError() }} disabled={isSaving}>{null}</VolumeDetailsFields>}
       {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
       <VolumeSetupFooter onBack={onBack} onCancel={onCancel} isSaving={isSaving} disabled={!drive || !details.name.trim()}
-        submitLabel={attachToAgent ? 'Add' : 'Add drive'} />
+        submitLabel={submitLabel} />
     </form>
   </>
 }

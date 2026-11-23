@@ -5,7 +5,7 @@ import { cleanup, render, screen, waitFor, within } from '@testing-library/react
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { VolumeSetupProps } from '@renderer/components/volumes/volume-setup'
-import type { TeamBrainSetup } from '@shared/lib/config/team-brain-schema'
+import type { TeamBrainOrigin, TeamBrainSetup } from '@shared/lib/config/team-brain-schema'
 
 const DRIVE = { accountId: 'acct', folderId: 'folder1', folderName: 'Brain', driveName: 'My Drive' }
 
@@ -23,6 +23,8 @@ const { app, user } = vi.hoisted(() => ({
     /** Agents whose sessions Team Brain reads: what an earlier Start chat gave. */
     reads: new Set<string>(),
     drives: 0,
+    /** The name each drive was made with. */
+    driveNames: [] as string[],
     /** The next claim is answered as another admin's set-up would be: stale, with theirs saved. */
     otherAdmin: null as TeamBrainSetup | null,
     /** Another window records its own agent just before this one does. */
@@ -89,7 +91,7 @@ function claimRoute(method: string, url: string, body: Record<string, unknown>) 
   const { setupId, agent, drive, ...choices } = body as {
     setupId: string
     agent?: { slug: string | null; replaces: string | null }
-    drive?: { volumeId: string | null; location: TeamBrainSetup['location']; replaces: string | null }
+    drive?: { volumeId: string | null; location: TeamBrainSetup['location']; origin?: TeamBrainOrigin; replaces: string | null }
   } & Partial<TeamBrainSetup>
   if (setupId !== app.setup.setupId) return refused(409, 'stale')
   if (agent) {
@@ -113,7 +115,7 @@ function claimRoute(method: string, url: string, body: Record<string, unknown>) 
     agents: { ...app.setup.agents, ...choices.agents },
     step: choices.step && STEPS.indexOf(choices.step) > STEPS.indexOf(app.setup.step) ? choices.step : app.setup.step,
     ...(agent ? { agentSlug: agent.slug } : {}),
-    ...(drive ? { volumeId: drive.volumeId, location: drive.location } : {}),
+    ...(drive ? { volumeId: drive.volumeId, location: drive.location, origin: drive.origin } : {}),
   }
   return answer(200, viewOf(app.setup))
 }
@@ -200,7 +202,8 @@ vi.mock('@renderer/hooks/use-mounts', () => ({
     refetch: app.recheck,
   }),
   useAddMount: () => ({
-    mutateAsync: async ({ agentSlug }: { agentSlug: string }) => {
+    mutateAsync: async ({ agentSlug, name }: { agentSlug: string; name: string }) => {
+      app.driveNames.push(name)
       const volumeId = `vol${++app.drives}`
       app.calls.push(`make drive ${volumeId}`)
       app.attached.set(volumeId, new Set([agentSlug]))
@@ -225,12 +228,16 @@ vi.mock('@renderer/components/ui/app-link', () => ({ AppLink: ({ children }: { c
 vi.mock('sonner', () => ({ toast: Object.assign(vi.fn(), { error: vi.fn(), info: vi.fn() }) }))
 // The home page has its own tests; here it only needs to show up, for the right agent.
 vi.mock('./team-brain-overview', () => ({ TeamBrainOverview: ({ agent }: { agent: { slug: string } }) => <div data-testid="team-brain-home">{agent.slug}</div> }))
-// The drive's own set-up, reduced to its save.
+// The drive's own set-up, reduced to its save, the folder the window says it is after, and a name of its own, as a
+// set-up that fills the drive's name from the chosen folder hands back.
 vi.mock('@renderer/components/volumes/volume-setup-registry', async (importOriginal) => {
   const { volumeSetupRegistry } = await importOriginal<typeof import('@renderer/components/volumes/volume-setup-registry')>()
+  const { VolumeSetupFolderContext } = await import('@renderer/components/volumes/volume-setup-layout')
+  const { useContext } = await import('react')
   const Setup = ({ initialDetails, onSubmit, error }: VolumeSetupProps) => (
     <>
-      <button type="button" data-testid="drive-save" onClick={() => void onSubmit(DRIVE, initialDetails)}>Save</button>
+      <span data-testid="drive-folder-mode">{useContext(VolumeSetupFolderContext)}</span>
+      <button type="button" data-testid="drive-save" onClick={() => void onSubmit(DRIVE, { ...initialDetails, name: DRIVE.folderName })}>Save</button>
       {error && <p role="alert">{error}</p>}
     </>
   )
@@ -268,7 +275,7 @@ beforeEach(() => {
   client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   resetTeamBrainState()
   Object.assign(app, {
-    calls: [], agents: [agent('writer'), agent('planner')], setup: null, existing: new Set(), attached: new Map(), reads: new Set(), drives: 0,
+    calls: [], agents: [agent('writer'), agent('planner')], setup: null, existing: new Set(), attached: new Map(), reads: new Set(), drives: 0, driveNames: [],
     otherAdmin: null, otherWindowAgent: null, finishedElsewhere: false, readyFails: false,
     instructions: '- **Brain location:** `{{brain_path}}`\n- **Maintenance schedule:** `{{schedule}}`',
     health: 'ok', pollFailed: false, skillsets: [{ id: DEFAULT_PUBLIC_SKILLSET.id }], skillsetsFailed: false,
@@ -281,8 +288,18 @@ afterEach(() => {
   vi.clearAllMocks()
 })
 
-async function saveDrive(clicker: ReturnType<typeof userEvent.setup>, opener = 'team-brain-start') {
+/** The current step's own title, apart from the window's. */
+const stepTitle = () => within(screen.getByTestId('team-brain-onboarding-step')).getByRole('heading')
+
+/** Open the window and answer its first question; Next shows the homes. */
+async function openAt(clicker: ReturnType<typeof userEvent.setup>, opener = 'team-brain-start', origin: TeamBrainOrigin = 'new') {
   await clicker.click(await screen.findByTestId(opener))
+  await clicker.click(screen.getByTestId(`team-brain-origin-${origin}`))
+  await clicker.click(screen.getByTestId('team-brain-next'))
+}
+
+async function saveDrive(clicker: ReturnType<typeof userEvent.setup>, opener = 'team-brain-start', origin: TeamBrainOrigin = 'new') {
+  await openAt(clicker, opener, origin)
   // Choosing a home only selects it; Next opens its set-up.
   await clicker.click(screen.getByTestId('team-brain-location-googledrive'))
   expect(screen.queryByTestId('drive-save')).toBeNull()
@@ -299,12 +316,21 @@ describe('TeamBrainPage', () => {
     app.agentsPending = false
   })
 
-  it('opens on the pitch, and Set up opens the window at where it lives with nothing chosen', async () => {
+  it('opens on the pitch, and Set up asks first whether there is a Team Brain already, then where, with nothing chosen', async () => {
     render(<TeamBrainPage />)
     expect(await screen.findByRole('heading', { level: 1 })).toHaveTextContent('One source of truth for every agent.')
 
     await userEvent.click(screen.getByTestId('team-brain-start'))
     expect(screen.getByTestId('team-brain-onboarding-step')).toHaveAttribute('data-step', 'location')
+    expect(stepTitle()).toHaveTextContent('Do you already have a Team Brain?')
+    expect(screen.queryAllByTestId(/^team-brain-location-/)).toEqual([])
+    for (const origin of ['new', 'existing']) expect(screen.getByTestId(`team-brain-origin-${origin}`)).toHaveAttribute('aria-checked', 'false')
+    expect(screen.getByTestId('team-brain-next')).toBeDisabled()
+    expect(screen.queryByTestId('team-brain-back')).toBeNull()
+
+    await userEvent.click(screen.getByTestId('team-brain-origin-new'))
+    await userEvent.click(screen.getByTestId('team-brain-next'))
+    expect(stepTitle()).toHaveTextContent('Choose where to create your Team Brain')
     // Every drive type the drives offer, Google Drive and Dropbox first, then the rest in the drives' own order.
     const homes = screen.getAllByTestId(/^team-brain-location-/)
     const rest = Object.values(volumeSetupRegistry).map((drive) => drive.type).filter((id) => id !== 'googledrive' && id !== 'dropbox')
@@ -313,6 +339,48 @@ describe('TeamBrainPage', () => {
     expect(screen.getByTestId('team-brain-next')).toBeDisabled()
     // Opening the window claims nothing.
     expect(app.calls).toEqual([])
+
+    // Back returns to the first question with its answer kept; the other answer changes what the homes are for.
+    await userEvent.click(screen.getByTestId('team-brain-back'))
+    expect(screen.getByTestId('team-brain-origin-new')).toHaveAttribute('aria-checked', 'true')
+    await userEvent.click(screen.getByTestId('team-brain-origin-existing'))
+    await userEvent.click(screen.getByTestId('team-brain-next'))
+    expect(stepTitle()).toHaveTextContent('Choose where your Team Brain is stored')
+  })
+
+  it.each(['new', 'existing'] as const)('tells the drive’s set-up it is after a %s folder, records the answer, and names the drive Team Brain itself', async (origin) => {
+    const clicker = userEvent.setup()
+    render(<TeamBrainPage />)
+    await openAt(clicker, 'team-brain-start', origin)
+    await clicker.click(screen.getByTestId('team-brain-location-googledrive'))
+    await clicker.click(screen.getByTestId('team-brain-next'))
+    expect(screen.getByTestId('drive-folder-mode')).toHaveTextContent(origin)
+    await clicker.click(screen.getByTestId('drive-save'))
+    await waitFor(() => expect(screen.getByTestId('team-brain-onboarding-step')).toHaveAttribute('data-step', 'agents'))
+    expect(app.setup).toMatchObject({ location: 'googledrive', origin })
+    // The folder's name is the folder's; agents find the drive at one path whatever it is called.
+    expect(app.driveNames).toEqual(['Team Brain'])
+  })
+
+  it('goes straight on from a prepared first step, and sets it up again when the first answer changes', async () => {
+    const clicker = userEvent.setup()
+    leftAt({ ...SAVED, origin: 'existing', step: 'agents' })
+    render(<TeamBrainPage />)
+    await clicker.click(await screen.findByTestId('team-brain-resume'))
+    await clicker.click(screen.getByTestId('team-brain-back'))
+    // The homes, with the saved one chosen: nothing to do but go on.
+    expect(stepTitle()).toHaveTextContent('Choose where your Team Brain is stored')
+    expect(screen.getByTestId('team-brain-next')).toHaveTextContent('Next: Agents')
+
+    await clicker.click(screen.getByTestId('team-brain-back'))
+    expect(screen.getByTestId('team-brain-origin-existing')).toHaveAttribute('aria-checked', 'true')
+    await clicker.click(screen.getByTestId('team-brain-origin-new'))
+    await clicker.click(screen.getByTestId('team-brain-next'))
+    expect(screen.getByTestId('team-brain-next')).toHaveTextContent('Next: Set up Google Drive')
+    await clicker.click(screen.getByTestId('team-brain-next'))
+    await clicker.click(screen.getByTestId('drive-save'))
+    await waitFor(() => expect(app.setup).toMatchObject({ volumeId: 'vol2', origin: 'new' }))
+    expect(made()).toEqual(['release drive vol1', 'unmount team-brain', 'delete drive vol1', 'make drive vol2', 'record drive vol2'])
   })
 
   it('claims before it makes anything, records the agent and the drive as each is made, and saves choices as they change', async () => {
@@ -399,7 +467,10 @@ describe('TeamBrainPage', () => {
       app.existing.clear()
       app.attached.get('vol1')!.clear()
       render(<TeamBrainPage />)
-      await saveDrive(clicker, 'team-brain-resume')
+      // Its first answer and its home are still chosen, so it opens at the homes.
+      await clicker.click(await screen.findByTestId('team-brain-resume'))
+      await clicker.click(screen.getByTestId('team-brain-next'))
+      await clicker.click(screen.getByTestId('drive-save'))
       await waitFor(() => expect(screen.getByTestId('team-brain-onboarding-step')).toHaveAttribute('data-step', 'agents'))
       expect(made()).toEqual(['install', 'record agent team-brain', 'release drive vol1', 'delete drive vol1', 'make drive vol2', 'record drive vol2'])
     })
@@ -562,7 +633,7 @@ describe('TeamBrainPage', () => {
       app.skillsets = [...app.skillsets, { id: DEFAULT_PUBLIC_SKILLSET.id }]
     })
     render(<TeamBrainPage />)
-    await clicker.click(await screen.findByTestId('team-brain-start'))
+    await openAt(clicker)
     await clicker.click(screen.getByTestId('team-brain-location-googledrive'))
     expect(screen.getByTestId('team-brain-next')).toBeDisabled()
 
@@ -578,7 +649,7 @@ describe('TeamBrainPage', () => {
     app.addSkillset.mockRejectedValueOnce(new Error('Failed to download skillset: 403 Forbidden'))
     const reread = invalidate()
     render(<TeamBrainPage />)
-    await clicker.click(await screen.findByTestId('team-brain-start'))
+    await openAt(clicker)
     await clicker.click(screen.getByTestId('team-brain-location-googledrive'))
     const notice = screen.getByTestId('team-brain-public-skillset-missing')
     await clicker.click(within(notice).getByRole('button'))
@@ -594,7 +665,7 @@ describe('TeamBrainPage', () => {
     app.skillsetsFailed = true
     app.skillsets = [{ id: 'github-com-acme-skills' }]
     render(<TeamBrainPage />)
-    await clicker.click(await screen.findByTestId('team-brain-start'))
+    await openAt(clicker)
     await clicker.click(screen.getByTestId('team-brain-location-googledrive'))
     expect(screen.getByText('Couldn’t read this workspace’s skillsets.')).toBeInTheDocument()
     expect(screen.queryByTestId('team-brain-public-skillset-missing')).toBeNull()
@@ -612,7 +683,7 @@ describe('TeamBrainPage', () => {
   it('puts a drive set-up’s buttons in the modal’s own bar', async () => {
     const clicker = userEvent.setup()
     render(<TeamBrainPage />)
-    await clicker.click(await screen.findByTestId('team-brain-start'))
+    await openAt(clicker)
     await clicker.click(screen.getByTestId('team-brain-location-s3'))
     await clicker.click(screen.getByTestId('team-brain-next'))
     const footer = await screen.findByTestId('team-brain-drive-footer')

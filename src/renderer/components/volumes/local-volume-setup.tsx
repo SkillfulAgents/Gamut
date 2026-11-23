@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Folder } from 'lucide-react'
 import { canUseHostFeatures } from '@renderer/lib/capabilities'
 import { localVolumeConfigSchema } from '@shared/lib/volumes/volume-config-schema'
-import { VolumeDetailsFields, VolumeSetupFooter, VolumeSetupHeader } from './volume-setup-layout'
+import { useVolumeSaveLabel, VolumeDetailsFields, VolumeSetupFooter, VolumeSetupHeader } from './volume-setup-layout'
 import { FolderLocationField } from './volume-folder-picker'
 import type { VolumeSetupDefinition, VolumeSetupProps } from './volume-setup'
 
@@ -23,6 +23,8 @@ function LocalVolumeSetup({ initialConfig, initialDetails, onSubmit, onBack, onC
   const [details, setDetails] = useState(() => ({ ...initialDetails, name: initialDetails.name || folderName(config.path) }))
   const [pickerError, setPickerError] = useState<string | null>(null)
   const [isPicking, setIsPicking] = useState(false)
+  // The system's folder window makes new folders itself, so a host after a new one and a host after one already there both end at "Use this folder".
+  const submitLabel = useVolumeSaveLabel(attachToAgent ? 'Create and add' : 'Create drive')
 
   const changeFolder = async () => {
     setPickerError(null)
@@ -46,7 +48,7 @@ function LocalVolumeSetup({ initialConfig, initialDetails, onSubmit, onBack, onC
         <FolderLocationField location={config.path || null} onClick={() => { void changeFolder() }} disabled={isSaving || isPicking} />
       </VolumeDetailsFields>
       {(error || pickerError) && <p role="alert" className="text-sm text-destructive">{error || pickerError}</p>}
-      <VolumeSetupFooter onBack={onBack} onCancel={onCancel} isSaving={isSaving || isPicking} disabled={!details.name.trim() || !config.path} submitLabel={attachToAgent ? 'Create and add' : 'Create drive'} />
+      <VolumeSetupFooter onBack={onBack} onCancel={onCancel} isSaving={isSaving || isPicking} disabled={!details.name.trim() || !config.path} submitLabel={submitLabel} />
     </form>
   </>
 }

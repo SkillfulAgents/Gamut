@@ -6,16 +6,16 @@ import { usePreparedDriveHealth, type useTeamBrainSetup } from '@renderer/hooks/
 import { Button } from '@renderer/components/ui/button'
 import { volumeSetupRegistry } from '@renderer/components/volumes/volume-setup-registry'
 import { parseVolumeSource, type VolumeSetupDefinition } from '@renderer/components/volumes/volume-setup'
-import { VolumeEveryoneOnlyContext, VolumeSetupFooterContext, type VolumeSetupFooterProps } from '@renderer/components/volumes/volume-setup-layout'
+import { VolumeEveryoneOnlyContext, VolumeSetupFolderContext, VolumeSetupFooterContext, type VolumeSetupFooterProps } from '@renderer/components/volumes/volume-setup-layout'
 import { volumeDetailsSchema, type VolumeDetails } from '@renderer/components/volumes/volume-details-schema'
 import { DEFAULT_PUBLIC_SKILLSET } from '@shared/lib/skillset-provider/default-public-skillset'
 import { cn } from '@shared/lib/utils/cn'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@renderer/components/ui/dialog'
 import { usesTeamBrain, useTeamBrain } from '@renderer/lib/team-brain/team-brain-store'
 import type { TeamBrainSourceId } from '@renderer/lib/team-brain/team-brain-schema'
-import { TEAM_BRAIN_STEPS, type TeamBrainLocationId, type TeamBrainStep } from '@shared/lib/config/team-brain-schema'
+import { TEAM_BRAIN_STEPS, type TeamBrainLocationId, type TeamBrainOrigin, type TeamBrainStep } from '@shared/lib/config/team-brain-schema'
 import { TeamBrainSourceIcon } from './team-brain-source-icon'
-import { LocationChoices, ScheduleChoices } from './team-brain-choices'
+import { LocationChoices, OriginChoices, ScheduleChoices } from './team-brain-choices'
 import { teamBrainLocation } from './team-brain-locations'
 import { AgentAccessList, EveryAgentRow } from './team-brain-agent-access'
 
@@ -49,9 +49,10 @@ const SECONDARY = cn(BUTTON_BASE, 'border bg-background hover:bg-muted')
  * grey subtitle; Back and "Next: …" in a ruled footer. Closing keeps the
  * set-up: the page offers Resume and Discard.
  *
- * It asks what a form asks best (where it lives, what each agent may do, how
- * often it syncs), then hands over to Start chat: a chat with Team Brain for
- * the team's context. Saving the drive on step 01 claims the set-up.
+ * It asks what a form asks best (whether there is a Team Brain already, where
+ * it lives, what each agent may do, how often it syncs), then hands over to
+ * Start chat: a chat with Team Brain for the team's context. Saving the drive
+ * on step 01 claims the set-up.
  */
 export function TeamBrainOnboarding({ open, setup }: { open: boolean; setup: TeamBrainSetupActions }) {
   const tb = useTeamBrain()
@@ -181,11 +182,31 @@ function StepPanel({
 
 // ── 01 Where it lives ────────────────────────────────────────────────────────
 
+/** The drive is Team Brain's in the app whatever its folder is called: agents find it at one path. */
+const TEAM_BRAIN_DRIVE_NAME = 'Team Brain'
+
+/** What the homes are for, by the first question's answer. */
+const LOCATION_COPY: Record<TeamBrainOrigin, { title: string; subtitle: string }> = {
+  new: {
+    title: 'Choose where to create your Team Brain',
+    subtitle: 'A new folder is made there for Team Brain’s knowledge. Next, you name it and choose where it goes. It is possible to migrate later if needed.',
+  },
+  existing: {
+    title: 'Choose where your Team Brain is stored',
+    subtitle: 'Next, you select the folder your team already keeps it in. Every agent you connect to Team Brain will read and add to the knowledge there.',
+  },
+}
+
 /**
- * Choosing a home only selects it; Next opens that drive's own set-up in place of the cards, and saving it prepares
- * Team Brain there. Back on this step with the prepared home still chosen, Next goes straight on.
+ * Three screens in one step. First, whether the team has a Team Brain already or wants a new one. Then the homes:
+ * choosing one only selects it, and Next opens that drive's own set-up in place of the cards. That set-up selects the
+ * folder there already, or names a new folder and says where it goes and makes it; saving it prepares Team Brain
+ * there. Back on this step with the prepared answers still chosen, Next goes straight on.
  */
 function LocationStep({ setup, nav }: { setup: TeamBrainSetupActions; nav: StepNav }) {
+  // A set-up from before the first question was asked selected a folder that was there.
+  const [origin, setOrigin] = useState<TeamBrainOrigin | null>(setup.setup?.origin ?? (setup.setup?.location ? 'existing' : null))
+  const [asking, setAsking] = useState(origin === null)
   const [picked, setPicked] = useState<TeamBrainLocationId | null>(setup.setup?.location ?? null)
   const [drive, setDrive] = useState<{ definition: VolumeSetupDefinition; config: unknown } | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -218,14 +239,15 @@ function LocationStep({ setup, nav }: { setup: TeamBrainSetupActions; nav: StepN
   }
 
   const save = async (config: unknown, values: VolumeDetails) => {
-    if (!drive || isSaving) return
+    if (!drive || !origin || isSaving) return
     setError(null)
-    const details = volumeDetailsSchema.safeParse(values)
+    // The set-up asks for no drive name: the only name asked for is a new folder's.
+    const details = volumeDetailsSchema.safeParse({ ...values, name: TEAM_BRAIN_DRIVE_NAME })
     if (!details.success) { setError(details.error.issues[0].message); return }
     setIsSaving(true)
     try {
       // False when the window now shows another admin's set-up instead.
-      if (!(await setup.prepare(parseVolumeSource(drive.definition, config), details.data))) return
+      if (!(await setup.prepare(parseVolumeSource(drive.definition, config), details.data, origin))) return
       setDrive(null)
       nav.next()
     } catch (err) {
@@ -238,14 +260,16 @@ function LocationStep({ setup, nav }: { setup: TeamBrainSetupActions; nav: StepN
     return (
       // The set-up's form fills the panel, so its buttons can sit in the ruled bar at the foot (`DriveSetupFooter`);
       // its header sits as far above the form as the other steps' subtitles sit above theirs, and goes without its
-      // supporting line: the drive's name and title say enough here.
+      // supporting line: the drive's name and title say enough here. The set-up is told which folder it is after, one
+      // there already or a new one to make, and asks for no drive name either way.
       <div className="flex min-h-0 flex-1 flex-col gap-7 overflow-y-auto px-6 pt-11 sm:px-[52px] [&>form]:flex [&>form]:flex-1 [&>form]:flex-col [&_[data-volume-setup-description]]:hidden" data-testid="team-brain-drive-setup">
         <VolumeSetupFooterContext.Provider value={DriveSetupFooter}>
           {/* Every member gets Team Brain, so every member must be able to read its drive. */}
           <VolumeEveryoneOnlyContext.Provider value>
+          <VolumeSetupFolderContext.Provider value={origin}>
           <Setup
             initialConfig={drive.config}
-            initialDetails={{ name: 'Team Brain', visibility: 'public' }}
+            initialDetails={{ name: TEAM_BRAIN_DRIVE_NAME, visibility: 'public' }}
             onSubmit={save}
             onBack={() => { setDrive(null); setError(null) }}
             onCancel={() => { setDrive(null); setError(null) }}
@@ -254,21 +278,36 @@ function LocationStep({ setup, nav }: { setup: TeamBrainSetupActions; nav: StepN
             clearError={() => setError(null)}
             attachToAgent
           />
+          </VolumeSetupFolderContext.Provider>
           </VolumeEveryoneOnlyContext.Provider>
         </VolumeSetupFooterContext.Provider>
       </div>
     )
   }
 
-  // Step 1 is done only while the set-up's agent holds its drive: one deleted since is set up again.
-  const ready = !!setup.prepared && picked === setup.prepared.location
+  if (asking || !origin) {
+    return (
+      <StepPanel
+        title="Do you already have a Team Brain?"
+        subtitle="Team Brain keeps what it learns about your team in one folder. Every agent you connect to it reads that folder and adds to it."
+        next={{ label: `Next: ${NEXT_LABELS.location}`, disabled: !origin, onClick: () => setAsking(false) }}
+      >
+        <OriginChoices value={origin} onChoose={setOrigin} />
+      </StepPanel>
+    )
+  }
+
+  // Step 1 is done only while the set-up's agent holds its drive: one deleted since is set up again. So is one whose
+  // first answer changed: a new folder is made, or the one there already is selected.
+  const ready = !!setup.prepared && picked === setup.prepared.location && origin === (setup.prepared.origin ?? 'existing')
   // A prepared drive already has its agent, so the skillset check is for a set-up still to install it.
   const unread = !ready && skillsetsUnread
   const missingPublic = !ready && !unread && !!skillsets && !skillsets.some((s) => s.id === DEFAULT_PUBLIC_SKILLSET.id)
   return (
     <StepPanel
-      title="Choose where Team Brain knowledge is stored"
-      subtitle="Every agent you connect to Team Brain will read and add to the knowledge in this storage. It is possible to migrate later if needed."
+      title={LOCATION_COPY[origin].title}
+      subtitle={LOCATION_COPY[origin].subtitle}
+      back={() => { setAsking(true); setError(null) }}
       next={{
         label: ready || !picked ? nav.nextLabel : `Next: Set up ${teamBrainLocation(picked).name}`,
         disabled: !picked || (!ready && !skillsets) || unread || missingPublic,

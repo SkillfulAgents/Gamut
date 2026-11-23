@@ -1,10 +1,12 @@
-import { useState } from 'react'
+import { useContext, useState } from 'react'
 import { useConnectedAccountsByToolkit } from '@renderer/hooks/use-connected-accounts'
+import { fetchVolumeFolders } from '@renderer/hooks/use-volume-folders'
 import { ServiceIcon } from '@renderer/components/ui/service-icon'
 import { githubVolumeConfigSchema, type GithubVolumeConfig } from '@shared/lib/volumes/github-schema'
 import { VolumeAccountStep, VolumeRemoteDetailsStep } from './volume-account-step'
 import { VolumeFolderPicker, type VolumeFolderSource } from './volume-folder-picker'
-import { VolumeSetupHeader } from './volume-setup-layout'
+import { VolumeNewFolderStep } from './volume-new-folder-step'
+import { VolumeSetupFolderContext, VolumeSetupHeader } from './volume-setup-layout'
 import type { VolumeSetupDefinition, VolumeSetupProps } from './volume-setup'
 
 function GithubLogo({ className }: { className?: string }) {
@@ -30,8 +32,20 @@ const githubFolders: VolumeFolderSource<GithubCursor> = {
   confirmLabel: cursor => cursor.length < 2 ? null : cursor.length === 2 ? 'Use repository root' : `Use “${cursor.at(-1)?.name}”`,
 }
 
+/** A repository just made, as a drive of its root on the branch GitHub started it with. */
+async function newRepositoryConfig(accountId: string, repository: { id: string; name: string }): Promise<GithubVolumeConfig> {
+  const [branch] = (await fetchVolumeFolders(githubFolders, githubFolders.query(accountId, [repository]))).folders
+  if (!branch) throw new Error('GitHub is still preparing the repository. Try again in a moment.')
+  const [owner, repo] = repository.name.split('/')
+  return { accountId, repoId: Number(repository.id), owner, repo, branch: branch.id, path: '' }
+}
+
+/** A drive's name as a repository's: "Team Brain" → "team-brain". */
+const repositoryName = (name: string) => name.trim().toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '')
+
 function GithubVolumeSetup({ initialDetails, onSubmit, onBack, onCancel, isSaving, error, clearError, attachToAgent }: VolumeSetupProps) {
   const accounts = useConnectedAccountsByToolkit('github')
+  const mode = useContext(VolumeSetupFolderContext)
   const [step, setStep] = useState<'account' | 'details'>('account')
   const [accountId, setAccountId] = useState('')
   const [config, setConfig] = useState<GithubVolumeConfig | null>(null)
@@ -48,11 +62,19 @@ function GithubVolumeSetup({ initialDetails, onSubmit, onBack, onCancel, isSavin
   }
 
   return <>
-    <VolumeSetupHeader title={step === 'account' ? 'Connect GitHub' : 'Set up GitHub drive'}
+    <VolumeSetupHeader title={step === 'account' ? 'Connect GitHub' : mode === 'new' ? 'Create a GitHub repository' : mode === 'existing' ? 'Choose a GitHub folder' : 'Set up GitHub drive'}
       description={step === 'account' ? (accounts.data?.accounts.length === 0 ? 'Sign in to GitHub, then choose a repository to add.' : 'Choose an account or connect a new one.') : 'Select a repository, branch and folder, then name this drive.'}
       Logo={GithubLogo} steps={['Source', 'Account', 'Details']} step={step === 'account' ? 1 : 2} />
     {step === 'account' ? <VolumeAccountStep toolkit="github" label="GitHub" accounts={accounts} accountId={accountId} active={active}
       onSelect={selectAccount} onNext={() => { clearError(); setStep('details') }} onBack={onBack} onCancel={onCancel} />
+    // Git has no empty folders, so the new thing is a private repository of its own, in this account.
+    : mode === 'new' ? <VolumeNewFolderStep key={accountId} source={githubFolders} noun="repository" accountId={accountId} account={{ name: account?.displayName, active }}
+      defaultName={repositoryName(initialDetails.name)} where={{ initial: [], pick: false }}
+      toConfig={repository => newRepositoryConfig(accountId, repository)}
+      onSubmit={made => onSubmit(made, details)} onBack={() => { clearError(); setStep('account') }} onCancel={onCancel}
+      isSaving={isSaving} error={error} clearError={clearError}>
+      <p className="text-xs text-muted-foreground">A new private repository is made in this account. Agents commit their changes straight to its main branch.</p>
+    </VolumeNewFolderStep>
     : <VolumeRemoteDetailsStep label="GitHub" accountName={account?.displayName} active={active} details={details}
       onDetailsChange={value => { setDetails(value); clearError() }} isSaving={isSaving} error={error} canSave={!!config} attachToAgent={attachToAgent}
       onSave={() => { if (config) void onSubmit(config, details) }} onBack={() => { clearError(); setStep('account') }} onCancel={onCancel}>

@@ -30,16 +30,33 @@ export function VolumeSetupHeader({ title, description, Logo, steps, step }: {
 /** A host whose drive every member must reach (Team Brain's set-up) makes it Everyone's and leaves out "Who can add this drive?". */
 export const VolumeEveryoneOnlyContext = createContext(false)
 
+/**
+ * A host that names the drive itself (Team Brain's set-up) says what the set-up is after instead: a folder that is
+ * there already ('existing'), or a new one for the set-up to make ('new'). Either way the drive's own Name field is
+ * left out, so the only name asked for is the new folder's; a source with nothing to make sets up as it always does.
+ */
+export type VolumeSetupFolderMode = 'existing' | 'new'
+export const VolumeSetupFolderContext = createContext<VolumeSetupFolderMode | null>(null)
+
+/**
+ * The save button's words for a step that saves what it was given: the drive's own, or "Use this folder" for a host
+ * after a folder rather than a drive. (The step that makes a new folder, `VolumeNewFolderStep`, says "Create".)
+ */
+export function useVolumeSaveLabel(driveLabel: string, { noun = 'folder' }: { noun?: string } = {}): string {
+  return useContext(VolumeSetupFolderContext) === null ? driveLabel : `Use this ${noun}`
+}
+
 export function VolumeDetailsFields({ value, onChange, disabled, isGlobal = false, children }: {
   value: VolumeDetails; onChange: (value: VolumeDetails) => void; disabled: boolean; isGlobal?: boolean; children: ReactNode
 }) {
   const { isAuthMode, isAdmin } = useUser()
   const everyoneOnly = useContext(VolumeEveryoneOnlyContext)
+  const hostNamesDrive = useContext(VolumeSetupFolderContext) !== null
   return <>
-    <div className="space-y-2">
+    {!hostNamesDrive && <div className="space-y-2">
       <Label htmlFor="volume-name">Name</Label>
       <Input id="volume-name" value={value.name} onChange={event => onChange({ ...value, name: event.target.value })} maxLength={255} disabled={disabled} required />
-    </div>
+    </div>}
     {children}
     {isAuthMode && !everyoneOnly && <div className="space-y-2">
       <Label htmlFor="volume-access">Who can add this drive?</Label>

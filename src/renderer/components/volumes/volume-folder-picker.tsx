@@ -33,6 +33,8 @@ export interface VolumeFolderSource<Cursor> {
   fieldLabel?: string
   /** Whether a listed row can be opened. Unset means every row can. */
   canOpen?(cursor: Cursor): boolean
+  /** What the confirm button does with a selected row, when not "Use": "Create in". */
+  confirmVerb?: string
 }
 
 /**
@@ -124,7 +126,7 @@ export function VolumeFolderPicker<Cursor>({ source, accountId, initial, selecte
   const visible = shown.find(folder => folder.id === highlighted?.id) ?? null
   const choice = visible && source.confirmLabel(visible.cursor) !== null ? visible : null
   const target = choice ? choice.cursor : source.confirmLabel(cursor) !== null ? cursor : null
-  const confirmLabel = choice ? `Use “${choice.name}”` : source.confirmLabel(cursor)
+  const confirmLabel = choice ? `${source.confirmVerb ?? 'Use'} “${choice.name}”` : source.confirmLabel(cursor)
   const loading = folders.isFetching || entering
   // While a folder is being made the picker stays where it was asked for, so the result lands there.
   const moving = loading || create.isPending

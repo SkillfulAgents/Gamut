@@ -15,6 +15,7 @@ import {
   readyTeamBrain,
   type TeamBrainChoices,
   type TeamBrainLocationId,
+  type TeamBrainOrigin,
   type TeamBrainRecord,
   type TeamBrainSetup,
   type TeamBrainSetupView,
@@ -94,7 +95,7 @@ export async function claimSetup(): Promise<TeamBrainSetupView> {
 /** Set or release the set-up's agent or drive: `replaces` is what the page saw there. */
 export interface SetupChanges extends Partial<TeamBrainChoices> {
   readonly agent?: { slug: string | null; replaces: string | null }
-  readonly drive?: { volumeId: string | null; location: TeamBrainLocationId | null; replaces: string | null }
+  readonly drive?: { volumeId: string | null; location: TeamBrainLocationId | null; origin?: TeamBrainOrigin; replaces: string | null }
 }
 
 const furthest = (a: TeamBrainStep, b: TeamBrainStep): TeamBrainStep => (TEAM_BRAIN_STEPS.indexOf(b) > TEAM_BRAIN_STEPS.indexOf(a) ? b : a)
@@ -116,7 +117,7 @@ export async function saveSetup(setupId: string, { agent, drive, ...choices }: S
       agents: { ...setup.agents, ...choices.agents },
       step: choices.step ? furthest(setup.step, choices.step) : setup.step,
       ...(agent ? { agentSlug: agent.slug } : {}),
-      ...(drive ? { volumeId: drive.volumeId, location: drive.location } : {}),
+      ...(drive ? { volumeId: drive.volumeId, location: drive.location, origin: drive.origin } : {}),
     }
   })
   return viewOf(refuseOther(after.teamBrain, setupId))

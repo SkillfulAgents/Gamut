@@ -1,10 +1,12 @@
-import { useState } from 'react'
+import { useContext, useState } from 'react'
 import { useConnectedAccountsByToolkit } from '@renderer/hooks/use-connected-accounts'
+import { useVolumeFolders } from '@renderer/hooks/use-volume-folders'
 import { ServiceIcon } from '@renderer/components/ui/service-icon'
 import { googleDriveVolumeConfigSchema, type GoogleDriveVolumeConfig } from '@shared/lib/volumes/google-drive-schema'
 import { VolumeAccountStep, VolumeRemoteDetailsStep } from './volume-account-step'
 import { VolumeFolderPicker, type VolumeFolderSource } from './volume-folder-picker'
-import { VolumeSetupHeader } from './volume-setup-layout'
+import { VolumeNewFolderStep } from './volume-new-folder-step'
+import { VolumeSetupFolderContext, VolumeSetupHeader } from './volume-setup-layout'
 import type { VolumeSetupDefinition, VolumeSetupProps } from './volume-setup'
 
 function GoogleDriveLogo({ className }: { className?: string }) {
@@ -30,6 +32,7 @@ const drivePath = (cursor: DriveCursor) => cursor.map(folder => folder.name).joi
 
 function GoogleDriveVolumeSetup({ initialDetails, onSubmit, onBack, onCancel, isSaving, error, clearError, attachToAgent }: VolumeSetupProps) {
   const accounts = useConnectedAccountsByToolkit('googledrive')
+  const mode = useContext(VolumeSetupFolderContext)
   const [step, setStep] = useState<'account' | 'details'>('account')
   const [accountId, setAccountId] = useState('')
   const [config, setConfig] = useState<GoogleDriveVolumeConfig | null>(null)
@@ -37,6 +40,10 @@ function GoogleDriveVolumeSetup({ initialDetails, onSubmit, onBack, onCancel, is
   const [details, setDetails] = useState(initialDetails)
   const account = accounts.data?.accounts.find(item => item.id === accountId)
   const active = account?.status === 'active' && !accounts.error
+  // A new folder goes in My Drive unless another place is picked: the top level lists it first.
+  const top = useVolumeFolders(googleDriveFolders, { accountId }, mode === 'new' && step === 'details' && !!accountId)
+  const myDrive = top.data?.folders[0]
+  const note = <p className="text-xs text-muted-foreground">Google Docs, Sheets and Slides appear as .md, .xlsx and .pptx files. Saving one updates the Google file. A saved Doc keeps its text but not its colors, fonts, alignment, tabs or pending suggestions.</p>
 
   const selectAccount = (id: string) => {
     if (id === accountId) return
@@ -48,11 +55,16 @@ function GoogleDriveVolumeSetup({ initialDetails, onSubmit, onBack, onCancel, is
   }
 
   return <>
-    <VolumeSetupHeader title={step === 'account' ? 'Connect Google Drive' : 'Set up Google Drive'}
+    <VolumeSetupHeader title={step === 'account' ? 'Connect Google Drive' : mode === 'new' ? 'Create a Google Drive folder' : mode === 'existing' ? 'Choose a Google Drive folder' : 'Set up Google Drive'}
       description={step === 'account' ? (accounts.data?.accounts.length === 0 ? 'Sign in to Google Drive, then choose a folder to add.' : 'Choose an account or connect a new one.') : 'Select a folder and name it. Agents you add it to get read/write access.'}
       Logo={GoogleDriveLogo} steps={['Source', 'Account', 'Details']} step={step === 'account' ? 1 : 2} />
     {step === 'account' ? <VolumeAccountStep toolkit="googledrive" label="Google Drive" accounts={accounts} accountId={accountId} active={active}
       onSelect={selectAccount} onNext={() => { clearError(); setStep('details') }} onBack={onBack} onCancel={onCancel} />
+    : mode === 'new' ? <VolumeNewFolderStep key={accountId} source={googleDriveFolders} accountId={accountId} account={{ name: account?.displayName, active }}
+      defaultName={initialDetails.name} where={{ initial: [], pick: true, preset: myDrive && [myDrive] }}
+      toConfig={(folder, parent): GoogleDriveVolumeConfig => ({ accountId, folderId: folder.id, folderName: folder.name, driveName: parent[0].name })}
+      onSubmit={made => onSubmit(made, details)} onBack={() => { clearError(); setStep('account') }} onCancel={onCancel}
+      isSaving={isSaving} error={error} clearError={clearError}>{note}</VolumeNewFolderStep>
     : <VolumeRemoteDetailsStep label="Google Drive" accountName={account?.displayName} active={active} details={details}
       onDetailsChange={value => { setDetails(value); clearError() }} isSaving={isSaving} error={error} canSave={!!config} attachToAgent={attachToAgent}
       onSave={() => { if (config) void onSubmit(config, details) }} onBack={() => { clearError(); setStep('account') }} onCancel={onCancel}>
@@ -66,7 +78,7 @@ function GoogleDriveVolumeSetup({ initialDetails, onSubmit, onBack, onCancel, is
             setDetails(current => !current.name || current.name === previousName ? { ...current, name: folder.name } : current)
             clearError()
           }} />
-      <p className="text-xs text-muted-foreground">Google Docs, Sheets and Slides appear as .md, .xlsx and .pptx files. Saving one updates the Google file. A saved Doc keeps its text but not its colors, fonts, alignment, tabs or pending suggestions.</p>
+      {note}
     </VolumeRemoteDetailsStep>}
   </>
 }

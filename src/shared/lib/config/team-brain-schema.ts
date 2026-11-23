@@ -5,6 +5,13 @@ import { VOLUME_TYPES } from '@shared/lib/types/mount'
 export const TEAM_BRAIN_LOCATION_IDS = VOLUME_TYPES
 export type TeamBrainLocationId = (typeof TEAM_BRAIN_LOCATION_IDS)[number]
 
+/**
+ * How set-up comes by Team Brain's folder: it makes a new one where the admin says, or uses one the team already
+ * keeps its Team Brain in.
+ */
+export const TEAM_BRAIN_ORIGINS = ['new', 'existing'] as const
+export type TeamBrainOrigin = (typeof TEAM_BRAIN_ORIGINS)[number]
+
 export const TEAM_BRAIN_SCHEDULES = ['hourly', 'daily', 'weekly'] as const
 export type TeamBrainSchedule = (typeof TEAM_BRAIN_SCHEDULES)[number]
 
@@ -41,6 +48,8 @@ export const teamBrainSetupSchema = teamBrainChoicesSchema.extend({
   agentSlug: z.string().nullable(),
   volumeId: z.string().nullable(),
   location: z.enum(TEAM_BRAIN_LOCATION_IDS).nullable(),
+  /** Whether the drive's folder was made for this set-up or was there already. Unset before a drive, and on a set-up from before the question was asked. */
+  origin: z.enum(TEAM_BRAIN_ORIGINS).optional(),
 }).strict()
 export type TeamBrainSetup = z.infer<typeof teamBrainSetupSchema>
 
