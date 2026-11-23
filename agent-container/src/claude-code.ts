@@ -746,7 +746,7 @@ export class ClaudeCodeProcess extends EventEmitter {
   private cliCommands?: readonly SlashCommand[];
   private runnableCommandNames?: readonly string[];
   private readonly contextUsage = new ContextUsageReporter(
-    async () => this.queryInstance?.getContextUsage({ detail: 'summary' }),
+    async detail => this.queryInstance?.getContextUsage({ detail }),
     (frame) => this.emit('message', frame),
   );
 
@@ -2672,10 +2672,8 @@ export class ClaudeCodeProcess extends EventEmitter {
   }
 
   /**
-   * The context window's full breakdown, as the CLI's `/context` counts it:
-   * every category through the token-count API, unlike the summary the
-   * reporter reads after each message. On request only (the drawer's Context
-   * tab), since each read costs those counts. null = no live query to ask.
+   * An explicit refresh from the Context tab uses the same full SDK count as
+   * the automatic settled snapshot. Discard a result if its context moved.
    */
   async contextBreakdown(): Promise<{ breakdown: ContextBreakdown | null; revision?: string }> {
     const query = this.queryInstance;

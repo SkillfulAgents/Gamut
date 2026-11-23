@@ -433,16 +433,16 @@ describe('context usage from the container', () => {
     expect((await persisted())?.lastUsage).toEqual({ totalTokens: 64_041, contextWindow: 1_000_000 })
   })
 
-  it('saves a late settled breakdown without broadcasting private rows', async () => {
+  it.each([['full', 'full'], [undefined, 'estimate']] as const)('persists a replayed %s breakdown as %s without broadcasting private rows', async (breakdownKind, expectedKind) => {
     const rows = {
       categories: [{ name: 'Messages', tokens: 40, kind: 'used' }],
       totalTokens: 40, rawMaxTokens: 200, percentage: 20,
       memoryFiles: [{ path: '/private/notes.md', tokens: 2 }],
     }
     mockClient.emit({ type: 'context_usage', totalTokens: 40, contextWindow: 200,
-      revision: 'settled', measuredAt: new Date().toISOString(), breakdown: rows, settled: true, replayed: true })
+      revision: 'settled', measuredAt: new Date().toISOString(), breakdownKind, breakdown: rows, settled: true, replayed: true })
     await vi.waitFor(() => expect(sseEvents).toContainEqual({ type: 'context_snapshot_saved' }))
-    expect((await persisted())?.lastContext?.breakdown.memoryFiles).toEqual(rows.memoryFiles)
+    expect((await persisted())?.lastContext).toMatchObject({ kind: expectedKind, breakdown: { memoryFiles: rows.memoryFiles } })
     expect(JSON.stringify(sseEvents)).not.toContain('/private/notes.md')
   })
 

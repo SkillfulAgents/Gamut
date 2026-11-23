@@ -1593,7 +1593,8 @@ export class LiveSession {
     if (!content.replayed) this.ctx.emit({ type: 'context_usage', ...usage })
     if (content.settled !== true) return
     const snapshot = savedContextSchema.safeParse({
-      kind: 'estimate', revision: content.revision, measuredAt: content.measuredAt, breakdown: content.breakdown,
+      // Older images attached summary rows without indicating their source.
+      kind: content.breakdownKind ?? 'estimate', revision: content.revision, measuredAt: content.measuredAt, breakdown: content.breakdown,
     })
     // Each settled frame supersedes prior details, even on an older image that
     // sends only totals. Do not expose tool names or file paths on the public stream.
