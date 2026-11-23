@@ -199,7 +199,7 @@ function SessionComposerHints({ contextPercent, isActive = false, voiceModeActiv
 }) {
   const tray = useRequiredTray()
   return (
-    <div className="relative isolate flex flex-wrap items-center justify-between gap-x-1.5 gap-y-0.5 overflow-hidden px-6 py-3">
+    <div className="relative isolate flex flex-wrap items-center justify-between gap-x-1.5 gap-y-0.5 overflow-hidden px-6 py-3 has-[button]:py-2">
       <div
         aria-hidden="true"
         className="pointer-events-none absolute inset-y-0 left-0 z-0 w-[52%]"
@@ -224,7 +224,7 @@ function SessionComposerHints({ contextPercent, isActive = false, voiceModeActiv
                 type="button"
                 aria-label={`Open Context Usage, ${contextPercent}% used`}
                 onClick={() => tray.openUtility('context')}
-                className="relative z-10 -my-1 flex items-center gap-1.5 whitespace-nowrap rounded-icon py-1 text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="relative z-10 flex items-center gap-1.5 whitespace-nowrap rounded-icon py-1 text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 <span>Context Usage</span>
                 <DonutChart
