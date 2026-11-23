@@ -1,0 +1,23 @@
+{
+  "storyId": "browser-test",
+  "passed": true,
+  "reason": "Sent the \"Open a browser and go to https://example.com. Tell me the page title.\" prompt to agent QA-20261123-193937-6vby and verified the reply names \"Example Domain\".",
+  "steps": [
+    "Navigated to http://localhost:47891 — page loaded with the \"Your Agents\" sidebar listing QA-20261123-193937-6vby and QA-20261123-193936-9myy.",
+    "Clicked the QA-20261123-193937-6vby agent in the sidebar — agent page opened at /agents/qa-20261123-193937-6vby-lb8fsqnoop, status \"idle\", with an empty message box. Screenshot: step1-agent-opened.png.",
+    "Typed the message into the composer and clicked Send — a new session \"Check Example.com Page Title\" was created, the user message appeared, and the agent status changed to \"working\" with a Browser-related ToolSearch tool call shown.",
+    "Waited 180 seconds — the session finished. The agent went back to \"idle\" and the turn showed \"Worked for 4s · 3 tool calls · 163,881 tokens\".",
+    "Verified the response — the agent replied \"The page title is \"Example Domain\". The browser is closed now.\" This matches the expected \"Example Domain\". Screenshot: step5-response-verified.png."
+  ],
+  "bugs": [],
+  "durationMs": 73041,
+  "sessionId": "4b22ff88-0ae4-4bf6-b5a8-98523f04eba4",
+  "cost": {
+    "inputTokens": 7803,
+    "outputTokens": 3616,
+    "cacheCreationTokens": 49593,
+    "cacheReadTokens": 620521,
+    "model": "claude-haiku-5-5",
+    "totalCostUsd": 0.149926
+  }
+}
