@@ -2,6 +2,7 @@ import pLimit from 'p-limit'
 import type { containerHost } from '@shared/lib/container/container-host'
 import { processIdleTimer, type IdleTimer } from '@shared/lib/container/idle-alarm'
 import type { ContainerRuntime } from '@shared/lib/container/container-runtime'
+import type { ContainerClient } from '@shared/lib/container/types'
 import type { userInputRequestManager } from '@shared/lib/tools/requests/request-manager'
 import type { reviewManager } from '@shared/lib/proxy/review-manager'
 import type { accountReauthManager } from '@shared/lib/proxy/account-reauth-manager'
@@ -56,6 +57,12 @@ import type {
   WidgetOps,
 } from './types'
 
+/** What the actor hands the session store a deployment makes: where activity is marked, and the agent's container client. */
+export interface SessionStoreHooks extends Pick<SessionStore, 'onActivity'> {
+  /** The agent's container client, from the actor's own runtime. */
+  client(): Promise<ContainerClient>
+}
+
 /**
  * What a local actor delegates to. Injected so the registry can be built
  * against fakes in tests.
@@ -86,6 +93,12 @@ export interface LocalActorDeps {
   readonly loadSessionUsageTotals: typeof loadSessionUsageTotals
   /** The host this agent asks for host tools, machine work and side effects. */
   readonly host: HostPort
+  /**
+   * Where the agent's files, config documents and transcripts are, when the
+   * deployment keeps them somewhere other than a directory on this machine.
+   * Omitted: the local workspace.
+   */
+  readonly createSessionStore?: (slug: AgentSlug, hooks: SessionStoreHooks) => SessionStore
   /**
    * What the agent's idle alarm waits with, for a deployment whose process
    * can end while the container runs. Absent: this process's timer.
@@ -159,8 +172,9 @@ export class LocalAgentActor implements AgentActor {
       state ??
       createAgentState(slug, {
         sessions: {
-          store: createLocalSessionStore(slug, deps, {
+          store: (deps.createSessionStore ?? ((s, hooks) => createLocalSessionStore(s, deps, hooks)))(slug, {
             onActivity: (at) => runtime().noteSessionActivity(at),
+            client: () => runtime().getClient(),
           }),
           host: deps.host,
           runtime: createSessionsRuntime(slug, runtime),
@@ -281,6 +295,9 @@ function createContainerOps(slug: AgentSlug, runtime: () => ContainerRuntime, de
     },
     stop: (...args) => runtime().stopContainer(...args),
     keepAlive: async () => runtime().keepAlive(),
+    syncStatus: async () => {
+      await runtime().syncAgentStatus()
+    },
     status: async () => runtime().getCachedInfo(),
     invalidate: async (options) => {
       if (!runtime().holdsDrives()) return 'not-running'
