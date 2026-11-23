@@ -1,18 +1,6 @@
-import { z } from 'zod'
+import { requestQuestions, type RequestQuestion } from '@shared/lib/tools/requests/request-text'
 
-const questionsSchema = z.object({ questions: z.array(z.object({
-  question: z.string().min(1), header: z.string().optional(),
-  options: z.array(z.object({ label: z.string().min(1), description: z.string().optional() })).default([]),
-  multiSelect: z.boolean().default(false),
-})).min(1) })
-export type EmailQuestion = z.infer<typeof questionsSchema>['questions'][number]
-
-/** The questions of an AskUserQuestion request, or null for any other request (or a recovered stub). */
-export function requestQuestions(request: { kind: string; payload: unknown }): EmailQuestion[] | null {
-  if (request.kind !== 'question') return null
-  const parsed = questionsSchema.safeParse(request.payload)
-  return parsed.success ? parsed.data.questions : null
-}
+export type EmailQuestion = RequestQuestion
 
 function escape(text: string) {
   return text.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!)

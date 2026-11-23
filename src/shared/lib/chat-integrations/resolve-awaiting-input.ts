@@ -11,6 +11,7 @@
  * Extracted from the manager's inbound handler so the answer-vs-cancel decision (and the
  * dismiss-on-cancel wiring) is unit-testable without the full container/session harness.
  */
+import { isOpenQuestion } from '@shared/lib/tools/requests/request-text'
 
 /** The chat's session, through its agent's actor, narrowed to what this decision needs. */
 interface AwaitingSession {
@@ -53,8 +54,10 @@ export async function consumeOrCancelAwaitingInput(opts: {
     // Recovered stubs are excluded the same way they are excluded from the
     // wire: they carry no renderable payload, so no card was ever posted and
     // there is nothing in this chat for the text to answer.
-    const pendingQuestion = live.openRequests
-      .find((r) => r.kind === 'question' && (r.payload as { recovered?: unknown }).recovered !== true)
+    // Chat's rule (request-text.ts): the first open question card, whatever
+    // else is open; the connector decides whether a typed reply can answer
+    // it (Telegram: only a card that asked one question).
+    const pendingQuestion = live.openRequests.find(isOpenQuestion)
     if (pendingQuestion) {
       const answered = await connector.answerOpenQuestionWithText(chatId, pendingQuestion.id, answerText ?? messageText)
       if (answered) return true

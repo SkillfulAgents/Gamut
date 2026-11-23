@@ -23,12 +23,14 @@ import { resolveAppLinkContext, withSessionUrl } from '@shared/lib/agent-integra
 import { callerHasRoleOnTarget, userXAgentCaller } from '@shared/lib/services/x-agent/caller'
 import { invokeAgent } from '@shared/lib/services/x-agent/invoke'
 import type { XAgentFailure } from '@shared/lib/services/x-agent/operations'
-import { compactMessage } from '@shared/lib/services/x-agent-transcript-view'
+import { readLastAssistantReply } from '@shared/lib/services/x-agent/sync-wait'
 import { resolveSignedUpload, takeSignedUpload } from '@shared/lib/signed-file-urls/signed-file-urls'
-import { isReplayableUserInputRequest, type PendingUserInputRequest } from '@shared/lib/tools/requests/request-schema'
+import type { PendingUserInputRequest } from '@shared/lib/tools/requests/request-schema'
+import { isRecoveredRequest, isSinglePlainQuestion, requestQuestions, requestText } from '@shared/lib/tools/requests/request-text'
 import type { AgentRole } from '@shared/lib/types/agent'
 import { appendAttachedFiles } from '@shared/lib/utils/attached-files'
 import { displaySlug } from '@shared/lib/utils/file-storage'
+import { DEADLINE, raceDeadline } from '@shared/lib/utils/race-deadline'
 import type { McpCallContext } from './context'
 import type { McpToolCall } from './tool-definition'
 import { McpToolError, truncateText } from './tool-result'
@@ -123,37 +125,6 @@ export async function sessionLink(ctx: McpCallContext, slug: string, sessionId: 
   return `${ctx.publicBaseUrl}/agents/${encodeURIComponent(slug)}/sessions/${encodeURIComponent(sessionId)}`
 }
 
-/** What the person is asked, in one line or a few. */
-function requestText(request: PendingUserInputRequest): string {
-  const payload = request.payload as Record<string, unknown>
-  const str = (key: string) => (typeof payload[key] === 'string' ? (payload[key] as string) : undefined)
-  const withReason = (text: string) => (str('reason') ? `${text}: ${str('reason')}` : text)
-  switch (request.kind) {
-    case 'question': {
-      const questions = Array.isArray(payload.questions) ? payload.questions as Array<Record<string, unknown>> : []
-      const lines = questions.map((question) => {
-        const options = Array.isArray(question.options)
-          ? (question.options as Array<Record<string, unknown>>).map((option) => option.label).filter((label): label is string => typeof label === 'string')
-          : []
-        const text = typeof question.question === 'string' ? question.question : ''
-        return options.length > 0 ? `${text} (options: ${options.join(', ')})` : text
-      }).filter(Boolean)
-      return lines.join('\n') || 'The agent asked a question.'
-    }
-    case 'secret': return withReason(`The agent needs the secret ${str('secretName') ?? ''}`.trim())
-    case 'connected_account': return withReason(`The agent wants the person to connect their ${str('toolkit') ?? ''} account`.replace(/\s+/g, ' '))
-    case 'file': return `The agent wants the person to upload a file${str('description') ? `: ${str('description')}` : ''}`
-    case 'login': return str('message') ?? 'The agent needs the person to sign in to a website.'
-    case 'browser_input': return str('message') ?? 'The agent needs the person to act in a browser session.'
-    case 'computer_use': return `The agent wants to use ${str('appName') ?? 'the person\'s computer'}`
-    case 'script_run': return `The agent wants approval to run a script${str('explanation') ? `: ${str('explanation')}` : ''}`
-    case 'remote_mcp': return withReason(`The agent wants to connect a remote MCP server${str('name') ? ` (${str('name')})` : ''}`)
-    case 'capability_review': return `The agent wants approval to ${str('capability') === 'workflows' ? 'run a workflow' : 'launch a subagent'}`
-    case 'integration_setup': return withReason('The agent asked the person to set up an integration')
-    default: return 'The agent is waiting on a decision from the person in Gamut.'
-  }
-}
-
 /** The blocking requests the session waits on, the ones a person can see. */
 function openBlocking(requests: PendingUserInputRequest[], sessionId: string): PendingUserInputRequest[] {
   return requests.filter((request) => request.blocking && !request.autoApproved && (request.scope.sessionId ?? sessionId) === sessionId)
@@ -161,23 +132,22 @@ function openBlocking(requests: PendingUserInputRequest[], sessionId: string): P
 
 /**
  * The one plain question the session waits on, when that is all it waits on:
- * one open request, a question, whose card asks one thing. The chat
- * integrations answer exactly this with a typed reply and nothing else
- * (`consumeOrCancelAwaitingInput` in resolve-awaiting-input.ts): a card with
- * several questions, or any other request, needs Gamut.
+ * exactly one open request, and it is one plain question
+ * (`isSinglePlainQuestion`). MCP's rule, stricter than chat's on purpose (see
+ * request-text.ts): an answer typed here cannot see what else the session
+ * waits on, so a question beside another request, or a card with several
+ * questions, needs Gamut.
  */
 function answerableQuestion(requests: PendingUserInputRequest[]): PendingUserInputRequest | null {
   if (requests.length !== 1) return null
   const [request] = requests
-  if (request.kind !== 'question' || !isReplayableUserInputRequest(request)) return null
-  const questions = Array.isArray(request.payload.questions) ? request.payload.questions as Array<Record<string, unknown>> : []
-  return questions.length === 1 && typeof questions[0].question === 'string' ? request : null
+  return !isRecoveredRequest(request) && isSinglePlainQuestion(request) ? request : null
 }
 
 /** The answer as the app sends it (`answer-question`): the question's text mapped to the answer. */
 function answersFor(request: PendingUserInputRequest, answer: string): Record<string, string> {
-  const [question] = request.payload.questions as Array<{ question: string }>
-  return { [question.question]: answer }
+  const [question] = requestQuestions(request) ?? []
+  return question ? { [question.question]: answer } : {}
 }
 
 interface LastAssistant {
@@ -187,23 +157,25 @@ interface LastAssistant {
   isError: boolean
 }
 
-async function lastAssistant(slug: string, sessionId: string): Promise<LastAssistant | null> {
-  const entry = await agentRegistry.get(slug).messages.findLastEntry(sessionId, { kind: 'assistant' })
-  if (!entry || entry.type === 'system') return null
-  const compact = compactMessage(entry)
-  if (!compact) return null
-  return { uuid: entry.uuid, text: compact.spoken, isError: entry.isApiErrorMessage === true }
+/**
+ * The last assistant entry newer than `boundaryUuid` (the shared x-agent read),
+ * polled REPLY_FLUSH_ATTEMPTS × REPLY_FLUSH_INTERVAL_MS when the reply may still
+ * be flushing, else read once. MCP reads the spoken text (never a
+ * placeholder) and does not count a system entry as the reply.
+ */
+async function replyAfter(slug: string, sessionId: string, boundaryUuid: string | undefined, settle: boolean): Promise<LastAssistant | null> {
+  const reply = await readLastAssistantReply(slug, sessionId, {
+    boundaryUuid,
+    attempts: settle ? REPLY_FLUSH_ATTEMPTS : 1,
+    intervalMs: REPLY_FLUSH_INTERVAL_MS,
+    includeSystem: false,
+  })
+  return reply ? { uuid: reply.uuid, text: reply.spoken, isError: reply.isApiErrorMessage } : null
 }
 
-/** The last assistant entry newer than `boundaryUuid`, polled briefly when the reply may still be flushing. */
-async function replyAfter(slug: string, sessionId: string, boundaryUuid: string | undefined, settle: boolean): Promise<LastAssistant | null> {
-  const attempts = settle ? REPLY_FLUSH_ATTEMPTS : 1
-  for (let attempt = 0; attempt < attempts; attempt++) {
-    const last = await lastAssistant(slug, sessionId)
-    if (last && last.uuid !== boundaryUuid) return last
-    if (attempt < attempts - 1) await new Promise((resolve) => setTimeout(resolve, REPLY_FLUSH_INTERVAL_MS))
-  }
-  return null
+/** The last assistant entry as it stands, read once. */
+function lastAssistant(slug: string, sessionId: string): Promise<LastAssistant | null> {
+  return replyAfter(slug, sessionId, undefined, false)
 }
 
 /** How many view rows a result reads: the current turn's prompt and what followed it. */
@@ -403,17 +375,10 @@ async function takeAttachments(ctx: McpCallContext, slug: string, uploadIds: str
   return taken.map((upload) => upload.path)
 }
 
-const DEADLINE = Symbol('deadline')
-
-async function beforeDeadline<T>(work: Promise<T>, deadline: number): Promise<T | typeof DEADLINE> {
-  // The losing work goes on (a container start finishes on its own); its failure is its own.
+/** `raceDeadline`, the losing work's failure left to that work (a container start finishes on its own). */
+function beforeDeadline<T>(work: Promise<T>, deadline: number): Promise<T | typeof DEADLINE> {
   work.catch(() => {})
-  let timer: ReturnType<typeof setTimeout> | undefined
-  try {
-    return await Promise.race([work, new Promise<typeof DEADLINE>((resolve) => { timer = setTimeout(() => resolve(DEADLINE), Math.max(0, deadline - Date.now())) })])
-  } finally {
-    clearTimeout(timer)
-  }
+  return raceDeadline(work, deadline)
 }
 
 /** A session name from the prompt's first line. */

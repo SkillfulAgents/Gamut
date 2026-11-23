@@ -10,6 +10,7 @@ import { listVolumeDefinitions, openVolumeDefinition } from '@shared/lib/service
 import type { BaseMountableVolume } from '@shared/lib/volumes/base-mountable-volume'
 import { mintSignedDownloadUrl } from '@shared/lib/signed-file-urls/signed-file-urls'
 import { guessMimeType } from '@shared/lib/utils/mime'
+import { DEADLINE, raceDeadline } from '@shared/lib/utils/race-deadline'
 import { VOLUME_TYPES } from '@shared/lib/types/mount'
 import { volumeViewerFor, type McpCallContext } from '../context'
 import { defineTool, READ_ONLY_ANNOTATIONS } from '../tool-definition'
@@ -111,16 +112,6 @@ export function decodeText(bytes: Uint8Array): string | null {
   }
 }
 
-async function withTimeout<T>(work: Promise<T>, ms: number): Promise<T | 'timeout'> {
-  let timer: ReturnType<typeof setTimeout> | undefined
-  const timeout = new Promise<'timeout'>((resolve) => { timer = setTimeout(() => resolve('timeout'), ms) })
-  try {
-    return await Promise.race([work, timeout])
-  } finally {
-    clearTimeout(timer)
-  }
-}
-
 /** A drive's root INDEX.md, cut to a size a listing can carry; null when it has none or it cannot be read now. */
 async function readIndexMd(ctx: McpCallContext, driveId: string): Promise<{ text: string; truncated: boolean } | null> {
   const read = (async () => {
@@ -135,8 +126,9 @@ async function readIndexMd(ctx: McpCallContext, driveId: string): Promise<{ text
   })()
   read.catch(() => {})
   try {
-    const result = await withTimeout(read, INDEX_MD_TIMEOUT_MS)
-    return result === 'timeout' ? null : result
+    // The read keeps its own rejection handler (above): a late failure is dropped.
+    const result = await raceDeadline(read, Date.now() + INDEX_MD_TIMEOUT_MS)
+    return result === DEADLINE ? null : result
   } catch {
     return null
   }

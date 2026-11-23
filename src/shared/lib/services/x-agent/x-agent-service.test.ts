@@ -115,7 +115,7 @@ vi.mock('@shared/lib/agent-actor', () => ({
 import { userXAgentCaller, agentXAgentCaller, type XAgentCaller } from './caller'
 import { getTargetSessions, getTargetTranscript, listVisibleAgents, openDeliveredFile } from './operations'
 import { invokeAgent } from './invoke'
-import { effectiveSyncWaitMs } from './sync-wait'
+import { effectiveSyncWaitMs, readLastAssistantMessage, readLastAssistantReply } from './sync-wait'
 
 async function seedRole(userId: string, agentSlug: string, role: AgentRole) {
   await testDb.insert(schema.agentAcl).values({ id: randomUUID(), userId, agentSlug, role, createdAt: new Date() })
@@ -431,5 +431,38 @@ describe('the promoted note under a configured sub-second wait', () => {
     mockWaitForIdle.mockResolvedValueOnce('timeout')
     const created = await invoke(caller, { slug: TARGET, prompt: 'hi', sync: true, syncWaitMs: 400 })
     expect(created).toEqual({ ok: true, value: { sessionId: NEW_SESSION_ID, status: 'running', error: routeNote('400ms') } })
+  })
+})
+
+describe('the last assistant reply after a boundary', () => {
+  const findLastEntry = fakeActor.messages.findLastEntry as unknown as ReturnType<typeof vi.fn>
+  const assistant = (uuid: string, content: unknown, extra: Record<string, unknown> = {}) => ({ type: 'assistant', uuid, message: { content }, ...extra })
+
+  afterEach(() => {
+    findLastEntry.mockReset()
+    findLastEntry.mockImplementation(async () => undefined)
+  })
+
+  it('reads up to the given attempts at the given interval while the boundary is still last, then gives up', async () => {
+    findLastEntry.mockImplementation(async () => assistant('old', 'previous answer'))
+    const started = Date.now()
+    expect(await readLastAssistantReply(TARGET, SESSION_ID, { boundaryUuid: 'old', attempts: 3, intervalMs: 20 })).toBeNull()
+    expect(findLastEntry).toHaveBeenCalledTimes(3)
+    expect(Date.now() - started).toBeGreaterThanOrEqual(35)
+  })
+
+  it('answers the newer entry with its uuid, spoken text and API-error flag', async () => {
+    findLastEntry
+      .mockImplementationOnce(async () => assistant('old', 'previous answer'))
+      .mockImplementationOnce(async () => assistant('new', [{ type: 'text', text: 'Overloaded' }, { type: 'tool_use', name: 'Read', id: 't', input: {} }], { isApiErrorMessage: true }))
+    expect(await readLastAssistantReply(TARGET, SESSION_ID, { boundaryUuid: 'old', attempts: 3, intervalMs: 5 })).toEqual({
+      uuid: 'new', role: 'assistant', content: 'Overloaded\n[tool_use: Read]', spoken: 'Overloaded', toolName: 'Read', isApiErrorMessage: true,
+    })
+  })
+
+  it('counts a system entry as the reply unless told not to, as the x-agent read always has', async () => {
+    findLastEntry.mockImplementation(async () => ({ type: 'system', uuid: 'sys', subtype: 'compact_boundary' }))
+    expect(await readLastAssistantMessage(TARGET, SESSION_ID)).toEqual({ role: 'system', content: '[context compacted]' })
+    expect(await readLastAssistantReply(TARGET, SESSION_ID, { attempts: 1, includeSystem: false })).toBeNull()
   })
 })
