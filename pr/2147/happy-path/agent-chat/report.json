@@ -1,24 +1,24 @@
 {
   "storyId": "agent-chat",
   "passed": true,
-  "reason": "Sent \"Hello! What is 2+2?\" to agent QA-20261123-192632-iu75 and confirmed the reply contains \"4\".",
+  "reason": "Opened the QA-20261123-194140-w3j0 agent, sent \"Hello! What is 2+2?\", and confirmed the reply contains \"4\".",
   "steps": [
-    "Step 1: Navigated to http://localhost:47891 — the Gamut home page loaded with the sidebar listing agents QA-20261123-192632-hq83 and QA-20261123-192632-iu75.",
-    "Step 2: Clicked QA-20261123-192632-iu75 in the sidebar — its agent page opened at /agents/qa-20261123-192632-iu75-dshmjahemu.",
-    "Step 3: Checked the agent status indicator — it shows \"idle\", which satisfies the running-or-idle requirement. Screenshot saved as step3-agent-status.png.",
-    "Step 4: Entered \"Hello! What is 2+2?\" in the message input (verified by snapshot) and clicked Send — the app navigated to a new session \"Basic Arithmetic Question\".",
-    "Step 5: Waited for the response — it was already rendered by the time I checked, so no wait was needed.",
-    "Step 6: Verified the assistant reply reads \"2 + 2 = 4.\" and took a screenshot (step6-response.png). The message list shows the user message and the reply, and the agent is back to \"idle\"."
+    "Step 1: Navigated to http://localhost:47891 — the Gamut app loaded and the sidebar listed QA-20261123-194140-w3j0 under Your Agents.",
+    "Step 2: Clicked QA-20261123-194140-w3j0 in the sidebar — its agent page opened (URL /agents/qa-20261123-194140-w3j0-cmpfyxekqx) with the name in the header.",
+    "Step 3: Checked agent status — the header status indicator reads \"idle\", which satisfies the running-or-idle requirement.",
+    "Step 4: Typed \"Hello! What is 2+2?\" into the message box and clicked the send arrow — the page navigated to a new session titled \"Basic Arithmetic Question\" and the message appeared in the chat.",
+    "Step 5: Waited for a response — none was needed beyond the first check. The assistant reply \"Hello! 2 + 2 = 4.\" was already shown, and the status returned to \"idle\" with no activity indicator visible.",
+    "Step 6: Verified the reply mentions \"4\" — it does (\"Hello! 2 + 2 = 4.\"). Took a screenshot of the chat showing the exchange."
   ],
   "bugs": [],
-  "durationMs": 36576,
-  "sessionId": "73991eae-c39a-4169-a4f6-7f2a5cacb410",
+  "durationMs": 26273,
+  "sessionId": "4482d922-e35a-4c3e-8a88-101dbc2b591d",
   "cost": {
-    "inputTokens": 7769,
-    "outputTokens": 3308,
-    "cacheCreationTokens": 139044,
-    "cacheReadTokens": 497837,
+    "inputTokens": 8678,
+    "outputTokens": 6771,
+    "cacheCreationTokens": 81788,
+    "cacheReadTokens": 617009,
     "model": "claude-haiku-5-5",
-    "totalCostUsd": 0.247898
+    "totalCostUsd": 0.206469
   }
 }

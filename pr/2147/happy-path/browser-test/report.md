@@ -1,7 +1,7 @@
 [TEST_PASS]
-[REASON] Sent the "Open a browser and go to https://example.com. Tell me the page title." prompt to agent QA-20261123-192632-hq83 and verified the reply names "Example Domain".
-[STEP] Step 1, navigate to http://localhost:47891 — the Gamut app loaded (page title "Gamut") and the sidebar listed the QA-20261123-192632-hq83 agent.
-[STEP] Step 2, click QA-20261123-192632-hq83 in the sidebar — the agent page opened at /agents/qa-20261123-192632-hq83-rc42te6isl, showing an empty "How can I help?" input and status "idle".
-[STEP] Step 3, send the message — the text was typed into the input, the send button enabled, and clicking it created a session ("Check Example.com Page Title") with my message shown in the chat and status "working".
-[STEP] Step 4, wait up to 3 minutes for a response — the agent's activity showed a ToolSearch call and an "Open Browser" tool call to https://example.com, and a browser preview panel with the title "Example Domain" appeared. The "Working..." indicator then disappeared, the status returned to "idle", and the turn finished after "Worked for 5s · 3 tool calls".
-[STEP] Step 5, verify the response mentions "Example Domain" and take a screenshot — the agent's reply reads: "The page title at https://example.com is "Example Domain". I've closed the browser." The text matches, and the screenshot was taken.
+[REASON] Sent a browser-open prompt to agent QA-20261123-194141-l8zb and verified the reply reports the example.com title "Example Domain".
+[STEP] Navigated to http://localhost:47891 — Gamut home page loaded with the Your Agents sidebar listing QA-20261123-194141-l8zb and QA-20261123-194140-w3j0.
+[STEP] Clicked the QA-20261123-194141-l8zb agent in the sidebar — agent page opened at /agents/qa-20261123-194141-l8zb-wp2ego6pcq with an empty message box.
+[STEP] Typed "Open a browser and go to https://example.com. Tell me the page title." into the message box and sent it — my first click hit the text box instead of the send arrow, so I clicked the enabled send button on the second try. The message was sent, a new session "Check Example.com Page Title" was created, and the sidebar showed "Working". Screenshot: step3-message-typed.png, step3-message-sent.png.
+[STEP] Waited up to 3 minutes for a response — the reply appeared within seconds. The turn showed "Worked for 4s · 3 tool calls · 163,839 tokens", and the agent went back to idle.
+[STEP] Verified the response and took a screenshot — the reply reads: "I opened https://example.com, and the page title is "Example Domain". The browser is closed now." Screenshot: step5-response-verified.png.
