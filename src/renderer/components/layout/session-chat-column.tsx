@@ -16,6 +16,7 @@ import { useScreenWakeLock } from '@renderer/hooks/use-screen-wake-lock'
 import { useStaleSession } from '@renderer/hooks/use-stale-session'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@renderer/components/ui/tooltip'
 import { DonutChart } from '@renderer/components/ui/donut-chart'
+import { useRequiredTray } from '@renderer/context/session-tray-context'
 import type { RuntimeOptions } from '@shared/lib/container/runtime-options'
 import type { PendingMessage } from '@renderer/components/messages/pending-message'
 import type { PendingMessagesContextValue } from '@renderer/context/pending-messages-context'
@@ -196,6 +197,7 @@ function SessionComposerHints({ contextPercent, isActive = false, voiceModeActiv
   /** The message only notifies this teammate: said instead of the context usage. */
   notifiesOnly?: string | null
 }) {
+  const tray = useRequiredTray()
   return (
     <div className="relative isolate flex flex-wrap items-center justify-between gap-x-1.5 gap-y-0.5 overflow-hidden px-6 py-3">
       <div
@@ -218,15 +220,20 @@ function SessionComposerHints({ contextPercent, isActive = false, voiceModeActiv
         <TooltipProvider delayDuration={0}>
           <Tooltip>
             <TooltipTrigger asChild>
-              <div className="relative z-10 flex cursor-default items-center gap-1.5 whitespace-nowrap">
-                <span className="text-xs text-muted-foreground">Context Usage</span>
+              <button
+                type="button"
+                aria-label={`Open Context Usage, ${contextPercent}% used`}
+                onClick={() => tray.openUtility('context')}
+                className="relative z-10 -my-1 flex items-center gap-1.5 whitespace-nowrap rounded-icon py-1 text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <span>Context Usage</span>
                 <DonutChart
                   percent={contextPercent}
                   animated={isActive}
                   size="sm"
                   showLabel={false}
                 />
-              </div>
+              </button>
             </TooltipTrigger>
             <TooltipContent>
               <p>{contextPercent}%</p>
