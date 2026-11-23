@@ -1,3 +1,5 @@
+import type { SubagentRef } from './subagent-metadata'
+export type { SubagentRef } from './subagent-metadata'
 /**
  * Agent actor — the single entry point for everything that acts on one agent.
  *
@@ -927,13 +929,6 @@ export interface AccountReauthOps {
 export interface UsageOps {
   /** `loadDailyUsageData` over every transcript the CLI wrote for this agent. */
   daily(options?: CommonLoadOptions): Promise<DailyUsageData[]>
-}
-
-/** A subagent a session launched, as its sidecar metadata describes it. */
-export interface SubagentRef {
-  id: string
-  /** The Task tool call that launched it, when the sidecar recorded one. */
-  toolUseId?: string
 }
 
 /** One media item from a transcript, ready to serve. */

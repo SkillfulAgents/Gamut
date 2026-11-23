@@ -2776,6 +2776,13 @@ agents.delete('/:id/sessions/:sessionId/tool-calls/:toolCallId', AgentUser(), as
   }
 })
 
+agents.get('/:id/sessions/:sessionId/subagents', AgentRead(), async (c) => {
+  const actor = agentRegistry.get(getAgentId(c))
+  const sessionId = c.req.param('sessionId')
+  if (!(await actor.sessions.fileRealPathWithinAgent(sessionId))) return c.json({ error: 'Session not found' }, 404)
+  return c.json(await actor.sessions.subagents(sessionId))
+})
+
 // GET /api/agents/:id/sessions/:sessionId/subagent/:agentId/messages - Get subagent messages
 agents.get('/:id/sessions/:sessionId/subagent/:agentId/messages', AgentRead(), async (c) => {
   try {

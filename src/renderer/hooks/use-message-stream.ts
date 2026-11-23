@@ -1,3 +1,4 @@
+import { publishSubagentSnapshot } from './use-session-subagents'
 
 import { invalidatePendingUserRequests } from '@renderer/lib/pending-request-cache'
 import { useState, useEffect, useCallback, useRef } from 'react'
@@ -1551,7 +1552,11 @@ function getOrCreateEventSource(
         streamStates.set(sessionId, { ...next, turnOutcome: null })
       }
 
-      // Notify all listeners
+      if (next && (data.type === 'connected' || next.activeSubagents !== current?.activeSubagents
+        || next.completedSubagents !== current?.completedSubagents || next.backgroundTasks !== current?.backgroundTasks
+        || next.isActive !== current?.isActive)) {
+        publishSubagentSnapshot(queryClient, sessionId, next, data.type === 'connected' || data.type === 'session_idle')
+      }
       streamListeners.get(sessionId)?.forEach((listener) => listener())
     } catch (error) {
       console.error('Failed to parse SSE message:', error)
