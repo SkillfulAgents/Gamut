@@ -1,7 +1,8 @@
 import pLimit from 'p-limit'
 import type { containerHost } from '@shared/lib/container/container-host'
-import { processIdleTimer, type IdleTimer } from '@shared/lib/container/idle-alarm'
 import type { ContainerRuntime } from '@shared/lib/container/container-runtime'
+import { autoSleepTimeoutMsFrom, processIdleTimer, type IdleTimer } from '@shared/lib/container/idle-alarm'
+import { getSettings } from '@shared/lib/config/settings'
 import type { ContainerClient } from '@shared/lib/container/types'
 import type { userInputRequestManager } from '@shared/lib/tools/requests/request-manager'
 import type { reviewManager } from '@shared/lib/proxy/review-manager'
@@ -99,11 +100,6 @@ export interface LocalActorDeps {
    * Omitted: the local workspace.
    */
   readonly createSessionStore?: (slug: AgentSlug, hooks: SessionStoreHooks) => SessionStore
-  /**
-   * What the agent's idle alarm waits with, for a deployment whose process
-   * can end while the container runs. Absent: this process's timer.
-   */
-  readonly idleTimer?: (slug: AgentSlug) => IdleTimer
 }
 
 // Dev-only capture of the sessions' frames for fixture replays: one per
@@ -180,7 +176,7 @@ export class LocalAgentActor implements AgentActor {
           runtime: createSessionsRuntime(slug, runtime),
           capture: subagentCapture,
         },
-        idle: createIdleAlarmHooks(slug, deps, runtime),
+        idle: createIdleAlarmHooks(runtime, () => this.idleWait ?? processIdleTimer()),
         watch: createContainerWatchHooks(slug, () => this.state),
         runtime: (agent) => deps.containerHost.createRuntime(slug, agent),
       })
@@ -213,19 +209,31 @@ export class LocalAgentActor implements AgentActor {
     })
   }
 
+  private idleWait: IdleTimer | undefined
+
+  /** What this actor's idle alarm waits with from its first arm on, in place of this process's timer. */
+  waitIdleWith(timer: IdleTimer): void {
+    this.idleWait = timer
+  }
+
+  /** That wait went off, perhaps in a later process: the idle alarm sleeps the container, or waits again. */
+  idleWaitEnded(): Promise<void> {
+    return this.state.idleAlarm.fire()
+  }
+
   /** The registry is dropping this handle: release everything it owns. */
   dispose(): void {
     releaseAgentState(this.state)
   }
 }
 
-/** What the agent's idle alarm reads and does: the auto-sleep timeout, and the agent's container runtime. */
-function createIdleAlarmHooks(slug: AgentSlug, deps: LocalActorDeps, runtime: () => ContainerRuntime): AgentStateHooks['idle'] {
+/** What the agent's idle alarm reads and does: the auto-sleep timeout in the settings, and the agent's container runtime. */
+function createIdleAlarmHooks(runtime: () => ContainerRuntime, timer: () => IdleTimer): AgentStateHooks['idle'] {
   return {
-    timeoutMs: () => deps.containerHost.autoSleepTimeoutMs(),
+    timeoutMs: async () => autoSleepTimeoutMsFrom(await getSettings()),
     lastActivityAt: () => runtime().sleepableSince(),
     sleep: (timeoutMs) => runtime().sleepIdle(timeoutMs),
-    timer: () => deps.idleTimer?.(slug) ?? processIdleTimer(),
+    timer,
   }
 }
 

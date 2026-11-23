@@ -11,7 +11,7 @@
  * else asks the actor for its agent and imports `containerHost` from
  * `@shared/lib/agent-actor` for the host-level calls.
  */
-import { autoSleepTimeoutMsFrom, ContainerRuntime, type RuntimeAgent, type RuntimeHost } from './container-runtime'
+import { ContainerRuntime, type RuntimeAgent, type RuntimeHost } from './container-runtime'
 import {
   checkAllRunnersAvailability,
   checkImageExists,
@@ -63,11 +63,6 @@ export class ContainerHost {
 
   private heldRuntimes(): ContainerRuntime[] {
     return this.agents?.held() ?? []
-  }
-
-  /** The auto-sleep timeout in the settings, in ms; zero or less disables. */
-  async autoSleepTimeoutMs(): Promise<number> {
-    return autoSleepTimeoutMsFrom(await getSettings())
   }
 
   /** Optional callback invoked before a container is stopped (e.g. to close host browser) */

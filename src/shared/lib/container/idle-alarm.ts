@@ -30,6 +30,12 @@
  * So does a timeout read that failed with nothing armed.
  */
 import { background } from '../background'
+import type { AppSettings } from '@shared/lib/config/settings'
+
+/** The auto-sleep timeout in `settings`, in ms; zero or less disables. */
+export function autoSleepTimeoutMsFrom(settings: Pick<AppSettings, 'app'>): number {
+  return (settings.app?.autoSleepTimeoutMinutes ?? 30) * 60_000
+}
 
 export interface IdleAlarmDeps {
   /**

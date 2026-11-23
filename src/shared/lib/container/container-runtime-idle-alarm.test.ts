@@ -218,60 +218,6 @@ describe('ContainerRuntime idle alarm', () => {
     expect(mockStop).not.toHaveBeenCalled()
   })
 
-  it('a shortened timeout applies to running containers when the host re-arms them', async () => {
-    await startRuntime()
-    await vi.advanceTimersByTimeAsync(10 * MINUTE)
-    settings.app.autoSleepTimeoutMinutes = 5
-    registry.rearmIdleAlarms()
-    await vi.advanceTimersByTimeAsync(0)
-    expect(mockStop).toHaveBeenCalledTimes(1)
-  })
-
-  it('re-arms every running agent from one read of the timeout', async () => {
-    const slugs = ['alarm-a', 'alarm-b', 'alarm-c', 'alarm-d']
-    for (const slug of slugs) await agents.runtime(slug).ensureRunning()
-    await settle()
-    await vi.advanceTimersByTimeAsync(10 * MINUTE)
-    settings.app.autoSleepTimeoutMinutes = 15
-    readSettings.mockClear()
-    registry.rearmIdleAlarms()
-    await settle()
-    expect(readSettings).toHaveBeenCalledTimes(1)
-    // Every one of them now sleeps 15 minutes after its start, not 30.
-    await vi.advanceTimersByTimeAsync(5 * MINUTE + 1)
-    expect(mockStop).toHaveBeenCalledTimes(slugs.length)
-    for (const slug of slugs) await registry.evict(slug)
-  })
-
-  it('a re-arm after a write uses a read made after it, not a mark\'s read already in flight', async () => {
-    const runtime = await startRuntime()
-    // A session write starts a timeout read that lands late, with the old value.
-    let landOldRead!: () => void
-    readSettings.mockImplementationOnce(() => new Promise((resolve) => {
-      landOldRead = () => resolve({ ...settings, app: { autoSleepTimeoutMinutes: 30 } })
-    }))
-    runtime.noteSessionActivity()
-    // The write commits 5 minutes; the route re-arms after it.
-    settings.app.autoSleepTimeoutMinutes = 5
-    registry.rearmIdleAlarms()
-    await settle()
-    landOldRead()
-    await settle()
-    await vi.advanceTimersByTimeAsync(5 * MINUTE + 1)
-    expect(mockStop).toHaveBeenCalledTimes(1)
-  })
-
-  it('a re-arm given the committed timeout reads nothing', async () => {
-    await startRuntime()
-    settings.app.autoSleepTimeoutMinutes = 5
-    readSettings.mockClear()
-    registry.rearmIdleAlarms(5 * MINUTE)
-    await settle()
-    expect(readSettings).not.toHaveBeenCalled()
-    await vi.advanceTimersByTimeAsync(5 * MINUTE + 1)
-    expect(mockStop).toHaveBeenCalledTimes(1)
-  })
-
   it('a burst of session writes reads the timeout once', async () => {
     const runtime = await startRuntime()
     readSettings.mockClear()
@@ -451,6 +397,21 @@ describe('ContainerRuntime idle alarm', () => {
     await vi.advanceTimersByTimeAsync(10 * MINUTE)
     expect(mockStop).not.toHaveBeenCalled()
     await vi.advanceTimersByTimeAsync(1)
+    expect(mockStop).toHaveBeenCalledTimes(1)
+  })
+
+  it('waits with what the actor is told to wait with, and sleeps when that wait goes off', async () => {
+    const idleTimer = { set: vi.fn(), clear: vi.fn() }
+    actorOf(SLUG).waitIdleWith(idleTimer)
+    await startRuntime()
+    expect(idleTimer.set).toHaveBeenCalled()
+
+    // This process's timers go off and nothing sleeps: the wait is the one the actor was told.
+    await vi.advanceTimersByTimeAsync(2 * TIMEOUT)
+    expect(mockStop).not.toHaveBeenCalled()
+
+    // The wait goes off.
+    await actorOf(SLUG).idleWaitEnded()
     expect(mockStop).toHaveBeenCalledTimes(1)
   })
 

@@ -28,7 +28,7 @@ import { agentConnectedAccounts, connectedAccounts } from '@shared/lib/db/schema
 import { eq } from 'drizzle-orm'
 import { getOrCreateProxyToken } from '@shared/lib/proxy/token-store'
 import { getOrCreateHostToken } from '@shared/lib/container/host-token-store'
-import { getSettings, type AppSettings } from '@shared/lib/config/settings'
+import { getSettings } from '@shared/lib/config/settings'
 import { displayNameFromInstructions } from '@shared/lib/utils/agent-display-name'
 import type { RuntimeSessions } from './agent-sessions-access'
 import type { RuntimeFatalKind } from './runtime-death'
@@ -93,11 +93,6 @@ export interface RuntimeAgent {
   readonly containerWatch: ContainerWatch
   /** The agent's instructions document (`AGENTS.md`), for the display name a start gives the container; null when it has none. */
   instructions(): Promise<string | null>
-}
-
-/** The auto-sleep timeout in `settings`, in ms; zero or less disables. */
-export function autoSleepTimeoutMsFrom(settings: Pick<AppSettings, 'app'>): number {
-  return (settings.app?.autoSleepTimeoutMinutes ?? 30) * 60_000
 }
 
 const healthVolumesSchema = z.object({ status: z.literal('ok'), volumes: z.array(z.string()) })
