@@ -1,23 +1,23 @@
 {
   "storyId": "browser-test",
   "passed": true,
-  "reason": "Sent a browser-task prompt to agent QA-20261123-200515-l5iq and verified the reply reports the example.com page title as \"Example Domain\".",
+  "reason": "Ran the 5-step QA check: opened the QA-20261123-210101-sh5a agent, sent the example.com page-title request, waited for the reply, and confirmed it says \"Example Domain\".",
   "steps": [
-    "Step 1, navigated to http://localhost:47891 — Gamut home page loaded with the sidebar listing \"QA-20261123-200515-l5iq\" and \"QA-20261123-200514-rhxg\". No errors.",
-    "Step 2, clicked \"QA-20261123-200515-l5iq\" in the sidebar — agent page opened at /agents/qa-20261123-200515-l5iq-j07tasymfs, status \"idle\", message box visible.",
-    "Step 3, typed \"Open a browser and go to https://example.com. Tell me the page title.\" and clicked Send — a new session \"Check Example.com Page Title\" opened and showed \"Working...\". The user message appeared in the chat.",
-    "Step 4, waited up to 3 minutes for \"Example Domain\" to appear — the reply appeared within the window. The agent's turn summary read \"Worked for 4s · 3 tool calls · 163,073 tokens\". The wait tool ran its full 180-second timer before checking the text, which is a tooling detail, not an app issue.",
-    "Step 5, verified the response and took a screenshot — the reply reads: \"The page title at https://example.com is \"Example Domain\". I closed the browser afterward.\" The response contains \"Example Domain\" as required. The session status returned to \"idle\" and the Send button was disabled again."
+    "Step 1: Navigated to http://localhost:47891 — the Gamut app loaded and the sidebar lists QA-20261123-210101-sh5a. PASS.",
+    "Step 2: Clicked QA-20261123-210101-sh5a in the sidebar — the agent chat view opened with an empty message box. PASS.",
+    "Step 3: Typed \"Open a browser and go to https://example.com. Tell me the page title.\" and clicked Send — the message appeared in the chat, the session was created as \"Browser Page Title Check\", the agent showed \"Working...\", and the browser preview panel appeared on the right showing the example.com tab. PASS.",
+    "Step 4: Waited up to 3 minutes for the agent to finish — \"Working...\" disappeared within the window (about 3 seconds of work, 3 tool calls). PASS.",
+    "Step 5: Verified the reply — the agent answered \"The page title at https://example.com is \"Example Domain\". The page loaded normally and I've closed the browser.\" The text was confirmed on screen and a screenshot was taken. PASS."
   ],
   "bugs": [],
-  "durationMs": 76831,
-  "sessionId": "c702cb6f-3bcb-4e0d-8e6a-29778d84de5a",
+  "durationMs": 73118,
+  "sessionId": "5d916ee1-3bd5-4604-8372-7211fd80db6d",
   "cost": {
-    "inputTokens": 7823,
-    "outputTokens": 4957,
-    "cacheCreationTokens": 119205,
-    "cacheReadTokens": 589563,
+    "inputTokens": 8974,
+    "outputTokens": 8182,
+    "cacheCreationTokens": 104895,
+    "cacheReadTokens": 861911,
     "model": "claude-haiku-5-5",
-    "totalCostUsd": 0.240571
+    "totalCostUsd": 0.267194
   }
 }
