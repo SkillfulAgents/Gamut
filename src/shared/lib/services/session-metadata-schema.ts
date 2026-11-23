@@ -1,6 +1,6 @@
 import { z } from 'zod'
-import { savedContextSchema } from '@shared/lib/container/context-breakdown-schema'
 import type { SessionMetadata } from '@shared/lib/types/agent'
+import { savedContextSchema } from '@shared/lib/container/context-breakdown-schema'
 
 /**
  * Zod schema for what the app keeps about a session, validated wherever it

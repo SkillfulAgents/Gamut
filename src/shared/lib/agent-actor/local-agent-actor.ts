@@ -1,5 +1,4 @@
 import pLimit from 'p-limit'
-import { readSessionContext } from './session-context'
 import type { containerHost } from '@shared/lib/container/container-host'
 import { processIdleTimer, type IdleTimer } from '@shared/lib/container/idle-alarm'
 import type { userInputRequestManager } from '@shared/lib/tools/requests/request-manager'
@@ -31,6 +30,7 @@ import { createAgentState, releaseAgentState, releaseSessionState, settleStopped
 import { createLocalSessionStore } from './local-session-store'
 import { exportSessionMetadata, ingestSessionMetadataFile } from '@shared/lib/services/session-metadata-file'
 import { transcriptPath, type SessionStore } from './session-store'
+import { readSessionContext } from './session-context'
 import { sessionEvents, sessionFrames } from './session-streams'
 import type { UserInputRequestOutcome } from '@shared/lib/tools/requests/request-schema'
 import type {
