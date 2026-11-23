@@ -25,11 +25,15 @@ const CLAUDE_4_6_EFFORTS: EffortLevel[] = ['low', 'medium', 'high', 'max']
 // grok-4.6/4.7, muse-spark ≤1.2: xhigh accepted, max rejected or clamped.
 const XHIGH_EFFORTS: EffortLevel[] = ['low', 'medium', 'high', 'xhigh']
 // kimi-k3 on Fireworks' Anthropic wire: two real tiers, max ≈ 2.4× high (measured 2026-09-18).
+// kimi-k3.1-pro: low < medium ≈ high < max ≈ 2× high; xhigh ≈ max, so not offered (measured 2026-11-23).
 const KIMI_K3_EFFORTS: EffortLevel[] = ['low', 'medium', 'high', 'max']
 // grok-4.5 and deepseek-v4.1-flash: nothing above high is verified to be
 // honored (Fireworks' Anthropic shim accepts any value; deepseek output is
 // flat across all tiers), so they keep the standard three.
 const NON_CLAUDE_EFFORTS: EffortLevel[] = ['low', 'medium', 'high']
+// minimax-m3.1-flash on Fireworks: low ≈ medium ≈ high, xhigh ≈ 1.5-2× high, max
+// no longer than xhigh (measured 2026-11-23). It always reasons.
+const MINIMAX_M3_1_EFFORTS: EffortLevel[] = ['low', 'medium', 'high', 'xhigh']
 
 /**
  * Processing-speed tiers, normalized to slow/normal/fast. `supportedSpeeds`
@@ -913,13 +917,31 @@ const PLATFORM_EXTRA_MODELS: ModelDefinition[] = [
     contextWindow: 1_048_576,
   },
   {
-    // Bare id matches the platform proxy's kimi-* → fireworks route.
-    id: 'kimi-k3',
-    label: 'Kimi K3',
+    // Bare id matches the platform proxy's kimi-* → fireworks route. Newer than
+    // kimi-k3 (post-trained from it), so it is the kimi alias target and Moonshot
+    // tab default. Fireworks has no fast router for it.
+    id: 'kimi-k3.1-pro',
+    label: 'Kimi K3.1 Pro',
     blurb: 'Moonshot AI, served via Platform',
     family: 'kimi',
     isLatest: true,
     isDefault: true,
+    icon: 'kimi',
+    supportedEfforts: KIMI_K3_EFFORTS,
+    supportsWebSearch: false,
+    supportsWebFetch: false,
+    // Fireworks serverless rates (2026-11-23). Cache write is unpublished, so
+    // cacheCreation mirrors input, the same convention as Fireworks/Meta.
+    pricing: pricingFor('kimi-k3.1-pro'),
+    // Fireworks-reported `contextLength` for accounts/fireworks/models/kimi-k3p1-pro.
+    contextWindow: 1_048_576,
+    supportsImageInput: true,
+  },
+  {
+    id: 'kimi-k3',
+    label: 'Kimi K3',
+    blurb: 'Moonshot AI, served via Platform',
+    family: 'kimi',
     icon: 'kimi',
     supportedEfforts: KIMI_K3_EFFORTS,
     // Fireworks' fast path is a separate router resource the proxy swaps in;
@@ -992,9 +1014,27 @@ const PLATFORM_EXTRA_MODELS: ModelDefinition[] = [
     // cacheCreation mirrors input — same convention as Fireworks/Meta.
     pricing: pricingFor('deepseek-v4.1-flash'),
   },
+  {
+    // Bare id matches the platform proxy's minimax-* → fireworks route. No fast router.
+    id: 'minimax-m3.1-flash',
+    label: 'MiniMax M3.1 Flash',
+    blurb: 'MiniMax, served via Platform',
+    family: 'minimax',
+    isLatest: true,
+    isDefault: true,
+    icon: 'minimax',
+    supportedEfforts: MINIMAX_M3_1_EFFORTS,
+    supportsWebSearch: false,
+    supportsWebFetch: false,
+    supportsImageInput: true,
+    // Fireworks-reported `contextLength` for accounts/fireworks/models/minimax-m3p1-flash.
+    contextWindow: 1_048_576,
+    // Fireworks serverless rates (2026-11-23); cacheCreation mirrors input.
+    pricing: pricingFor('minimax-m3.1-flash'),
+  },
 ]
 
-/** Platform — bare Claude models plus the GPT/Grok/Kimi/Muse/GLM/DeepSeek models the proxy serves. */
+/** Platform — bare Claude models plus the GPT/Grok/Kimi/Muse/GLM/DeepSeek/MiniMax models the proxy serves. */
 export const PLATFORM_CATALOG: ModelDefinition[] = [
   ...withPlatformClaudeSpeeds(CLAUDE_BARE_CATALOG),
   ...PLATFORM_EXTRA_MODELS,
