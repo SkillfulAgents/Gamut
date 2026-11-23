@@ -203,6 +203,9 @@ paths:
                 type: object
                 required: [breakdown]
                 properties:
+                  revision:
+                    type: string
+                    description: Identifies the measured context across the request and settled usage events.
                   breakdown:
                     type: object
                     nullable: true

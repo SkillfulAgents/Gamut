@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import { ChevronRight, RefreshCw } from 'lucide-react'
 import { cn } from '@shared/lib/utils/cn'
 import type { ContextBreakdown } from '@shared/lib/container/context-breakdown-schema'
 import { useContextBreakdown } from '@renderer/hooks/use-context-breakdown'
 import { useMessageStream } from '@renderer/hooks/use-message-stream'
 import { useSendMessage } from '@renderer/hooks/use-messages'
+import { useSession } from '@renderer/hooks/use-sessions'
 import { useUser } from '@renderer/context/user-context'
 
 /** 512.4K, 33K, 1M: one decimal, none when it is .0. */
@@ -85,28 +86,28 @@ function Item({ name, tokens }: { name: string; tokens: number }) {
 
 /**
  * The drawer's Context tab: what fills the session's context window, as the
- * CLI's `/context` counts it. Read when the tab opens, again each time a turn
- * ends, and on Refresh.
+ * CLI's `/context` counts it. Read when the tab opens, when a measurement
+ * is saved, and on Refresh.
  */
 export function ContextTrayContent({ agentSlug, sessionId }: { agentSlug: string; sessionId: string }) {
   const { canUseAgent } = useUser()
   const canRead = canUseAgent(agentSlug)
-  const { data: breakdown, isLoading, isError, refetch, isFetching } = useContextBreakdown(sessionId, agentSlug, canRead)
-  const { isActive } = useMessageStream(sessionId, agentSlug, ['isActive'])
+  const query = useContextBreakdown(sessionId, agentSlug, canRead)
+  const { data: session } = useSession(sessionId, agentSlug)
+  const { isActive, contextUsage } = useMessageStream(sessionId, agentSlug, ['isActive', 'contextUsage'])
   const sendMessage = useSendMessage()
-
-  // A turn that ends has changed what fills the window.
-  const wasActive = useRef(isActive)
-  useEffect(() => {
-    if (canRead && wasActive.current && !isActive) void refetch()
-    wasActive.current = isActive
-  }, [isActive, refetch, canRead])
-
-  const window = breakdown?.rawMaxTokens ?? 0
+  // Ordinary session reads expose totals to viewers and have already filled
+  // the composer's cache. Detailed fields always require the agent's use role.
+  const reading = canRead ? query.data : undefined
+  const breakdown = reading?.breakdown
+  const usage = contextUsage ?? reading?.usage ?? session?.lastUsage
+  const total = breakdown?.totalTokens ?? usage?.totalTokens
+  const window = breakdown?.rawMaxTokens ?? usage?.contextWindow ?? 0
+  const refresh = () => { void query.refresh().catch(() => { /* The query exposes the error for retry. */ }) }
   const used = breakdown?.categories.filter(c => c.kind === 'used') ?? []
   const reserve = breakdown?.categories.filter(c => c.kind === 'buffer' || c.kind === 'free') ?? []
   const deferred = breakdown?.categories.filter(c => c.kind === 'deferred') ?? []
-  const percent = breakdown ? Math.round((breakdown.totalTokens / Math.max(1, window)) * 100) : 0
+  const percent = total !== undefined && window > 0 ? Math.round(total / window * 100) : null
   const untilCompact = breakdown?.isAutoCompactEnabled && breakdown.autoCompactThreshold
     ? Math.max(0, breakdown.autoCompactThreshold - breakdown.totalTokens)
     : null
@@ -114,38 +115,46 @@ export function ContextTrayContent({ agentSlug, sessionId }: { agentSlug: string
   return (
     <div className="flex min-h-0 flex-1 flex-col" data-testid="context-tray">
       <div className="flex flex-1 min-h-0 flex-col overflow-auto px-5 pb-6 pt-5">
-        {!canRead ? (
-          <p className="text-sm text-muted-foreground">Detailed context usage requires permission to use this agent.</p>
-        ) : isLoading ? (
-          <p className="text-sm text-muted-foreground">Counting what fills the context…</p>
-        ) : isError ? (
-          <div className="text-sm text-muted-foreground" role="alert">
-            Could not read context usage.
-            <button type="button" className="ml-2 underline" onClick={() => void refetch()}>Retry</button>
+        {total !== undefined && (
+          <>
+            <div className="flex items-baseline gap-2">
+              <span className="text-sm font-medium text-foreground" data-testid="context-percent">
+                {percent === null ? 'Context usage' : `${percent}% used`}
+              </span>
+              <span className="ml-auto text-sm tabular-nums text-muted-foreground">
+                {window > 0 ? `${formatTokens(total)} / ${formatTokens(window)}` : `${formatTokens(total)} tokens`}
+              </span>
+              {canRead && (
+                <button type="button" onClick={refresh} disabled={query.isFetching} title="Refresh" aria-label="Refresh"
+                  className="rounded-icon p-0.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40">
+                  <RefreshCw className={cn('h-3.5 w-3.5', query.isFetching && 'animate-spin')} />
+                </button>
+              )}
+            </div>
+            {reading?.capturedAt && (
+              <p className="mt-1 text-xs text-muted-foreground" data-testid="context-source">
+                {reading.source === 'saved-estimate' ? 'Last recorded estimate' : 'Last recorded count'} ·{' '}
+                <time dateTime={reading.capturedAt}>{new Date(reading.capturedAt).toLocaleString()}</time>
+              </p>
+            )}
+          </>
+        )}
+        {canRead && (query.isError || reading?.refreshFailed) && (
+          <div className="mt-2 text-sm text-muted-foreground" role="alert">
+            Could not refresh context usage.
+            <button type="button" className="ml-2 underline" onClick={refresh} disabled={query.isFetching}>Retry</button>
           </div>
+        )}
+        {!canRead ? (
+          <p className="mt-2 text-sm text-muted-foreground">Detailed context usage requires permission to use this agent.</p>
         ) : !breakdown ? (
-          <p className="text-sm text-muted-foreground" data-testid="context-unavailable">
-            Detailed usage is unavailable. It requires a running session and an agent image that supports context breakdowns.
+          <p className="mt-2 text-sm text-muted-foreground" data-testid="context-unavailable">
+            {query.isLoading ? 'Loading context details…' : isActive && contextUsage ? 'Live usage. A category breakdown is unavailable for this measurement.' : total !== undefined
+              ? 'Last recorded usage. Category details weren’t saved for this session.'
+              : 'This session has no recorded context usage yet.'}
           </p>
         ) : (
           <>
-            <div className="flex items-baseline gap-2">
-              <span className="text-sm font-medium text-foreground" data-testid="context-percent">{percent}% used</span>
-              <span className="ml-auto text-sm tabular-nums text-muted-foreground">
-                {formatTokens(breakdown.totalTokens)} / {formatTokens(window)}
-              </span>
-              <button
-                type="button"
-                onClick={() => void refetch()}
-                disabled={isFetching}
-                title="Refresh"
-                aria-label="Refresh"
-                className="rounded-icon p-0.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40"
-              >
-                <RefreshCw className={cn('h-3.5 w-3.5', isFetching && 'animate-spin')} />
-              </button>
-            </div>
-
             {/* What is in the window, in order, then the compaction reserve at the far end. */}
             <div className="mt-2 flex h-1.5 w-full overflow-hidden rounded-full bg-muted" aria-hidden data-testid="context-bar">
               {used.map((category, index) => (

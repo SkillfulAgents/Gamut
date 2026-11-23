@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { savedContextSchema } from '@shared/lib/container/context-breakdown-schema'
 import type { SessionMetadata } from '@shared/lib/types/agent'
 
 /**
@@ -93,6 +94,7 @@ export const sessionMetadataSchema = z
     // Complex/structured fields are kept permissive on purpose — a strict shape
     // here risks false-rejecting a valid file and refusing to persist names.
     lastUsage: sessionUsageSchema.optional(),
+    lastContext: savedContextSchema.optional().catch(undefined),
     slashCommands: z.array(slashCommandInfoSchema).optional(),
     // `effort`/`speed`/`model` are intentionally bare strings (not the enums)
     // so a newly-added level/id from a newer build never fails an older reader.

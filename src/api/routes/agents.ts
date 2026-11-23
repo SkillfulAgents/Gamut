@@ -3353,10 +3353,8 @@ agents.post('/:id/sessions/:sessionId/interrupt', AgentUser(), async (c) => {
   }
 })
 
-// GET /api/agents/:id/sessions/:sessionId/context - What fills the session's
-// context window, counted in full (the drawer's Context tab). `breakdown` is
-// null while the session has no live runtime to ask: a stopped agent, or a
-// session the runtime has not loaded.
+// The Context tab reads the latest stored measurement. Explicit refresh can
+// measure the already-running session without starting its runtime.
 agents.get('/:id/sessions/:sessionId/context', AgentUser(), async (c) => {
   // A meeting page can read its transcript, but does not need a paid runtime count.
   if (getMeetingParticipant(c)) return c.json({ error: 'Forbidden' }, 403)
@@ -3366,10 +3364,8 @@ agents.get('/:id/sessions/:sessionId/context', AgentUser(), async (c) => {
   if (!(await actor.sessions.isKnown(sessionId))) {
     return c.json({ error: 'Session not found' }, 404)
   }
-  const info = await actor.container.status()
-  if (info.status !== 'running') return c.json({ breakdown: null })
   try {
-    return c.json({ breakdown: await actor.sessions.contextBreakdown(sessionId) })
+    return c.json(await actor.sessions.contextBreakdown(sessionId, c.req.query('refresh') === 'true'))
   } catch (error) {
     console.error('Failed to read context breakdown:', error)
     return c.json({ error: 'Failed to read context' }, 500)

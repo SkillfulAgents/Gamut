@@ -46,9 +46,9 @@ describe('BaseContainerClient.getContextBreakdown', () => {
 
   it('supports older agent images and non-resident sessions', async () => {
     const old = new StubFetchClient(new Response('404 Not Found', { status: 404 }))
-    expect(await old.getContextBreakdown('s')).toBeNull()
+    expect(await old.getContextBreakdown('s')).toEqual({ breakdown: null })
     const stopped = new StubFetchClient(Response.json({ breakdown: null }))
-    expect(await stopped.getContextBreakdown('s')).toBeNull()
+    expect(await stopped.getContextBreakdown('s')).toEqual({ breakdown: null })
   })
 
   it('surfaces runtime and payload errors for retry', async () => {

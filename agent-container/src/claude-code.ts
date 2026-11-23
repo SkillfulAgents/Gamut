@@ -13,7 +13,6 @@ import {
   McpServerConfig,
   McpSetServersResult,
   SlashCommand,
-  type SDKControlGetContextUsageResponse,
 } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
 import type { UUID } from 'crypto';
@@ -33,6 +32,7 @@ import { builtinHints, createHintHookMatchers } from './hints';
 import { promptDate } from './prompt-date';
 import { mountedDrives, mountedVolumeIndexes, type VolumeIndex } from './volume-mounts';
 import { prepareResumeDiagnostics } from './resume-diagnostics';
+import { contextBreakdownSchema, type ContextBreakdown } from './context-breakdown-schema';
 import { ContextUsageReporter, contextUsageChange } from './context-usage-reporter';
 
 /**
@@ -2518,6 +2518,7 @@ export class ClaudeCodeProcess extends EventEmitter {
     }
     return [
       ...this.lastTurnInformationals,
+      ...(this.contextUsage.settledFrame ? [this.contextUsage.settledFrame] : []),
       this.lastResultMessage,
       {
         type: 'system',
@@ -2676,9 +2677,13 @@ export class ClaudeCodeProcess extends EventEmitter {
    * reporter reads after each message. On request only (the drawer's Context
    * tab), since each read costs those counts. null = no live query to ask.
    */
-  async contextBreakdown(): Promise<SDKControlGetContextUsageResponse | null> {
-    if (this.stopping || !this.queryInstance) return null;
-    return (await this.queryInstance.getContextUsage({ detail: 'full' })) ?? null;
+  async contextBreakdown(): Promise<{ breakdown: ContextBreakdown | null; revision?: string }> {
+    const query = this.queryInstance;
+    if (this.stopping || !query) return { breakdown: null };
+    const revision = this.contextUsage.revision;
+    const usage = await query.getContextUsage({ detail: 'full' });
+    if (!usage || this.queryInstance !== query || this.contextUsage.revision !== revision) return { breakdown: null };
+    return { breakdown: contextBreakdownSchema.parse(usage), revision };
   }
 
   /**

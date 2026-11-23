@@ -1,4 +1,5 @@
 import pLimit from 'p-limit'
+import { readSessionContext } from './session-context'
 import type { containerHost } from '@shared/lib/container/container-host'
 import { processIdleTimer, type IdleTimer } from '@shared/lib/container/idle-alarm'
 import type { userInputRequestManager } from '@shared/lib/tools/requests/request-manager'
@@ -382,7 +383,10 @@ function createSessionOps(
       live.markIdle(sessionId)
     },
     stopTask: async (sessionId, taskId) => (await client()).stopTask(sessionId, taskId),
-    contextBreakdown: async (sessionId) => (await client()).getContextBreakdown(sessionId),
+    contextBreakdown: (sessionId, refresh) => readSessionContext(store, sessionId, refresh, async () => {
+      if (deps.containerHost.runtime(slug).getCachedInfo().status !== 'running') return { breakdown: null }
+      return (await client()).getContextBreakdown(sessionId)
+    }),
     waitForIdle: (sessionId, opts) => live.waitForIdle(sessionId, opts),
     broadcastUpdate: async (sessionId) => live.emit(sessionId, { type: 'session_updated' }),
     reconcileTranscript: async (sessionId, toolCalls) => live.reconcileTranscript(sessionId, toolCalls),

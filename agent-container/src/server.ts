@@ -333,7 +333,7 @@ app.post('/sessions/:id/messages', async (c) => {
 app.get('/sessions/:id/context', async (c) => {
   const sessionId = c.req.param('id');
   try {
-    return c.json({ breakdown: await sessionManager.contextBreakdown(sessionId) });
+    return c.json(await sessionManager.contextBreakdown(sessionId));
   } catch (error: any) {
     console.error('Error reading context breakdown:', error);
     return c.json({ error: error.message || 'Failed to read context' }, 500);

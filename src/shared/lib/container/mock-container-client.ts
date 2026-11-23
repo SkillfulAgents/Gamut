@@ -28,7 +28,7 @@ import { matchScopes } from '../proxy/scope-matcher'
 import { withUserReason } from '../proxy/user-reason'
 import { db } from '../db'
 import { connectedAccounts } from '../db/schema'
-import type { ContextBreakdown } from './context-breakdown-schema'
+import type { RuntimeContext } from './context-breakdown-schema'
 import { background } from '../background'
 
 export const MOCK_ACCOUNT_ID = 'mock-account-id'
@@ -3979,8 +3979,8 @@ export class MockContainerClient extends EventEmitter implements ContainerClient
   }
 
   /** A fixed breakdown in the shape the CLI's full `/context` gives, for a session the mock knows. */
-  async getContextBreakdown(sessionId: string): Promise<ContextBreakdown | null> {
-    if (!this.sessions.has(sessionId)) return null
+  async getContextBreakdown(sessionId: string): Promise<RuntimeContext> {
+    if (!this.sessions.has(sessionId)) return { breakdown: null }
     const categories = [
       { id: 'messages', name: 'Messages', tokens: 43_100, kind: 'used' },
       { id: 'mcp_tools', name: 'MCP tools', tokens: 27_800, kind: 'used' },
@@ -3992,7 +3992,7 @@ export class MockContainerClient extends EventEmitter implements ContainerClient
       { id: 'free_space', name: 'Free space', tokens: 54_700, kind: 'free' },
       { id: 'mcp_tools_deferred', name: 'MCP tools (deferred)', tokens: 48_100, kind: 'deferred' },
     ]
-    return {
+    const breakdown = {
       categories,
       totalTokens: 112_300,
       rawMaxTokens: 200_000,
@@ -4007,6 +4007,7 @@ export class MockContainerClient extends EventEmitter implements ContainerClient
       autoCompactThreshold: 167_000,
       isAutoCompactEnabled: true,
     }
+    return { breakdown }
   }
 
   /**

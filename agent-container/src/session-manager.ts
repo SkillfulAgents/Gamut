@@ -1343,7 +1343,7 @@ export class SessionManager extends EventEmitter {
   }
 
   async contextBreakdown(sessionId: string) {
-    return await this.sessions.get(sessionId)?.process.contextBreakdown() ?? null;
+    return await this.sessions.get(sessionId)?.process.contextBreakdown() ?? { breakdown: null };
   }
 
   /**

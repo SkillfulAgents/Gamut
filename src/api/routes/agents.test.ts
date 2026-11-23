@@ -12021,7 +12021,7 @@ describe('cross-agent session scoping', () => {
 
   describe('GET /sessions/:sessionId/context', () => {
     it('counts a session on the requested agent', async () => {
-      mockGetContextBreakdown.mockResolvedValue(null)
+      mockGetContextBreakdown.mockResolvedValue({ breakdown: null })
       const res = await app.request(url(OWN_SESSION, '/context'))
       expect(res.status).toBe(200)
       expect(await res.json()).toEqual({ breakdown: null })

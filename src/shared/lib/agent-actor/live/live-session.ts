@@ -18,6 +18,8 @@
  */
 import type { ContainerClient, SlashCommandInfo, StreamMessage } from '@shared/lib/container/types'
 import type { SessionTurnOutcome } from '@shared/lib/container/session-turn-outcome-schema'
+import { saveSettledContext } from '../session-context'
+import { savedContextSchema } from '@shared/lib/container/context-breakdown-schema'
 import type { SessionUsage, SessionActivity } from '@shared/lib/types/agent'
 import type { CoalescedUserMessage } from '@shared/lib/container/runtime-death'
 import type { AgentInputRequests } from '@shared/lib/tools/requests/agent-input-requests'
@@ -1090,7 +1092,7 @@ export class LiveSession {
     // Late-join catch-up: the runtime replays the last turn's terminal frames
     // when a socket attaches after it ended. Only a session that missed that
     // end (still active) acts on them; a settled one already did.
-    if (content.replayed && !this.isActive) return
+    if (content.replayed && !this.isActive && content.type !== 'context_usage') return
     // It missed its turn end, so nothing recorded that activity; the
     // transcript's mtime says when it happened.
     if (content.replayed && content.type === 'result') this.refreshActivityFromTranscript()
@@ -1577,6 +1579,8 @@ export class LiveSession {
     owner.publish({ type: 'session_error', ...error })
   }
 
+  private contextWrite: Promise<void> = Promise.resolve()
+
   /**
    * The container measured the context: the CLI's own count, against the
    * window it auto-compacts at. A size that a turn end or a compaction
@@ -1586,11 +1590,24 @@ export class LiveSession {
     const { totalTokens, contextWindow } = content
     if (typeof totalTokens !== 'number' || typeof contextWindow !== 'number') return
     const usage: SessionUsage = { totalTokens, contextWindow }
-    this.ctx.emit({ type: 'context_usage', ...usage })
+    if (!content.replayed) this.ctx.emit({ type: 'context_usage', ...usage })
     if (content.settled !== true) return
-    background(updateSessionMetadata(this.ctx.store, this.ctx.sessionId, { lastUsage: usage }).catch((error) => {
+    const snapshot = savedContextSchema.safeParse({
+      kind: 'estimate', revision: content.revision, measuredAt: content.measuredAt, breakdown: content.breakdown,
+    })
+    // Each settled frame supersedes prior details, even on an older image that
+    // sends only totals. Do not expose tool names or file paths on the public stream.
+    const lastContext = snapshot.success && snapshot.data.breakdown.totalTokens === totalTokens &&
+      snapshot.data.breakdown.rawMaxTokens === contextWindow ? snapshot.data : undefined
+    this.contextWrite = this.contextWrite.then(async () => {
+      if (await saveSettledContext(this.ctx.store, this.ctx.sessionId, usage, lastContext, content.replayed === true)) {
+        if (content.replayed) this.ctx.emit({ type: 'context_usage', ...usage })
+        this.ctx.emit({ type: 'context_snapshot_saved' })
+      }
+    }).catch((error) => {
       console.error('[LiveSession] Failed to persist lastUsage:', error)
-    }), { name: 'live-session.persist-last-usage' })
+    })
+    background(this.contextWrite, { name: 'live-session.persist-last-usage' })
   }
 
   /**

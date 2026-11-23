@@ -1156,6 +1156,12 @@ function getOrCreateEventSource(
         // every tab renders from.
         invalidateMessagesThrottled(queryClient, sessionId)
       }
+      else if (data.type === 'context_snapshot_saved') {
+        // The saved rows are now readable, including when compaction happened
+        // without an activity transition. A pre-commit request cannot win.
+        const queryKey = ['context-breakdown', agentSlug, sessionId]
+        void queryClient.cancelQueries({ queryKey }).then(() => queryClient.invalidateQueries({ queryKey }))
+      }
       else if (data.type === 'context_usage') {
         // Context window usage update from backend
         if (current) {

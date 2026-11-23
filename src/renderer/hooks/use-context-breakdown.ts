@@ -1,27 +1,39 @@
+import { useRef } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { apiFetch } from '@renderer/lib/api'
-import { contextBreakdownResponseSchema, type ContextBreakdown } from '@shared/lib/container/context-breakdown-schema'
+import { sessionContextSchema } from '@shared/lib/container/context-breakdown-schema'
 
-/**
- * What fills a session's context window, counted in full. Each read costs the
- * runtime token-count calls, so it is fetched only while something shows it
- * (`enabled`) and refreshed by the caller (a turn ending, a Refresh click),
- * never on an interval. null = no live runtime to ask.
- */
 export function useContextBreakdown(sessionId: string, agentSlug: string, enabled: boolean) {
-  return useQuery<ContextBreakdown | null>({
-    queryKey: ['context-breakdown', agentSlug, sessionId],
-    // Let a started count finish in the query cache. A React remount then
-    // shares that request instead of asking the runtime to count twice.
-    queryFn: async () => {
-      const res = await apiFetch(`/api/agents/${encodeURIComponent(agentSlug)}/sessions/${encodeURIComponent(sessionId)}/context`)
-      if (!res.ok) throw new Error('Failed to read context')
-      return contextBreakdownResponseSchema.parse(await res.json()).breakdown
+  const refreshRequested = useRef(false)
+  const queryKey = ['context-breakdown', agentSlug, sessionId]
+  const read = async (refresh: boolean) => {
+    const path = `/api/agents/${encodeURIComponent(agentSlug)}/sessions/${encodeURIComponent(sessionId)}/context`
+    const res = await apiFetch(refresh ? path + '?refresh=true' : path)
+    if (!res.ok) throw new Error('Failed to read context')
+    return sessionContextSchema.parse(await res.json())
+  }
+
+  const query = useQuery({
+    queryKey,
+    // Share an in-flight count across panel remounts.
+    queryFn: () => {
+      const refresh = refreshRequested.current
+      refreshRequested.current = false
+      return read(refresh)
     },
     enabled,
-    staleTime: 0,
     retry: false,
     refetchOnReconnect: false,
     refetchOnWindowFocus: false,
+    staleTime: 0,
   })
+  const refresh = async () => {
+    refreshRequested.current = true
+    try {
+      await query.refetch({ cancelRefetch: false })
+    } finally {
+      refreshRequested.current = false
+    }
+  }
+  return { ...query, refresh }
 }

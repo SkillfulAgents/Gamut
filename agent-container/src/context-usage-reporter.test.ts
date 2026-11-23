@@ -44,6 +44,25 @@ describe('ContextUsageReporter', () => {
     expect(sent).toEqual([{ type: 'context_usage', totalTokens: 64_041, contextWindow: 1_000_000, settled: true }]);
   });
 
+  it('projects only settled rows into replay and invalidates them as the context moves', async () => {
+    const usage = {
+      ...summary(400, 2000), percentage: 20,
+      categories: [{ name: 'Messages', kind: 'used', tokens: 400, color: 'blue' }],
+    } as SDKControlGetContextUsageResponse;
+    const send = vi.fn();
+    const reporter = new ContextUsageReporter(async () => usage, send);
+    reporter.refresh(true);
+    await flush();
+    const settled = reporter.settledFrame;
+    expect(settled?.breakdown?.categories).toEqual([{ name: 'Messages', kind: 'used', tokens: 400 }]);
+    expect(settled?.revision).toBe(reporter.revision);
+    expect(settled?.measuredAt).toBeTruthy();
+    reporter.refresh(false);
+    expect(reporter.settledFrame).toBeUndefined();
+    await flush();
+    expect(send.mock.calls[1][0].breakdown).toBeUndefined();
+  });
+
   it('runs one read at a time and one more for a burst during it, keeping settled', async () => {
     const first = deferred<SDKControlGetContextUsageResponse>();
     const reads = [first.promise, Promise.resolve(summary(32_166))];

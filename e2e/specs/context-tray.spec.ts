@@ -6,7 +6,7 @@ import { SessionPage } from '../pages/session.page'
 test('context is counted only when opened and can be refreshed and inspected', async ({ page }, testInfo) => {
   const counts: string[] = []
   page.on('request', request => {
-    if (request.method() === 'GET' && /\/sessions\/[^/]+\/context$/.test(request.url())) counts.push(request.url())
+    if (request.method() === 'GET' && /\/sessions\/[^/]+\/context(?:\?|$)/.test(request.url())) counts.push(request.url())
   })
   const app = new AppPage(page)
   await app.goto()
@@ -23,10 +23,12 @@ test('context is counted only when opened and can be refreshed and inspected', a
   await page.getByTestId('tray-empty-context').click()
   await expect(page.getByTestId('context-percent')).toHaveText('56% used')
   expect(counts).toHaveLength(1)
+  expect(new URL(counts[0]).searchParams.has('refresh')).toBe(false)
   await page.getByRole('button', { name: /MCP tools/ }).click()
   await expect(page.getByText('mcp__browser__navigate', { exact: true })).toBeVisible()
   await page.getByRole('button', { name: 'Refresh', exact: true }).click()
   await expect.poll(() => counts.length).toBe(2)
+  expect(new URL(counts[1]).searchParams.get('refresh')).toBe('true')
   await page.getByTestId('tray-hide').click()
   await session.sendMessage('Summarize the workspace again')
   await expect(session.getAssistantMessages()).toHaveCount(2)
@@ -43,11 +45,15 @@ test('the composer meter opens, selects and restores the session’s Context tab
   await session.sendMessage('Summarize the workspace')
   await expect(session.getAssistantMessages().first()).toBeVisible()
 
-  // The mock transcript has no token totals. Read a session with persisted usage.
+  // A sleeping session from an older image can carry only the last usage.
+  const usage = { totalTokens: 50_000, contextWindow: 200_000 }
+  await page.route(/\/sessions\/[^/]+\/context$/, route => route.fulfill({
+    json: { breakdown: null, source: 'saved-usage', usage },
+  }))
   await page.route(/\/api\/agents\/[^/]+\/sessions\/[^/?]+(\?.*)?$/, async route => {
     const response = await route.fetch()
     const record = await response.json()
-    await route.fulfill({ response, json: { ...record, lastUsage: { totalTokens: 50_000, contextWindow: 200_000 } } })
+    await route.fulfill({ response, json: { ...record, lastUsage: usage } })
   })
   await page.reload()
   const meter = page.getByRole('button', { name: 'Open Context Usage, 25% used' })
@@ -56,8 +62,9 @@ test('the composer meter opens, selects and restores the session’s Context tab
   await expect(page.getByRole('tooltip')).toHaveText('25%')
   await meter.click()
   await expect(selected).toBeVisible()
-  await expect(page.getByTestId('context-percent')).toHaveText('56% used')
+  await expect(page.getByTestId('context-percent')).toHaveText('25% used')
 
+  await expect(page.getByTestId('context-unavailable')).toContainText('Category details weren’t saved')
   await page.getByTestId('tray-new-tab').click()
   await meter.press('Enter')
   await expect(selected).toBeVisible()

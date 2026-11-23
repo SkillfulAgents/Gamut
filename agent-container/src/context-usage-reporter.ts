@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+import { contextBreakdownSchema, type ContextBreakdown } from './context-breakdown-schema';
 import type { SDKControlGetContextUsageResponse } from '@anthropic-ai/claude-agent-sdk';
 
 /**
@@ -6,6 +8,9 @@ import type { SDKControlGetContextUsageResponse } from '@anthropic-ai/claude-age
  * which the host saves; other sizes are mid-turn and only go out.
  */
 export interface ContextUsageFrame {
+  revision?: string;
+  measuredAt?: string;
+  breakdown?: ContextBreakdown;
   type: 'context_usage';
   totalTokens: number;
   contextWindow: number;
@@ -33,6 +38,13 @@ export function contextUsageChange(message: ContextMovingMessage): { settled: bo
  * burst of frames costs one more read, not one each.
  */
 export class ContextUsageReporter {
+  revision: string = randomUUID();
+  private lastSettled?: ContextUsageFrame;
+
+  get settledFrame(): ContextUsageFrame | undefined {
+    return this.lastSettled?.revision === this.revision ? this.lastSettled : undefined;
+  }
+
   private reading = false;
   private pending: { settled: boolean } | null = null;
   private warned = false;
@@ -43,6 +55,7 @@ export class ContextUsageReporter {
   ) {}
 
   refresh(settled: boolean): void {
+    this.revision = randomUUID();
     if (this.reading) {
       // The read after this one must still be saved if any request was settled.
       this.pending = { settled: settled || this.pending?.settled === true };
@@ -53,10 +66,19 @@ export class ContextUsageReporter {
 
   private async readAndSend(settled: boolean): Promise<void> {
     this.reading = true;
+    const revision = this.revision;
     try {
       const usage = await this.read();
       if (usage) {
-        this.send({ type: 'context_usage', totalTokens: usage.totalTokens, contextWindow: usage.rawMaxTokens, settled });
+        // Only settled snapshots cross the wire with rows. The host saves the
+        // public totals and displayable detail separately.
+        const projected = settled ? contextBreakdownSchema.safeParse(usage) : undefined;
+        const frame: ContextUsageFrame = {
+          type: 'context_usage', totalTokens: usage.totalTokens, contextWindow: usage.rawMaxTokens, settled,
+          ...(projected?.success && { revision, measuredAt: new Date().toISOString(), breakdown: projected.data }),
+        };
+        if (settled) this.lastSettled = frame;
+        this.send(frame);
       }
     } catch (error) {
       if (!this.warned) {
@@ -68,6 +90,6 @@ export class ContextUsageReporter {
     }
     const next = this.pending;
     this.pending = null;
-    if (next) this.refresh(next.settled);
+    if (next) void this.readAndSend(next.settled);
   }
 }

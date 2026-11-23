@@ -7,15 +7,18 @@ import type { ContextBreakdown } from '@shared/lib/container/context-breakdown-s
 const state = {
   breakdown: null as ContextBreakdown | null,
   isActive: false,
+  liveUsage: undefined as { totalTokens: number; contextWindow: number } | undefined,
   refetch: vi.fn(),
   send: vi.fn(),
   canUse: true,
+  usage: undefined as { totalTokens: number; contextWindow: number } | undefined,
 }
+vi.mock('@renderer/hooks/use-sessions', () => ({ useSession: () => ({ data: { lastUsage: state.usage } }) }))
 vi.mock('@renderer/context/user-context', () => ({ useUser: () => ({ canUseAgent: () => state.canUse }) }))
 vi.mock('@renderer/hooks/use-context-breakdown', () => ({
-  useContextBreakdown: () => ({ data: state.breakdown, isLoading: false, isError: false, isFetching: false, refetch: state.refetch }),
+  useContextBreakdown: () => ({ data: { breakdown: state.breakdown }, isLoading: false, isError: false, isFetching: false, refresh: state.refetch }),
 }))
-vi.mock('@renderer/hooks/use-message-stream', () => ({ useMessageStream: () => ({ isActive: state.isActive }) }))
+vi.mock('@renderer/hooks/use-message-stream', () => ({ useMessageStream: () => ({ isActive: state.isActive, contextUsage: state.liveUsage }) }))
 vi.mock('@renderer/hooks/use-messages', () => ({ useSendMessage: () => ({ mutate: state.send, isPending: false }) }))
 
 import { ContextTrayContent, formatTokens } from './context-tray-content'
@@ -48,6 +51,8 @@ describe('formatTokens', () => {
 
 describe('ContextTrayContent', () => {
   beforeEach(() => {
+    state.usage = undefined
+    state.liveUsage = undefined
     state.canUse = true
     state.breakdown = BREAKDOWN
     state.isActive = false
@@ -82,17 +87,33 @@ describe('ContextTrayContent', () => {
     state.isActive = true
     rerender(<ContextTrayContent agentSlug="a" sessionId="s" />)
     expect(screen.getByTestId('context-compact')).toBeDisabled()
-    // A turn ending reads the context again.
-    state.isActive = false
-    rerender(<ContextTrayContent agentSlug="a" sessionId="s" />)
-    expect(state.refetch).toHaveBeenCalled()
   })
 
   it('hides counts and compaction for a read-only member', () => {
     state.canUse = false
+    state.usage = { totalTokens: 48_616, contextWindow: 1_000_000 }
     render(<ContextTrayContent agentSlug="a" sessionId="s" />)
     expect(screen.getByText(/requires permission/)).toBeVisible()
+    expect(screen.getByTestId('context-percent')).toHaveTextContent('5% used')
+    expect(screen.queryByRole('button', { name: /Memory files/ })).toBeNull()
     expect(screen.queryByTestId('context-compact')).toBeNull()
+  })
+
+  it('shows the current first-turn usage before any measurement is saved', () => {
+    state.isActive = true
+    state.breakdown = null
+    state.liveUsage = { totalTokens: 73_000, contextWindow: 200_000 }
+    render(<ContextTrayContent agentSlug="a" sessionId="s" />)
+    expect(screen.getByText('73K / 200K')).toBeVisible()
+    expect(screen.getByTestId('context-unavailable')).toHaveTextContent('Live usage')
+  })
+
+  it('shows the token count alone when an older image omitted the window', () => {
+    state.breakdown = null
+    state.usage = { totalTokens: 5_100, contextWindow: 0 }
+    render(<ContextTrayContent agentSlug="a" sessionId="s" />)
+    expect(screen.getByText('5.1K tokens')).toBeVisible()
+    expect(screen.getByTestId('context-percent')).toHaveTextContent('Context usage')
   })
 
   it('says when there is no live runtime to ask', () => {
