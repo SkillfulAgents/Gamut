@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+import { contextBreakdownSchema, type ContextBreakdown } from './context-breakdown-schema';
 import type { SDKControlGetContextUsageResponse } from '@anthropic-ai/claude-agent-sdk';
 
 /**
@@ -6,6 +8,10 @@ import type { SDKControlGetContextUsageResponse } from '@anthropic-ai/claude-age
  * which the host saves; other sizes are mid-turn and only go out.
  */
 export interface ContextUsageFrame {
+  revision?: string;
+  measuredAt?: string;
+  breakdown?: ContextBreakdown;
+  breakdownKind?: 'full';
   type: 'context_usage';
   totalTokens: number;
   contextWindow: number;
@@ -28,24 +34,31 @@ export function contextUsageChange(message: ContextMovingMessage): { settled: bo
 }
 
 /**
- * Reads the CLI's `/context` summary (no token-count API calls) and sends it
- * on. One read at a time: a request during a read runs once after it, so a
- * burst of frames costs one more read, not one each.
+ * Mid-turn updates need only totals. At turn end or compaction, capture the
+ * full SDK count while the query still owns that context. A later revision
+ * supersedes an in-flight measurement.
  */
 export class ContextUsageReporter {
+  revision: string = randomUUID();
+  private lastSettled?: ContextUsageFrame;
+
+  get settledFrame(): ContextUsageFrame | undefined {
+    return this.lastSettled?.revision === this.revision ? this.lastSettled : undefined;
+  }
+
   private reading = false;
-  private pending: { settled: boolean } | null = null;
+  private pending: boolean | undefined;
   private warned = false;
 
   constructor(
-    private readonly read: () => Promise<SDKControlGetContextUsageResponse | undefined>,
+    private readonly read: (detail: 'summary' | 'full') => Promise<SDKControlGetContextUsageResponse | undefined>,
     private readonly send: (frame: ContextUsageFrame) => void,
   ) {}
 
   refresh(settled: boolean): void {
+    this.revision = randomUUID();
     if (this.reading) {
-      // The read after this one must still be saved if any request was settled.
-      this.pending = { settled: settled || this.pending?.settled === true };
+      this.pending = settled;
       return;
     }
     void this.readAndSend(settled);
@@ -53,21 +66,47 @@ export class ContextUsageReporter {
 
   private async readAndSend(settled: boolean): Promise<void> {
     this.reading = true;
+    const revision = this.revision;
     try {
-      const usage = await this.read();
-      if (usage) {
-        this.send({ type: 'context_usage', totalTokens: usage.totalTokens, contextWindow: usage.rawMaxTokens, settled });
+      const frame = await this.measure(settled, revision);
+      if (frame && revision === this.revision) {
+        if (settled) this.lastSettled = frame;
+        this.send(frame);
       }
     } catch (error) {
-      if (!this.warned) {
-        this.warned = true;
-        console.warn('[ContextUsage] getContextUsage failed:', error);
-      }
+      this.warn(error);
     } finally {
       this.reading = false;
     }
     const next = this.pending;
-    this.pending = null;
-    if (next) this.refresh(next.settled);
+    this.pending = undefined;
+    if (next !== undefined) void this.readAndSend(next);
+  }
+
+  private async measure(settled: boolean, revision: string): Promise<ContextUsageFrame | undefined> {
+    if (settled) {
+      try {
+        const usage = await this.read('full');
+        if (!usage) return;
+        const breakdown = contextBreakdownSchema.parse(usage);
+        return {
+          type: 'context_usage', settled, totalTokens: breakdown.totalTokens, contextWindow: breakdown.rawMaxTokens,
+          revision, measuredAt: new Date().toISOString(), breakdownKind: 'full', breakdown,
+        };
+      } catch (error) {
+        // If the provider cannot count the categories, keep the composer's
+        // totals without recording estimated rows as a full measurement.
+        this.warn(error);
+        if (revision !== this.revision) return;
+      }
+    }
+    const usage = await this.read('summary');
+    if (usage) return { type: 'context_usage', settled, totalTokens: usage.totalTokens, contextWindow: usage.rawMaxTokens };
+  }
+
+  private warn(error: unknown): void {
+    if (this.warned) return;
+    this.warned = true;
+    console.warn('[ContextUsage] getContextUsage failed:', error);
   }
 }

@@ -79,6 +79,7 @@ import type { ComputerUsePermissionLevel, PermissionGrantType } from '@shared/li
 import type { ComputerUseRun, HostRunOutcome, ScriptRun } from './host-runs'
 import type { WidgetRefreshOutcome } from '@shared/lib/widgets/agent-widget-refreshes'
 import type { McpProxySession } from '@shared/lib/mcp/agent-mcp-sessions'
+import type { SessionContext } from '@shared/lib/container/context-breakdown-schema'
 import type { VolumeUploadOutcome } from '@shared/lib/volumes/volume-upload-guard'
 
 /** The agent's directory-name slug. Not the URL `displaySlug`. */
@@ -441,6 +442,8 @@ export interface SessionOps {
   markIdle(sessionId: string): Promise<void>
   /** `client.stopTask` — stop one background task by its SDK task id. */
   stopTask(sessionId: string, taskId: string): Promise<boolean>
+  /** The saved context, or an on-demand measurement from an already running process. */
+  contextBreakdown(sessionId: string, refresh: boolean): Promise<SessionContext>
   /**
    * `LiveSessions.waitForIdle`: `'idle'` once the session is not active (at
    * once when it is not running), `'timeout'` when it still is after `timeoutMs`.

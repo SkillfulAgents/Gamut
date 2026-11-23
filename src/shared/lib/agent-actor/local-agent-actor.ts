@@ -33,6 +33,7 @@ import { createAgentState, releaseAgentState, releaseSessionState, settleStopped
 import { createLocalSessionStore } from './local-session-store'
 import { exportSessionMetadata, ingestSessionMetadataFile } from '@shared/lib/services/session-metadata-file'
 import { transcriptPath, type SessionStore } from './session-store'
+import { readSessionContext } from './session-context'
 import { sessionEvents, sessionFrames } from './session-streams'
 import type { UserInputRequestOutcome } from '@shared/lib/tools/requests/request-schema'
 import type {
@@ -452,6 +453,10 @@ function createSessionOps(
       live.markIdle(sessionId)
     },
     stopTask: async (sessionId, taskId) => (await client()).stopTask(sessionId, taskId),
+    contextBreakdown: (sessionId, refresh) => readSessionContext(store, sessionId, refresh, async () => {
+      if (deps.containerHost.runtime(slug).getCachedInfo().status !== 'running') return { breakdown: null }
+      return (await client()).getContextBreakdown(sessionId)
+    }),
     waitForIdle: (sessionId, opts) => live.waitForIdle(sessionId, opts),
     broadcastUpdate: async (sessionId) => live.emit(sessionId, { type: 'session_updated' }),
     reconcileTranscript: async (sessionId, toolCalls) => live.reconcileTranscript(sessionId, toolCalls),

@@ -32,6 +32,7 @@ import { builtinHints, createHintHookMatchers } from './hints';
 import { promptDate } from './prompt-date';
 import { mountedDrives, mountedVolumeIndexes, type VolumeIndex } from './volume-mounts';
 import { prepareResumeDiagnostics } from './resume-diagnostics';
+import { contextBreakdownSchema, type ContextBreakdown } from './context-breakdown-schema';
 import { ContextUsageReporter, contextUsageChange } from './context-usage-reporter';
 
 /**
@@ -745,7 +746,7 @@ export class ClaudeCodeProcess extends EventEmitter {
   private cliCommands?: readonly SlashCommand[];
   private runnableCommandNames?: readonly string[];
   private readonly contextUsage = new ContextUsageReporter(
-    async () => this.queryInstance?.getContextUsage({ detail: 'summary' }),
+    async detail => this.queryInstance?.getContextUsage({ detail }),
     (frame) => this.emit('message', frame),
   );
 
@@ -2524,6 +2525,7 @@ export class ClaudeCodeProcess extends EventEmitter {
     }
     return [
       ...this.lastTurnInformationals,
+      ...(this.contextUsage.settledFrame ? [this.contextUsage.settledFrame] : []),
       this.lastResultMessage,
       {
         type: 'system',
@@ -2674,6 +2676,19 @@ export class ClaudeCodeProcess extends EventEmitter {
       state: 'discarded',
       session_id: this.claudeSessionId || this.sessionId,
     });
+  }
+
+  /**
+   * An explicit refresh from the Context tab uses the same full SDK count as
+   * the automatic settled snapshot. Discard a result if its context moved.
+   */
+  async contextBreakdown(): Promise<{ breakdown: ContextBreakdown | null; revision?: string }> {
+    const query = this.queryInstance;
+    if (this.stopping || !query) return { breakdown: null };
+    const revision = this.contextUsage.revision;
+    const usage = await query.getContextUsage({ detail: 'full' });
+    if (!usage || this.queryInstance !== query || this.contextUsage.revision !== revision) return { breakdown: null };
+    return { breakdown: contextBreakdownSchema.parse(usage), revision };
   }
 
   /**

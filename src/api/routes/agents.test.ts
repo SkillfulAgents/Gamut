@@ -231,6 +231,7 @@ const mockCancelQueuedMessage = vi.fn()
 const mockKeepAlive = vi.fn()
 const mockEnsureRunning = vi.fn()
 const mockInterruptSession = vi.fn()
+const mockGetContextBreakdown = vi.fn()
 const mockStopTask = vi.fn()
 const mockForkSession = vi.fn()
 const mockClientDeleteSession = vi.fn(async (..._args: unknown[]) => true)
@@ -251,6 +252,7 @@ vi.mock('@shared/lib/container/container-host', async () => {
       sendMessage: (...args: unknown[]) => mockSendMessage(...args),
       cancelQueuedMessage: (...args: unknown[]) => mockCancelQueuedMessage(...args),
       interruptSession: (...args: unknown[]) => mockInterruptSession(...args),
+      getContextBreakdown: (sessionId: string) => mockGetContextBreakdown(sessionId),
       stopTask: (...args: unknown[]) => mockStopTask(...args),
       forkSession: (...args: unknown[]) => mockForkSession(...args),
       releaseSession: async () => true,
@@ -12014,6 +12016,41 @@ describe('cross-agent session scoping', () => {
       expect(res.status).toBe(400)
       expect(mockInterruptSession).not.toHaveBeenCalled()
       expect(mockLiveSessions.markInterrupted).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('GET /sessions/:sessionId/context', () => {
+    it('counts a session on the requested agent', async () => {
+      mockGetContextBreakdown.mockResolvedValue({ breakdown: null })
+      const res = await app.request(url(OWN_SESSION, '/context'))
+      expect(res.status).toBe(200)
+      expect(await res.json()).toEqual({ breakdown: null })
+      expect(mockGetContextBreakdown).toHaveBeenCalledWith(OWN_SESSION)
+    })
+
+    it('checks session ownership before asking the runtime', async () => {
+      const res = await app.request(url(VICTIM_SESSION, '/context'))
+      expect(res.status).toBe(404)
+      expect(mockGetContextBreakdown).not.toHaveBeenCalled()
+    })
+
+    it('leaves a stopped agent asleep', async () => {
+      mockGetCachedInfo.mockReturnValue({ status: 'stopped', port: 0 })
+      const res = await app.request(url(OWN_SESSION, '/context'))
+      expect(res.status).toBe(200)
+      expect(await res.json()).toEqual({ breakdown: null })
+      expect(mockGetContextBreakdown).not.toHaveBeenCalled()
+    })
+
+    it('does not run a count for a meeting participant', async () => {
+      mockMeetingParticipant.value = { meetingId: 'm-1', agentSlug: ATTACKER, sessionId: OWN_SESSION, userId: 'u-1' }
+      try {
+        const res = await app.request(url(OWN_SESSION, '/context'))
+        expect(res.status).toBe(403)
+        expect(mockGetContextBreakdown).not.toHaveBeenCalled()
+      } finally {
+        mockMeetingParticipant.value = null
+      }
     })
   })
 

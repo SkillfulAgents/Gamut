@@ -3361,6 +3361,25 @@ agents.post('/:id/sessions/:sessionId/interrupt', AgentUser(), async (c) => {
   }
 })
 
+// The Context tab reads the latest stored measurement. Explicit refresh can
+// measure the already-running session without starting its runtime.
+agents.get('/:id/sessions/:sessionId/context', AgentUser(), async (c) => {
+  // A meeting page can read its transcript, but does not need a paid runtime count.
+  if (getMeetingParticipant(c)) return c.json({ error: 'Forbidden' }, 403)
+  const agentSlug = getAgentId(c)
+  const sessionId = c.req.param('sessionId')
+  const actor = agentRegistry.get(agentSlug)
+  if (!(await actor.sessions.isKnown(sessionId))) {
+    return c.json({ error: 'Session not found' }, 404)
+  }
+  try {
+    return c.json(await actor.sessions.contextBreakdown(sessionId, c.req.query('refresh') === 'true'))
+  } catch (error) {
+    console.error('Failed to read context breakdown:', error)
+    return c.json({ error: 'Failed to read context' }, 500)
+  }
+})
+
 // POST /api/agents/:id/sessions/:sessionId/tasks/:taskId/stop - Stop one
 // background task (backgrounded Bash, background subagent, workflow) by the
 // id the stream reported in background_task_started. The runtime answers on
