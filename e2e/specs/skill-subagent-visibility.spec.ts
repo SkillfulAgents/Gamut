@@ -27,7 +27,7 @@ test.describe('Skill subagent visibility', () => {
     await sessionPage.sendMessage('skill launches nested subagent')
 
     const running = page.getByRole('button', {
-      name: 'Show full activity: code-reviewer Review the changes · Inspecting tests',
+      name: 'Open code-reviewer Review the changes · Inspecting tests',
     })
     await expect(running).toBeVisible({ timeout: 15000 })
 
@@ -35,7 +35,7 @@ test.describe('Skill subagent visibility', () => {
     await expect(running).toBeVisible({ timeout: 5000 })
 
     const completed = page.getByRole('button', {
-      name: 'Show full activity: code-reviewer Review the changes',
+      name: 'Open code-reviewer Review the changes',
     })
     const completedRow = page.getByTestId('subagent-activity-row').filter({ has: completed })
     await expect(completedRow).toBeVisible({ timeout: 7000 })
@@ -44,6 +44,12 @@ test.describe('Skill subagent visibility', () => {
     await page.reload()
     await expect(completedRow).toBeVisible({ timeout: 5000 })
     await expect(completedRow).toContainText('✓')
+    await completed.click()
+    const trajectory = page.getByTestId('subagent-transcript')
+    await expect(trajectory).toBeVisible()
+    await expect(trajectory).toContainText('Review the changes')
+    await page.getByTestId('subagent-back').click()
+    await expect(page.getByTestId('subagents-list-row').filter({ hasText: 'Review the changes' })).toBeVisible()
     await agentPage.waitForStatus('idle', 15000)
   })
 })

@@ -1,5 +1,5 @@
 import { cn } from '@shared/lib/utils'
-import { ChevronDown, Circle, CircleCheckBig, Loader2, Monitor, X } from 'lucide-react'
+import { ChevronDown, ChevronRight, Circle, CircleCheckBig, Loader2, Monitor, X } from 'lucide-react'
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from 'react'
 
 import { useElapsedTimer } from '@renderer/hooks/use-elapsed-timer'
@@ -79,6 +79,7 @@ export interface ActivityCardProps {
    * Stop one background task or subagent by its task id. When absent no row
    * gets a stop control. Rejections surface as a retry state on the row.
    */
+  onOpenSubagent?: (item: ActivitySubagentItem) => void
   onStopTask?: (taskId: string) => Promise<void>
 }
 
@@ -102,6 +103,7 @@ export function ActivityCard({
   backgroundTasks = [],
   todos,
   onStopTask,
+  onOpenSubagent,
 }: ActivityCardProps) {
   const [showAllTodos, setShowAllTodos] = useState(false)
   const [isCollapsed, setIsCollapsed] = useState(false)
@@ -246,7 +248,7 @@ export function ActivityCard({
                   <RowMark>
                     {item.status === 'completed' ? <span>✓</span> : null}
                   </RowMark>
-                  <SubagentActivityLabel item={item} />
+                  <SubagentActivityLabel item={item} onOpen={onOpenSubagent && (() => onOpenSubagent(item))} />
                   {onStopTask && item.status === 'running' && item.taskId && (
                     <StopTaskButton
                       taskId={item.taskId}
@@ -306,13 +308,46 @@ function formatActivityCount(count: number, singular: string, plural: string): s
   return `${count} ${count === 1 ? singular : plural}`
 }
 
-function SubagentActivityLabel({ item }: { item: ActivitySubagentItem }) {
+function SubagentActivityLabel({ item, onOpen }: { item: ActivitySubagentItem; onOpen?: () => void }) {
   const progressSummary = item.status === 'running' ? item.progressSummary : null
   const fullActivityText = [
     item.name,
     item.description,
     progressSummary ? `· ${progressSummary}` : '',
   ].filter(Boolean).join(' ')
+
+  const label = (
+    <HoverScrollText hoverTarget="parent" className={onOpen ? 'min-w-0' : undefined}>
+      <span className="font-mono">{item.name}</span>
+      {item.description && (
+        <span className="text-muted-foreground">{' '}{item.description}</span>
+      )}
+      {progressSummary && (
+        <>
+          <span className="text-muted-foreground" aria-hidden="true">{' · '}</span>
+          <span className="italic text-muted-foreground">{progressSummary}</span>
+        </>
+      )}
+    </HoverScrollText>
+  )
+
+  // In a session the row opens the subagent in the drawer, where its whole
+  // transcript is; the full text stays on the tooltip.
+  if (onOpen) {
+    return (
+      <button
+        type="button"
+        onClick={onOpen}
+        className="group flex min-w-0 flex-1 items-center gap-1 rounded-sm text-left hover:underline"
+        aria-label={`Open ${fullActivityText}`}
+        title={fullActivityText}
+        data-testid="subagent-activity-open"
+      >
+        {label}
+        <ChevronRight className="h-3 w-3 opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100" />
+      </button>
+    )
+  }
 
   return (
     <Popover>

@@ -161,31 +161,9 @@ function isSubagentTool(name: string): boolean {
   return name === 'Task' || name === 'Agent'
 }
 
-// The rows that read activeSubagents/completedSubagents: they draw a subagent or workflow card.
-export function readsSubagentState(message: ApiMessage): boolean {
-  return message.toolCalls?.some(tc => isSubagentTool(tc.name) || tc.name === 'Workflow') ?? false
-}
-
-function resolveSubagentRun(
-  toolCall: ApiToolCall,
-  activeSubagents: SubagentInfo[] | undefined,
-  completedSubagents: Set<string> | null | undefined,
-): { activeSubagent: SubagentInfo | null; isCompleted: boolean } {
-  const directRun = activeSubagents?.find((sub) => sub.parentToolId === toolCall.id)
-  const agentId = toolCall.subagent?.agentId
-  const resumedRun = agentId
-    ? activeSubagents?.find((sub) =>
-      sub.agentId === agentId &&
-      sub.parentToolId !== toolCall.id &&
-      (!sub.parentToolId || !completedSubagents?.has(sub.parentToolId))
-    )
-    : undefined
-  const activeSubagent = resumedRun ?? directRun ?? null
-  const selectedToolId = activeSubagent?.parentToolId ?? toolCall.id
-  return {
-    activeSubagent,
-    isCompleted: completedSubagents?.has(selectedToolId) ?? false,
-  }
+// Workflow blocks read live task events through their message row.
+export function hasWorkflowCall(message: ApiMessage): boolean {
+  return message.toolCalls?.some(tc => tc.name === 'Workflow') ?? false
 }
 
 /**
@@ -604,7 +582,6 @@ function MessageItemComponent({ message, isStreaming, agentSlug, sessionId, isSe
         {isAssistant && toolCalls.length > 0 && (
           <div className="w-full space-y-2">
             {toolCalls.map((toolCall) => {
-              const subagentRun = resolveSubagentRun(toolCall, activeSubagents, completedSubagents)
               return (
                 <MessageContextMenu key={toolCall.id} text={toolCall.name} onRemove={onRemoveToolCall ? () => onRemoveToolCall(toolCall.id) : undefined}>
                   <div
@@ -621,8 +598,6 @@ function MessageItemComponent({ message, isStreaming, agentSlug, sessionId, isSe
                           sessionId={sessionId}
                           agentSlug={agentSlug!}
                           isSessionActive={isSessionActive}
-                          activeSubagent={subagentRun.activeSubagent}
-                          isCompleted={subagentRun.isCompleted}
                         />
                       ) : toolCall.name === 'Workflow' ? (
                         <WorkflowBlock
@@ -650,7 +625,7 @@ function MessageItemComponent({ message, isStreaming, agentSlug, sessionId, isSe
 // skips re-rendering all but the items that actually changed. Handlers, agentSlug
 // and sessionId are referentially stable. activeSubagents/completedSubagents
 // change identity on each subagent SSE event, so MessageList passes them only to
-// rows with Task/Agent/Workflow calls; other rows skip re-rendering.
+// rows with Workflow calls; other rows skip re-rendering.
 export const MessageItem = memo(MessageItemComponent)
 
 if (__RENDER_TRACKING__) {
