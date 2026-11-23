@@ -1,0 +1,8 @@
+[TEST_PASS]
+[REASON] Sent "Hello! What is 2+2?" to agent QA-20261123-190217-r03z and confirmed the reply contains 4.
+[STEP] Step 1: Navigated to http://localhost:47891 — the Gamut home page loaded with the sidebar listing agents QA-20261123-190217-82s5 and QA-20261123-190217-r03z.
+[STEP] Step 2: Clicked the QA-20261123-190217-r03z agent in the sidebar — the agent page opened at /agents/qa-20261123-190217-r03z-1x70uok3r3 and I took a screenshot.
+[STEP] Step 3: Checked the agent status — the header status indicator reads "idle", which is an accepted state.
+[STEP] Step 4: Typed "Hello! What is 2+2?" into the message input and clicked Send — the app navigated to a new session titled "Basic Arithmetic Question Check" and the message appeared in the chat.
+[STEP] Step 5: Waited for a response — the assistant reply "2 + 2 = 4." was already in the message list on the first check after sending, so no wait was needed. The activity indicator was not visible.
+[STEP] Step 6: Verified the response mentions "4" — it reads "2 + 2 = 4." I took a screenshot of the chat showing the user message and the reply.
