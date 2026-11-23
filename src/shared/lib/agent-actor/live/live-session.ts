@@ -41,7 +41,7 @@ import { parseUserTags } from '@shared/lib/utils/mentions'
 import { stripMarkdownPreview } from '@shared/lib/markdown-preview'
 import type { SubagentCapture } from '@shared/lib/container/subagent-capture'
 import { appendInformationalEntry } from '@shared/lib/services/session-transcript-append'
-import { finalizeAutomationStatus, recordErrorProvider, updateSessionMetadata } from '@shared/lib/services/session-service'
+import { finalizeAutomationStatus, recordErrorProvider } from '@shared/lib/services/session-service'
 import {
   recordProvisionalSessionActivity,
   recordSessionActivity,
