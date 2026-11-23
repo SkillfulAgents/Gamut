@@ -1,10 +1,8 @@
 [TEST_PASS]
-[REASON] Opened the QA-20261123-194140-w3j0 agent, sent "Hello! What is 2+2?", and confirmed the reply contains "4".
-[STEP] Step 1: Navigated to http://localhost:47891 — the Gamut app loaded and the sidebar listed QA-20261123-194140-w3j0 under Your Agents.
-[STEP] Step 2: Clicked QA-20261123-194140-w3j0 in the sidebar — its agent page opened (URL /agents/qa-20261123-194140-w3j0-cmpfyxekqx) with the name in the header.
-[STEP] Step 3: Checked agent status — the header status indicator reads "idle", which satisfies the running-or-idle requirement.
-[STEP] Step 4: Typed "Hello! What is 2+2?" into the message box and clicked the send arrow — the page navigated to a new session titled "Basic Arithmetic Question" and the message appeared in the chat.
-[STEP] Step 5: Waited for a response — none was needed beyond the first check. The assistant reply "Hello! 2 + 2 = 4." was already shown, and the status returned to "idle" with no activity indicator visible.
-[STEP] Step 6: Verified the reply mentions "4" — it does ("Hello! 2 + 2 = 4."). Took a screenshot of the chat showing the exchange.
-
-No bugs observed. The browser console showed only WebGL GL driver warnings, which I did not treat as app defects.
+[REASON] Opened agent QA-20261123-220607-s7s3, sent "Hello! What is 2+2?", and confirmed the reply contains 4.
+[STEP] Step 1: Navigated to http://localhost:47891 — the Gamut app loaded with the sidebar listing agents QA-20261123-220608-vwlc and QA-20261123-220607-s7s3.
+[STEP] Step 2: Clicked QA-20261123-220607-s7s3 in the sidebar — its agent page opened (URL /agents/qa-20261123-220607-s7s3-z2wzbab43e) with the message composer shown.
+[STEP] Step 3: Checked the agent status indicator in the header — it reads "idle", which is an accepted state.
+[STEP] Step 4: Typed "Hello! What is 2+2?" into the composer and clicked the send button — the app navigated to a new session, and the message appeared in the chat as the first user message.
+[STEP] Step 5: Waited for the response — the assistant reply "2 + 2 = 4." appeared within the wait window, and the send control and input returned to their idle state.
+[STEP] Step 6: Verified the response mentions "4" and took a screenshot (step6-response-verified.png) — the screenshot shows the user message and the reply "2 + 2 = 4.".
