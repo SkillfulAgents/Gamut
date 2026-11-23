@@ -136,4 +136,34 @@ describe('mcpSafeFetch pin (live connect)', () => {
       )
     }
   })
+
+  it('reads a body to the end when the server closes the socket while the reader is slow', async () => {
+    // Like a Python BaseHTTPRequestHandler MCP server: a Content-Length body, then the socket closes.
+    const body = Buffer.alloc(400_000, 'a')
+    const server = createServer((_req, res) => {
+      res.writeHead(200, { 'Content-Type': 'application/json', 'Content-Length': body.length, Connection: 'close' })
+      res.end(body)
+    })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    const { port } = server.address() as { port: number }
+
+    const readSlowly = async () => {
+      const res = await mcpSafeFetch(`http://localhost:${port}/mcp`, { method: 'POST', body: '{}' })
+      const reader = res.body!.getReader()
+      let length = 0
+      for (let chunk = await reader.read(); !chunk.done; chunk = await reader.read()) {
+        length += chunk.value.length
+        await new Promise((resolve) => setTimeout(resolve, 1))
+      }
+      return length
+    }
+
+    try {
+      expect(await Promise.all(Array.from({ length: 5 }, readSlowly))).toEqual(Array(5).fill(body.length))
+    } finally {
+      await new Promise<void>((resolve, reject) =>
+        server.close((err) => (err ? reject(err) : resolve())),
+      )
+    }
+  })
 })
