@@ -1,3 +1,4 @@
+import { useSessionSubagents } from '@renderer/hooks/use-session-subagents'
 
 import { useIsVoiceModeActive } from '@renderer/lib/voice-mode-handoff'
 import { useMessages, useStopBackgroundTask } from '@renderer/hooks/use-messages'
@@ -26,12 +27,12 @@ interface AgentActivityIndicatorProps {
 
 export function AgentActivityIndicator({ sessionId, agentSlug }: AgentActivityIndicatorProps) {
   const {
-    isActive, error, apiErrorCode, errorPresentation, activeStartTime, isCompacting, activeSubagents, completedSubagents,
+    isActive, error, apiErrorCode, errorPresentation, activeStartTime, isCompacting,
     apiRetry, computerUseApp, computerUseAppIcon, backgroundTasks,
     isThinking,
   } = useMessageStream(sessionId, agentSlug, [
-    'isActive', 'error', 'apiErrorCode', 'errorPresentation', 'activeStartTime', 'isCompacting', 'activeSubagents',
-    'completedSubagents', 'apiRetry', 'computerUseApp', 'computerUseAppIcon', 'backgroundTasks', 'isThinking',
+    'isActive', 'error', 'apiErrorCode', 'errorPresentation', 'activeStartTime', 'isCompacting',
+    'apiRetry', 'computerUseApp', 'computerUseAppIcon', 'backgroundTasks', 'isThinking',
   ])
   const { data: pendingUserRequests } = usePendingUserRequests(agentSlug, sessionId)
   const { data: agent } = useAgent(agentSlug)
@@ -93,115 +94,16 @@ export function AgentActivityIndicator({ sessionId, agentSlug }: AgentActivityIn
 
   const elapsed = useElapsedTimer(isActive ? timerStartTime : null)
 
-  // Build one display row per stable agentId. A SendMessage resume gets a new
-  // tool_use id but keeps the agentId, so keying rows by the launch tool alone
-  // leaves the original row completed while the resumed run works invisibly.
-  const subagentItems = useMemo<ActivitySubagentItem[]>(() => {
-    if (!messages || activeSubagents.length === 0) return []
-
-    type LaunchMetadata = {
-      agentId: string | null
-      name: string
-      description: string
-      completedFromResult: boolean
-    }
-    const launchByToolId = new Map<string, LaunchMetadata>()
-    const launchByAgentId = new Map<string, LaunchMetadata>()
-
-    for (const msg of messages) {
-      if (msg.type !== 'user' && msg.type !== 'assistant') continue
-      for (const tc of msg.toolCalls || []) {
-        if (tc.name !== 'Agent' && tc.name !== 'Task') continue
-        if (tc.isError) continue
-        const input = tc.input as { subagent_type?: string; description?: string }
-        const isAsyncLaunched = tc.subagent?.status === 'async_launched'
-        const metadata = {
-          agentId: tc.subagent?.agentId ?? null,
-          name: input.subagent_type || tc.name,
-          description: input.description || '',
-          completedFromResult: !isAsyncLaunched && tc.result != null,
-        }
-        launchByToolId.set(tc.id, metadata)
-        if (tc.subagent?.agentId) {
-          launchByAgentId.set(tc.subagent.agentId, metadata)
-        }
-      }
-    }
-
-    // Every live run names its agent: the host stamps the agentId (the
-    // task_started task_id, or the frame's agent_id) on the first event of a
-    // run, including a SendMessage run, whose own call is not an Agent launch.
-    const groups = new Map<string, typeof activeSubagents>()
-    for (const sub of activeSubagents) {
-      const directLaunch = sub.parentToolId
-        ? launchByToolId.get(sub.parentToolId)
-        : undefined
-      const originalLaunch = sub.agentId
-        ? launchByAgentId.get(sub.agentId)
-        : undefined
-      const isLifecycleAgent = !!sub.subagentType
-      // local_workflow also emits subagent lifecycle events, but it has its own
-      // activity UI. A lifecycle-identified Agent may originate in a Skill
-      // sidechain and therefore have no launch call in the main transcript.
-      if (!directLaunch && !originalLaunch && !isLifecycleAgent) continue
-
-      const stableAgentId = sub.agentId ?? directLaunch?.agentId ?? null
-      if (!stableAgentId && !sub.parentToolId) continue
-      const key = stableAgentId
-        ? `agent:${stableAgentId}`
-        : `tool:${sub.parentToolId}`
-      const group = groups.get(key) ?? []
-      group.push(sub)
-      groups.set(key, group)
-    }
-
-    const isCompleted = (sub: (typeof activeSubagents)[number]) => {
-      const parentToolId = sub.parentToolId
-      if (parentToolId && completedSubagents?.has(parentToolId)) return true
-      return !!parentToolId && (launchByToolId.get(parentToolId)?.completedFromResult ?? false)
-    }
-
-    return [...groups.entries()].map(([key, group]) => {
-      let selected = group[group.length - 1]
-      for (let i = group.length - 1; i >= 0; i--) {
-        if (!isCompleted(group[i])) {
-          selected = group[i]
-          break
-        }
-      }
-
-      const directLaunch = selected.parentToolId
-        ? launchByToolId.get(selected.parentToolId)
-        : undefined
-      const selectedAgentId = selected.agentId ?? directLaunch?.agentId ?? null
-      const originalLaunch = selectedAgentId
-        ? launchByAgentId.get(selectedAgentId)
-        : undefined
-      const metadata = directLaunch ?? originalLaunch
-
-      return {
-        id: selectedAgentId ?? selected.parentToolId ?? key,
-        name: selected.subagentType || metadata?.name || 'Agent',
-        description: selected.description || metadata?.description || '',
-        status: isCompleted(selected) ? 'completed' as const : 'running' as const,
-        progressSummary: selected.progressSummary ?? null,
-        // The agent id is the task id the runtime's stop_task takes.
-        taskId: selectedAgentId ?? null,
-      }
-    })
-  }, [messages, activeSubagents, completedSubagents])
-
-  // A subagent reports completion when its own turn ends, but the runtime
-  // keeps listing it while background work it started still runs. Its row
-  // stays live (with its stop control) until the runtime drops it.
-  const subagentRows = useMemo<ActivitySubagentItem[]>(() => {
-    const liveAgentTaskIds = new Set(backgroundTasks.filter((task) => task.isSubagent).map((task) => task.taskId))
-    return subagentItems.map((item) =>
-      item.status === 'completed' && item.taskId && liveAgentTaskIds.has(item.taskId)
-        ? { ...item, status: 'running' as const, progressSummary: 'background work still running' }
-        : item
-    )
-  }, [subagentItems, backgroundTasks])
+  const { data: subagents } = useSessionSubagents(agentSlug, sessionId)
+  const subagentRows: ActivitySubagentItem[] = (subagents?.entries ?? []).filter(entry => entry.activeSubagent || entry.waitingForChildren).map(entry => ({
+    id: entry.id,
+    name: entry.name,
+    description: entry.description,
+    // Only the child command can be stopped once the SDK retires the parent task.
+    taskId: entry.waitingForChildren ? null : entry.agentId,
+    status: entry.status === 'running' ? 'running' : 'completed',
+    progressSummary: entry.waitingForChildren || (entry.backgroundRunning && entry.isCompleted) ? 'background work still running' : entry.activeSubagent?.progressSummary ?? null,
+  }))
 
   // Name each background task after the tool call that launched it (the
   // command, the subagent's description) so the rows say what would be stopped.

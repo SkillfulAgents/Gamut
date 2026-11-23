@@ -1,3 +1,4 @@
+import { subagentMetadataSchema } from './subagent-metadata'
 /**
  * Transcript-adjacent reads over an agent's session store: subagent and
  * workflow transcripts beside the session's own, the raw transcript bytes,
@@ -21,9 +22,6 @@ import { WorkspaceFileError, joinWorkspacePath } from './workspace-path'
 
 const SUBAGENT_ID = /^[\w-]+$/
 const WORKFLOW_RUN_ID = /^wf_[\w-]+$/
-
-/** The sidecar the container writes beside each subagent transcript. */
-const subagentMetaSchema = z.object({ toolUseId: z.string().optional() }).loose()
 
 /**
  * The one transcript read that also checks its real location, as its route
@@ -53,27 +51,30 @@ export async function listSubagents(
   const subagentsDir = sessionFilePath(store, sessionId, 'subagents')
   let entries: FileEntry[]
   try {
+    await reallyInsideWorkspace(store, subagentsDir)
     entries = await store.files.list(subagentsDir)
-  } catch {
-    return [] // No subagents directory
+  } catch (error) {
+    if (isAbsentFile(error)) return []
+    throw error
   }
-  const ids: string[] = []
+  const ids = new Map<string, boolean>()
   for (const entry of entries) {
-    if (entry.kind !== 'file' || !entry.name.startsWith('agent-') || !entry.name.endsWith('.meta.json')) continue
-    const id = entry.name.slice('agent-'.length, -'.meta.json'.length)
-    if (!options?.except?.has(id)) ids.push(id)
+    if (entry.kind !== 'file') continue
+    const match = /^agent-([\w-]+)\.(meta\.json|jsonl)$/.exec(entry.name)
+    if (!match || options?.except?.has(match[1])) continue
+    ids.set(match[1], ids.get(match[1]) || match[2] === 'meta.json')
   }
-  // The sidecars are independent small files: read a few at a time rather
-  // than one after another, in the listing's order.
   const limit = pLimit(8)
   return Promise.all(
-    ids.map((id) =>
+    [...ids].map(([id, hasMetadata]) =>
       limit(async (): Promise<SubagentRef> => {
+        if (!hasMetadata) return { id }
         try {
-          const raw = await store.files.getDoc(joinWorkspacePath(subagentsDir, `agent-${id}.meta.json`))
+          const path = await reallyInsideWorkspace(store, joinWorkspacePath(subagentsDir, `agent-${id}.meta.json`))
+          const raw = await store.files.getDoc(path)
           if (raw === null) return { id }
-          const meta = subagentMetaSchema.parse(JSON.parse(Buffer.from(raw).toString('utf8')))
-          return meta.toolUseId ? { id, toolUseId: meta.toolUseId } : { id }
+          const metadata = subagentMetadataSchema.parse(JSON.parse(Buffer.from(raw).toString('utf8')))
+          return { id, ...metadata }
         } catch {
           return { id } // an unreadable sidecar still names a subagent
         }

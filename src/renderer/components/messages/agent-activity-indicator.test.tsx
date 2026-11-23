@@ -36,6 +36,11 @@ vi.mock('@renderer/hooks/use-message-stream', () => ({
   useMessageStream: () => mockStreamState,
 }))
 
+vi.mock('@renderer/hooks/use-session-subagents', async (importOriginal) => {
+  const { reconcileSubagents } = await importOriginal<typeof import('@renderer/hooks/use-session-subagents')>()
+  return { useSessionSubagents: () => ({ data: reconcileSubagents([], mockStreamState) }) }
+})
+
 // Mock useMessages
 const mockMessages: any[] = []
 const mockStopBackgroundTask = { mutateAsync: vi.fn().mockResolvedValue({ success: true }) }
@@ -892,7 +897,7 @@ describe('AgentActivityIndicator', () => {
       { taskId: 'agent-bg', startedAt: Date.now() - 5000, isSubagent: true },
     ]
     mockStreamState.activeSubagents = [
-      { parentToolId: 'tc-bg', agentId: 'agent-bg', progressSummary: null },
+      { subagentType: 'Explore', description: 'Map the repo', parentToolId: 'tc-bg', agentId: 'agent-bg', progressSummary: null },
     ]
     mockMessages.push({
       id: 'msg-1',
@@ -940,7 +945,7 @@ describe('AgentActivityIndicator', () => {
       { taskId: 'agent-done', startedAt: Date.now() - 5000, isSubagent: true },
     ]
     mockStreamState.activeSubagents = [
-      { parentToolId: 'tc-done', agentId: 'agent-done', progressSummary: null },
+      { subagentType: 'general-purpose', description: 'Implement attribution changes', parentToolId: 'tc-done', agentId: 'agent-done', progressSummary: null },
     ]
     mockStreamState.completedSubagents = new Set(['tc-done'])
     mockMessages.push({
@@ -965,6 +970,23 @@ describe('AgentActivityIndicator', () => {
     expect(screen.queryByTestId('background-task-row')).not.toBeInTheDocument()
   })
 
+  it('keeps the owner live while offering Stop only on its surviving command', () => {
+    mockStreamState.isActive = true
+    mockStreamState.activeSubagents = [
+      { subagentType: 'Explore', parentToolId: 'launch', agentId: 'owner' },
+    ]
+    mockStreamState.completedSubagents = new Set(['launch'])
+    mockStreamState.backgroundTasks = [
+      { taskId: 'sleep', startedAt: Date.now(), parentTaskId: 'owner', taskType: 'local_bash' },
+    ]
+    render(<AgentActivityIndicator sessionId="s-1" agentSlug="agent-1" />)
+    const owner = screen.getByTestId('subagent-activity-row')
+    expect(owner).toHaveAttribute('data-tracer-live', 'true')
+    expect(owner).toHaveTextContent('background work still running')
+    expect(screen.getAllByTestId('stop-task-button')).toHaveLength(1)
+    expect(screen.getByTestId('background-task-row')).toContainElement(screen.getByTestId('stop-task-button'))
+  })
+
   it('collapses activity details into an active-only summary', () => {
     mockStreamState.isActive = true
     mockStreamState.activeStartTime = Date.now()
@@ -975,8 +997,8 @@ describe('AgentActivityIndicator', () => {
       { taskId: 'agent-running', startedAt: Date.now() - 2000, isSubagent: true },
     ]
     mockStreamState.activeSubagents = [
-      { parentToolId: 'tc-running', agentId: 'agent-running', progressSummary: null },
-      { parentToolId: 'tc-completed', agentId: 'agent-completed', progressSummary: null },
+      { subagentType: 'Explore', description: 'Running subagent', parentToolId: 'tc-running', agentId: 'agent-running', progressSummary: null },
+      { subagentType: 'Review', description: 'Finished subagent', parentToolId: 'tc-completed', agentId: 'agent-completed', progressSummary: null },
     ]
     mockStreamState.completedSubagents = new Set(['tc-completed'])
     mockMessages.push({
@@ -1156,7 +1178,7 @@ describe('AgentActivityIndicator', () => {
     const renderWithSubagent = (opts: { result?: unknown; subagentStatus?: string; completed?: boolean }) => {
       mockStreamState.isActive = true
       mockStreamState.activeStartTime = Date.now()
-      mockStreamState.activeSubagents = [{ parentToolId: 'tc-sub', progressSummary: null }]
+      mockStreamState.activeSubagents = [{ subagentType: 'Explore', description: 'Explore workspace', parentToolId: 'tc-sub', progressSummary: null }]
       mockStreamState.completedSubagents = opts.completed ? new Set(['tc-sub']) : new Set()
       mockMessages.push({
         id: 'msg-1',
@@ -1198,9 +1220,8 @@ describe('AgentActivityIndicator', () => {
       expect(screen.getByRole('button', { name: 'Expand activity details' })).toBeInTheDocument()
     })
 
-    it('marks a foreground subagent completed when its tool result lands', () => {
-      // Synchronous subagents have no async_launched status; their result is completion.
-      renderWithSubagent({ result: 'done', completed: false })
+    it('marks a foreground subagent completed when its lifecycle finishes', () => {
+      renderWithSubagent({ result: 'done', completed: true })
       expect(screen.getByText('Explore')).toBeInTheDocument()
       expect(screen.getByText('✓')).toBeInTheDocument()
     })

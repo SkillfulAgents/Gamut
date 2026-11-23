@@ -21,18 +21,14 @@ async function readdirAsDirents(...args: unknown[]) {
   }))
 }
 
-vi.mock('fs', () => ({
-  default: {
-    promises: {
-      readdir: readdirAsDirents,
-      readFile: (...args: unknown[]) => mockReadFile(...args),
-    },
-  },
-  promises: {
+vi.mock('fs', () => {
+  const promises = {
+    realpath: async (file: string) => file,
     readdir: readdirAsDirents,
     readFile: (...args: unknown[]) => mockReadFile(...args),
-  },
-}))
+  }
+  return { default: { promises }, promises }
+})
 
 // This suite mocks `fs` wholesale, so the real-path containment check, which
 // walks the real filesystem, cannot run here; it has its own real-directory
@@ -231,7 +227,7 @@ describe('resolveInterruptedSubagents', () => {
     const tc = makeTaskToolCall('tool-1')
     const items: TransformedItem[] = [makeAssistantMsg([tc])]
 
-    mockReaddir.mockRejectedValue(new Error('ENOENT'))
+    mockReaddir.mockRejectedValue(Object.assign(new Error('Missing directory'), { code: 'ENOENT' }))
 
     await resolveInterruptedSubagents(items, 'my-agent', 'session-1')
 
