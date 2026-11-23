@@ -6,7 +6,7 @@ vi.mock('@shared/lib/db', () => ({ get db() { return handle.db } }))
 
 import { getSettings, mutateSettings } from '@shared/lib/config/settings'
 import { mcpServerSettingsSchema } from './mcp-server-settings-schema'
-import { isMcpServerEnabledFrom, mcpServerReachFrom, setMcpServerReach } from './mcp-server-settings'
+import { isMcpServerEnabledFrom, mcpServerReachFrom, setMcpServerEnabled, setMcpServerReach } from './mcp-server-settings'
 
 beforeEach(async () => {
   handle = await createTestDatabase()
@@ -26,10 +26,18 @@ describe('MCP server settings', () => {
 
   it('stores a chosen reach and keeps the switch beside it', async () => {
     await mutateSettings((s) => { s.mcpServer = { enabled: false } })
-    expect(await setMcpServerReach('network')).toBe('network')
+    expect(await setMcpServerReach('network')).toEqual({ reach: 'network', changed: true })
+    expect(await setMcpServerReach('network')).toEqual({ reach: 'network', changed: false })
     const settings = await getSettings()
     expect(settings.mcpServer).toEqual({ enabled: false, reach: 'network' })
     expect(isMcpServerEnabledFrom(settings)).toBe(false)
+  })
+
+  it('writes nothing when the switch or reach already has the value asked for', async () => {
+    expect(await setMcpServerEnabled(true)).toEqual({ enabled: true, changed: false })
+    expect((await getSettings()).mcpServer).toBeUndefined()
+    expect(await setMcpServerReach('this-computer')).toEqual({ reach: 'this-computer', changed: false })
+    expect(await setMcpServerEnabled(false)).toEqual({ enabled: false, changed: true })
   })
 
   it('validates the field at the boundary: an unknown reach or field is refused', () => {
