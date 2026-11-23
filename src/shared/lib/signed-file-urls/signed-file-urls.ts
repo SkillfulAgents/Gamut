@@ -507,8 +507,18 @@ export async function resolveSignedUpload(userId: string, agentSlug: string, upl
  * so of two calls attaching the same upload id exactly one gets it. Null as
  * `resolveSignedUpload` is, and for an id already taken. The file stays in
  * the workspace; only the id is spent.
+ *
+ * `putBack` returns an id taken but not used (a later step of the same call
+ * failed before anything was sent): the same record, with its original
+ * expiry, written only while the key is absent. Once consumed the key is
+ * absent and nothing else writes it (an id is minted once), so the insert
+ * restores exactly what was taken; an id that expired meanwhile stays gone.
  */
-export async function takeSignedUpload(userId: string, agentSlug: string, uploadId: string): Promise<SignedUploadResult | null> {
+export async function takeSignedUpload(
+  userId: string,
+  agentSlug: string,
+  uploadId: string,
+): Promise<{ result: SignedUploadResult; putBack: () => Promise<boolean> } | null> {
   if (!userId || !agentSlug || !uploadId) return null
   let canonical: string
   try {
@@ -521,5 +531,14 @@ export async function takeSignedUpload(userId: string, agentSlug: string, upload
   const entry = await appState().get(key)
   if (entry?.value.state !== 'completed') return null
   const taken = await appState().consume(key, { revision: entry.revision })
-  return taken.consumed ? entry.value.result : null
+  if (!taken.consumed) return null
+  const { value, expiresAt } = entry
+  return {
+    result: value.result,
+    putBack: async () => {
+      if (expiresAt !== null && expiresAt <= Date.now()) return false
+      const restored = await appState().insertIfAbsent(key, value, expiresAt === null ? {} : { expiry: { at: expiresAt } })
+      return restored.inserted
+    },
+  }
 }
