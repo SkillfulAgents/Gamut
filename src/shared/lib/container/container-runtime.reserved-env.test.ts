@@ -164,19 +164,22 @@ vi.mock('@shared/lib/facts/server-facts', async () => {
 })
 
 import { containerHost } from './container-host'
+import { attachTestRuntimes } from './testing/test-runtimes'
+
+const agents = attachTestRuntimes(containerHost)
 import { globalFeed } from '@shared/lib/notifications/global-feed'
 import { createFakeWebhookRelay } from '@shared/lib/webhook-relay/testing/fake-webhook-relay'
 
 describe('ContainerRuntime.ensureRunning — customEnvVars cannot override reserved runtime env vars', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    containerHost.dropRuntime('test-agent')
+    agents.drop('test-agent')
 
     mockGetOrCreateProxyToken.mockResolvedValue('real-proxy-token')
     mockGetContainerHostUrl.mockReturnValue('192.168.1.100')
     mockGetAppPort.mockReturnValue(3000)
 
-    containerHost.runtime('test-agent').updateCachedStatus('stopped', null)
+    agents.runtime('test-agent').updateCachedStatus('stopped', null)
     relayState.available = false
     accountProviderState.name = 'composio'
     mockStart.mockResolvedValue(undefined)
@@ -211,7 +214,7 @@ describe('ContainerRuntime.ensureRunning — customEnvVars cannot override reser
   })
 
   it('keeps PROXY_TOKEN from getOrCreateProxyToken, not the custom override', async () => {
-    await containerHost.runtime('test-agent').ensureRunning()
+    await agents.runtime('test-agent').ensureRunning()
 
     expect(mockStart).toHaveBeenCalledOnce()
     const envVars = mockStart.mock.calls[0][0].envVars
@@ -219,7 +222,7 @@ describe('ContainerRuntime.ensureRunning — customEnvVars cannot override reser
   })
 
   it('keeps computed PROXY_BASE_URL / SUPERAGENT_* / CONNECTED_ACCOUNTS', async () => {
-    await containerHost.runtime('test-agent').ensureRunning()
+    await agents.runtime('test-agent').ensureRunning()
 
     const envVars = mockStart.mock.calls[0][0].envVars
     expect(envVars.PROXY_BASE_URL).toBe('http://192.168.1.100:3000/api/proxy/test-agent')
@@ -234,7 +237,7 @@ describe('ContainerRuntime.ensureRunning — customEnvVars cannot override reser
 
   it('only injects services supported by the selected account provider', async () => {
     accountProviderState.name = 'nango'
-    await containerHost.runtime('test-agent').ensureRunning()
+    await agents.runtime('test-agent').ensureRunning()
     const toolkits = mockStart.mock.calls[0][0].envVars.CONNECTED_ACCOUNT_TOOLKITS.split(',')
     expect(toolkits).toContain('gmail')
     expect(toolkits).toContain('github')
@@ -245,7 +248,7 @@ describe('ContainerRuntime.ensureRunning — customEnvVars cannot override reser
   })
 
   it('keeps computed TZ / HOST_PLATFORM / CLAUDE_CODE_ATTRIBUTION_HEADER', async () => {
-    await containerHost.runtime('test-agent').ensureRunning()
+    await agents.runtime('test-agent').ensureRunning()
 
     const envVars = mockStart.mock.calls[0][0].envVars
     expect(envVars.TZ).toBe('America/New_York')
@@ -255,18 +258,18 @@ describe('ContainerRuntime.ensureRunning — customEnvVars cannot override reser
 
   it('tells the container whether agents get computer use, and whether the app is sandboxed', async () => {
     serverFacts.distribution = 'direct'
-    await containerHost.runtime('test-agent').ensureRunning()
+    await agents.runtime('test-agent').ensureRunning()
     expect(mockStart.mock.calls[0][0].envVars).toMatchObject({ HOST_COMPUTER_USE: 'true', HOST_SCRIPTS: 'true', HOST_APP_SANDBOX: 'false' })
   })
 
   it('withholds computer use from a Mac App Store build’s agents', async () => {
     serverFacts.distribution = 'mac-app-store'
-    await containerHost.runtime('test-agent').ensureRunning()
+    await agents.runtime('test-agent').ensureRunning()
     expect(mockStart.mock.calls[0][0].envVars).toMatchObject({ HOST_COMPUTER_USE: 'false', HOST_SCRIPTS: 'false', HOST_APP_SANDBOX: 'true' })
   })
 
   it('still passes non-reserved custom env vars through unchanged', async () => {
-    await containerHost.runtime('test-agent').ensureRunning()
+    await agents.runtime('test-agent').ensureRunning()
 
     const envVars = mockStart.mock.calls[0][0].envVars
     expect(envVars.MY_CUSTOM).toBe('foo')
@@ -277,7 +280,7 @@ describe('ContainerRuntime webhook relay env', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     accountProviderState.name = 'composio'
-    containerHost.dropRuntime('test-agent')
+    agents.drop('test-agent')
     mockGetOrCreateProxyToken.mockResolvedValue('real-proxy-token')
     mockGetContainerHostUrl.mockReturnValue('192.168.1.100')
     mockGetAppPort.mockReturnValue(3000)
@@ -288,19 +291,19 @@ describe('ContainerRuntime webhook relay env', () => {
     mockMcpInnerJoin.mockReturnValue({ where: mockMcpWhere })
     mockMcpWhere.mockResolvedValue([])
     mockGetSettings.mockReturnValue({ container: { agentImage: 'test-image', containerRunner: 'docker' }, app: {} })
-    containerHost.runtime('test-agent').updateCachedStatus('stopped', null)
+    agents.runtime('test-agent').updateCachedStatus('stopped', null)
   })
 
   async function start(available: boolean) {
     relayState.available = available
-    await containerHost.runtime('test-agent').ensureRunning()
+    await agents.runtime('test-agent').ensureRunning()
     return mockStart.mock.calls.at(-1)![0].envVars as Record<string, string>
   }
 
   it('sets WEBHOOK_RELAY_AVAILABLE only while the relay can receive webhooks', async () => {
     expect((await start(true)).WEBHOOK_RELAY_AVAILABLE).toBe('true')
 
-    containerHost.runtime('test-agent').updateCachedStatus('stopped', null)
+    agents.runtime('test-agent').updateCachedStatus('stopped', null)
     // Also covers the custom-env clobber: the key is reserved.
     mockGetSettings.mockReturnValue({
       container: { agentImage: 'test-image', containerRunner: 'docker' },
@@ -316,12 +319,12 @@ describe('ContainerRuntime webhook relay env', () => {
 
     await start(false)
 
-    expect(containerHost.runtime('test-agent').isStale()).toBe(true)
+    expect(agents.runtime('test-agent').isStale()).toBe(true)
   })
 
   it('goes stale when availability moves away from what its env was built with', async () => {
     await start(false)
-    const runtime = containerHost.runtime('test-agent')
+    const runtime = agents.runtime('test-agent')
 
     containerHost.reconcileWebhookRelay(false)
     expect(runtime.isStale()).toBe(false)
@@ -331,7 +334,7 @@ describe('ContainerRuntime webhook relay env', () => {
   })
 
   it('assumes a container it did not start matches, until availability moves', () => {
-    const runtime = containerHost.runtime('test-agent')
+    const runtime = agents.runtime('test-agent')
     runtime.updateCachedStatus('running', 8080)
 
     containerHost.reconcileWebhookRelay(true)
@@ -343,7 +346,7 @@ describe('ContainerRuntime webhook relay env', () => {
 
   it('forgets the start-time availability once stopped', async () => {
     await start(true)
-    const runtime = containerHost.runtime('test-agent')
+    const runtime = agents.runtime('test-agent')
     runtime.updateCachedStatus('stopped', null)
     runtime.updateCachedStatus('running', 8080)
 
@@ -355,7 +358,7 @@ describe('ContainerRuntime webhook relay env', () => {
 describe('ContainerRuntime drives during a start', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    containerHost.dropRuntime('test-agent')
+    agents.drop('test-agent')
     mockGetOrCreateProxyToken.mockResolvedValue('real-proxy-token')
     mockGetContainerHostUrl.mockReturnValue('192.168.1.100')
     mockGetAppPort.mockReturnValue(3000)
@@ -366,7 +369,7 @@ describe('ContainerRuntime drives during a start', () => {
     mockMcpInnerJoin.mockReturnValue({ where: mockMcpWhere })
     mockMcpWhere.mockResolvedValue([])
     mockGetSettings.mockReturnValue({ container: { agentImage: 'test-image', containerRunner: 'docker' }, app: {} })
-    containerHost.runtime('test-agent').updateCachedStatus('stopped', null)
+    agents.runtime('test-agent').updateCachedStatus('stopped', null)
   })
 
   it('holds its drives from just before the start reads them, and a stale mark then survives the start', async () => {
@@ -376,30 +379,30 @@ describe('ContainerRuntime drives during a start', () => {
       return { container: { agentImage: 'test-image', containerRunner: 'docker' }, app: {} }
     })
     drives.onList = () => { seen.push(containerHost.getAgentIdsHoldingDrives()) }
-    mockStart.mockImplementationOnce(async () => { containerHost.runtime('test-agent').markStale() })
+    mockStart.mockImplementationOnce(async () => { agents.runtime('test-agent').markStale() })
     try {
-      await containerHost.runtime('test-agent').ensureRunning()
+      await agents.runtime('test-agent').ensureRunning()
     } finally {
       drives.onList = null
     }
     expect(seen).toEqual([[], ['test-agent']])
-    expect(containerHost.runtime('test-agent').isStale()).toBe(true)
+    expect(agents.runtime('test-agent').isStale()).toBe(true)
   })
 
   it('drops a stale mark from a start that failed, since the next start reads everything again', async () => {
     mockStart.mockImplementationOnce(async () => {
-      containerHost.runtime('test-agent').markStale()
+      agents.runtime('test-agent').markStale()
       throw new Error('start failed')
     })
-    await expect(containerHost.runtime('test-agent').ensureRunning()).rejects.toThrow('start failed')
+    await expect(agents.runtime('test-agent').ensureRunning()).rejects.toThrow('start failed')
     expect(containerHost.getAgentIdsHoldingDrives()).toEqual([])
-    expect(containerHost.runtime('test-agent').isStale()).toBe(false)
-    await containerHost.runtime('test-agent').ensureRunning()
-    expect(containerHost.runtime('test-agent').isStale()).toBe(false)
+    expect(agents.runtime('test-agent').isStale()).toBe(false)
+    await agents.runtime('test-agent').ensureRunning()
+    expect(agents.runtime('test-agent').isStale()).toBe(false)
   })
 
   it('keeps holding the drives of a start that replaced a stopped one, when the stopped one resumes', async () => {
-    const runtime = containerHost.runtime('test-agent')
+    const runtime = agents.runtime('test-agent')
     let resumeFirst!: () => void
     mockGetOrCreateProxyToken.mockImplementationOnce(() => new Promise((resolve) => { resumeFirst = () => resolve('real-proxy-token') }))
     const first = runtime.ensureRunning()
@@ -421,8 +424,8 @@ describe('ContainerRuntime drives during a start', () => {
 
 describe('ContainerHost.watchWebhookRelay', () => {
   it('publishes status changes and marks agents whose webhook tools went out of date', () => {
-    containerHost.dropRuntime('test-agent')
-    const runtime = containerHost.runtime('test-agent')
+    agents.drop('test-agent')
+    const runtime = agents.runtime('test-agent')
     runtime.updateCachedStatus('running', 8080)
     const relay = createFakeWebhookRelay()
 

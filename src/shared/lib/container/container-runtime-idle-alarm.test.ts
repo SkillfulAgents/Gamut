@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 const mockStart = vi.fn().mockResolvedValue({ status: 'running', port: 4001 })
 const mockStop = vi.fn().mockResolvedValue({ forceStopUsed: false, stopped: true })
 const mockGetInfoFromRuntime = vi.fn().mockResolvedValue({ status: 'running', port: 4001 })
+const mockIsDefinitelyStopped = vi.fn().mockResolvedValue(false)
 
 vi.mock('./client-factory', () => ({
   createContainerClient: () => ({
@@ -18,6 +19,7 @@ vi.mock('./client-factory', () => ({
     stop: mockStop,
     stopSync: vi.fn(),
     getInfoFromRuntime: (...args: unknown[]) => mockGetInfoFromRuntime(...args),
+    isDefinitelyStopped: () => mockIsDefinitelyStopped(),
     getStats: vi.fn(),
     fetch: vi.fn(),
     getHostApiBaseUrl: () => 'http://127.0.0.1:3000',
@@ -108,9 +110,10 @@ import type { LocalActorDeps, LocalAgentActor } from '@shared/lib/agent-actor/lo
 // The routers over the actors' stores take no part here.
 const routers = { userInputRequestManager: {}, reviewManager: {}, accountReauthManager: {}, mcpReauthManager: {}, computerUsePermissionManager: {} }
 const registry = createAgentRegistry({ containerHost, ...routers } as unknown as LocalActorDeps)
-// A start reads no display name here.
-containerHost.attachAgentWorkspaces(null)
-const alarmOf = (slug: string) => (registry.get(slug) as LocalAgentActor).state.idleAlarm
+// Each agent's actor holds its runtime.
+const actorOf = (slug: string) => registry.get(slug) as LocalAgentActor
+const agents = { runtime: (slug: string) => actorOf(slug).state.runtime(), drop: (slug: string) => actorOf(slug).state.dropRuntime() }
+const alarmOf = (slug: string) => actorOf(slug).state.idleAlarm
 
 const MINUTE = 60_000
 const TIMEOUT = 30 * MINUTE
@@ -133,6 +136,7 @@ describe('ContainerRuntime idle alarm', () => {
     vi.clearAllMocks()
     settings.app.autoSleepTimeoutMinutes = 30
     mockGetInfoFromRuntime.mockResolvedValue({ status: 'running', port: 4001 })
+    mockIsDefinitelyStopped.mockResolvedValue(false)
     mockHasActive.mockReturnValue(false)
     mockHasAwaiting.mockReturnValue(false)
     // The agent's live sessions, as its alarm asks them whether it is busy.
@@ -152,7 +156,7 @@ describe('ContainerRuntime idle alarm', () => {
   const settle = () => vi.advanceTimersByTimeAsync(0)
 
   async function startRuntime() {
-    const runtime = containerHost.runtime(SLUG)
+    const runtime = agents.runtime(SLUG)
     await runtime.ensureRunning()
     expect(runtime.getCachedInfo().status).toBe('running')
     await settle()
@@ -225,7 +229,7 @@ describe('ContainerRuntime idle alarm', () => {
 
   it('re-arms every running agent from one read of the timeout', async () => {
     const slugs = ['alarm-a', 'alarm-b', 'alarm-c', 'alarm-d']
-    for (const slug of slugs) await containerHost.runtime(slug).ensureRunning()
+    for (const slug of slugs) await agents.runtime(slug).ensureRunning()
     await settle()
     await vi.advanceTimersByTimeAsync(10 * MINUTE)
     settings.app.autoSleepTimeoutMinutes = 15
@@ -309,7 +313,10 @@ describe('ContainerRuntime idle alarm', () => {
   })
 
   it('a session write to a stopped agent marks the clock but arms nothing, and the next start is unaffected', async () => {
-    const runtime = containerHost.runtime(SLUG)
+    // The actor's first read finds the container stopped.
+    mockGetInfoFromRuntime.mockResolvedValue({ status: 'stopped', port: null })
+    const runtime = agents.runtime(SLUG)
+    await actorOf(SLUG).firstRead
     // Deleting a message or appending to a transcript offline records activity.
     runtime.noteSessionActivity()
     expect(alarmOf(SLUG).isArmed()).toBe(false)
@@ -317,6 +324,7 @@ describe('ContainerRuntime idle alarm', () => {
     await vi.advanceTimersByTimeAsync(2 * TIMEOUT)
     expect(mockStop).not.toHaveBeenCalled()
 
+    mockGetInfoFromRuntime.mockResolvedValue({ status: 'running', port: 4001 })
     await runtime.ensureRunning()
     await settle()
     expect(alarmOf(SLUG).isArmed()).toBe(true)
@@ -327,7 +335,7 @@ describe('ContainerRuntime idle alarm', () => {
   it('a stale mark during an in-flight start neither arms nor fires against the start', async () => {
     let finishStart!: (info: { status: 'running'; port: number }) => void
     mockStart.mockImplementationOnce(() => new Promise((resolve) => { finishStart = resolve }))
-    const runtime = containerHost.runtime(SLUG)
+    const runtime = agents.runtime(SLUG)
     const starting = runtime.ensureRunning()
     await vi.advanceTimersByTimeAsync(0)
     expect(runtime.isStarting()).toBe(true)
@@ -353,7 +361,8 @@ describe('ContainerRuntime idle alarm', () => {
     const runtime = await startRuntime()
     // A transient inspect failure (or a real external stop) is reported as stopped:
     // the alarm is disarmed, and one that fires in that window finds nothing to sleep.
-    mockGetInfoFromRuntime.mockResolvedValueOnce({ status: 'stopped', port: null })
+    // The actor's status checks in the window read it as stopped too.
+    mockGetInfoFromRuntime.mockResolvedValue({ status: 'stopped', port: null })
     await runtime.syncAgentStatus()
     expect(runtime.getCachedInfo().status).toBe('stopped')
     expect(alarmOf(SLUG).isArmed()).toBe(false)
@@ -364,6 +373,7 @@ describe('ContainerRuntime idle alarm', () => {
     // The next sync sees it running: the clock was never reset, so the alarm
     // arms from the original start mark, which is already past the timeout,
     // and fires as soon as its timeout read lands.
+    mockGetInfoFromRuntime.mockResolvedValue({ status: 'running', port: 4001 })
     await runtime.syncAgentStatus()
     expect(runtime.getCachedInfo().status).toBe('running')
     await vi.advanceTimersByTimeAsync(0)
@@ -371,9 +381,63 @@ describe('ContainerRuntime idle alarm', () => {
     expect(runtime.getCachedInfo().status).toBe('stopped')
   })
 
+  it('the actor\'s status check reads a container shown as stopped again, and sleeps it once idle', async () => {
+    const runtime = await startRuntime()
+    mockGetInfoFromRuntime.mockResolvedValueOnce({ status: 'stopped', port: null })
+    await runtime.syncAgentStatus()
+    expect(alarmOf(SLUG).isArmed()).toBe(false)
+
+    // The watch's status pass, 5 minutes after the start, sees the container running and re-arms the alarm.
+    await vi.advanceTimersByTimeAsync(5 * MINUTE)
+    expect(runtime.getCachedInfo().status).toBe('running')
+    expect(alarmOf(SLUG).isArmed()).toBe(true)
+    await vi.advanceTimersByTimeAsync(TIMEOUT - 5 * MINUTE + 1)
+    expect(mockStop).toHaveBeenCalledTimes(1)
+  })
+
+  it('reads the container of a start that failed again, and sleeps one the start left running', async () => {
+    // The first read finds nothing running, and the next pass confirms it: the actor stops reading.
+    mockGetInfoFromRuntime.mockResolvedValue({ status: 'stopped', port: null })
+    mockIsDefinitelyStopped.mockResolvedValue(true)
+    await actorOf(SLUG).firstRead
+    await vi.advanceTimersByTimeAsync(5 * MINUTE)
+    expect(actorOf(SLUG).state.containerWatch.isWatching()).toBe(false)
+
+    // The start gives up, and its container comes up anyway.
+    mockStart.mockRejectedValueOnce(new Error('the container did not become ready in time'))
+    await expect(agents.runtime(SLUG).ensureRunning()).rejects.toThrow('did not become ready')
+    expect(actorOf(SLUG).state.containerWatch.isWatching()).toBe(true)
+    mockGetInfoFromRuntime.mockResolvedValue({ status: 'running', port: 4001 })
+
+    await vi.advanceTimersByTimeAsync(5 * MINUTE)
+    expect(agents.runtime(SLUG).getCachedInfo().status).toBe('running')
+    expect(alarmOf(SLUG).isArmed()).toBe(true)
+    await vi.advanceTimersByTimeAsync(TIMEOUT + 1)
+    expect(mockStop).toHaveBeenCalledTimes(1)
+  })
+
+  it('a stopped read that lands after the agent was evicted leaves its watch stopped', async () => {
+    mockGetInfoFromRuntime.mockResolvedValue({ status: 'stopped', port: null })
+    await actorOf(SLUG).firstRead
+    const watch = actorOf(SLUG).state.containerWatch
+
+    // The next pass's read is in flight when the agent is evicted, and the runner cannot confirm the stop.
+    let answer!: (info: { status: 'stopped'; port: null }) => void
+    mockGetInfoFromRuntime.mockImplementationOnce(() => new Promise((resolve) => { answer = resolve }))
+    await vi.advanceTimersByTimeAsync(5 * MINUTE)
+    expect(mockGetInfoFromRuntime).toHaveBeenCalledTimes(2)
+    await registry.evict(SLUG)
+    answer({ status: 'stopped', port: null })
+    await settle()
+
+    expect(watch.isWatching()).toBe(false)
+    await vi.advanceTimersByTimeAsync(5 * MINUTE)
+    expect(mockGetInfoFromRuntime).toHaveBeenCalledTimes(2)
+  })
+
   it('a container a sync finds running gets an alarm, though no actor was held for it', async () => {
     // As after a restart: the runtime exists, nothing has asked for the agent's actor yet.
-    await containerHost.runtime(SLUG).syncAgentStatus()
+    await agents.runtime(SLUG).syncAgentStatus()
     await settle()
     expect(alarmOf(SLUG).isArmed()).toBe(true)
     await vi.advanceTimersByTimeAsync(TIMEOUT + 1)
@@ -392,7 +456,7 @@ describe('ContainerRuntime idle alarm', () => {
 
   it('dropping the runtime disarms the alarm, and so does evicting the actor', async () => {
     await startRuntime()
-    containerHost.dropRuntime(SLUG)
+    agents.drop(SLUG)
     expect(alarmOf(SLUG).isArmed()).toBe(false)
     await startRuntime()
     const alarm = alarmOf(SLUG)

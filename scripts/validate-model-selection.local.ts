@@ -18,7 +18,8 @@ import * as fs from 'fs'
 import * as path from 'path'
 import * as os from 'os'
 
-import { containerHost } from '../src/shared/lib/container/container-host'
+import { agentRegistry } from '../src/shared/lib/agent-actor/registry'
+import { LocalAgentActor } from '../src/shared/lib/agent-actor/local-agent-actor'
 import { createAgent, agentExists } from '../src/shared/lib/services/agent-service'
 import { getSessionJsonlPath } from '../src/shared/lib/utils/file-storage'
 import { openDatabase } from '../src/shared/lib/db'
@@ -85,7 +86,9 @@ async function main(): Promise<void> {
     console.log(`[validate] Created agent ${agentSlug}`)
   }
 
-  const client = await containerHost.runtime(agentSlug).ensureRunning()
+  const actor = agentRegistry.get(agentSlug)
+  if (!(actor instanceof LocalAgentActor)) throw new Error('Expected a local agent actor')
+  const client = await actor.state.runtime().ensureRunning()
   console.log(`[validate] Container running for ${agentSlug}`)
 
   // ---- Scenario 1: create session with Haiku ----

@@ -21,13 +21,12 @@ import type { AgentActor, AgentRegistry, AgentSlug } from './types'
 
 /**
  * Build a registry whose handles delegate to `deps`. A handle is created on
- * first `get` and holds the agent's in-memory state (see `AgentState`); the
- * container state behind it is the agent's `ContainerRuntime`, held by the
- * container host and created on first use. Evicting a handle releases both.
+ * first `get` and holds the agent's in-memory state (see `AgentState`),
+ * its container runtime among it. Evicting a handle releases it.
  *
- * The registry also hands the container host the way to each agent's
- * workspace, live sessions and idle alarm, and the user-input, review,
- * re-auth and computer-use routers the way to each actor's stores.
+ * The registry also hands the container host the way to the actors'
+ * runtimes, and the user-input, review, re-auth and computer-use routers the
+ * way to each actor's stores.
  */
 export function createAgentRegistry(
   deps: LocalActorDeps,
@@ -82,28 +81,20 @@ export function createAgentRegistry(
   const get = (slug: AgentSlug): LocalAgentActor => handles.get(slug) ?? wrap(slug, states.get(slug))
 
   const evict = (slug: AgentSlug): void => {
-    // Release what the handle owns while its runtime still exists: settling
-    // a parked request may still want to recompute the agent's awaiting state.
+    // Releasing the state drops the agent's runtime last: settling a parked
+    // request may still want to recompute the agent's awaiting state.
     handles.get(slug)?.dispose()
-    deps.containerHost.dropRuntime(slug)
     handles.delete(slug)
     states.delete(slug)
   }
 
-  // The container layer reaches an agent's workspace only through its actor;
-  // this is where it gets the way in. Wired here, by the package that owns
-  // the actors, so no entry point has to remember to.
-  deps.containerHost.attachAgentWorkspaces({
-    instructions: (slug) => get(slug).config.get('instructions'),
-  })
-  // A runtime marks and recovers only sessions that are live, and a live
-  // session is always on a held actor: peeking never creates one.
-  deps.containerHost.attachAgentSessions({ peek: (slug) => handles.get(slug)?.state.sessions })
-  // A container the runtime sees running gets an alarm even when nothing has
-  // asked for its actor yet (a container found running at startup).
-  deps.containerHost.attachAgentIdleAlarms({
-    get: (slug) => get(slug).state.idleAlarm,
-    peek: (slug) => handles.get(slug)?.state.idleAlarm,
+  // What the host does across agents (stop all, is anything running, the
+  // startup wake) it asks of the actors' runtimes. Wired here, by the
+  // package that owns the actors, so no entry point has to remember to.
+  deps.containerHost.attachAgentRuntimes({
+    wake: (slug) => get(slug).firstRead,
+    held: () => [...handles.values()].flatMap((actor) => actor.state.peekRuntime() ?? []),
+    drop: (slug) => handles.get(slug)?.state.dropRuntime(),
   })
 
   // Orders the re-arms' timeout reads: only the newest one to start re-arms.
@@ -152,15 +143,12 @@ export function createAgentRegistry(
     rearmIdleAlarms,
     evict: async (slug) => evict(slug),
     evictAll: async () => {
-      // Release every handle, then let the host forget the runtimes its own
-      // way: one whose container is starting is kept, so the start still
-      // lands somewhere the host knows. At shutdown the containers are
-      // stopped (and their runtimes cleared) first: see startup.ts.
+      // Release every handle, its runtime with it. At shutdown the containers
+      // are stopped first: see startup.ts.
       const released = [...handles.values()]
       for (const actor of released) actor.dispose()
       handles.clear()
       states.clear()
-      deps.containerHost.clearRuntimes()
       // Activity an index recorded and has not stored yet is stored before
       // this settles: its wakeup does not come once dispatch has stopped,
       // and nothing reads the index again. After the release, which callers
