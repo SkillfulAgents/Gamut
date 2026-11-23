@@ -1,24 +1,24 @@
 {
   "storyId": "agent-chat",
   "passed": true,
-  "reason": "Opened agent QA-20261123-193936-9myy, sent \"Hello! What is 2+2?\", and confirmed the agent replied with \"2 + 2 = 4.\"",
+  "reason": "Opened the app, selected agent QA-20261123-221204-zt3g, confirmed it was idle, sent \"Hello! What is 2+2?\", and confirmed the reply contains \"4\".",
   "steps": [
-    "1. Navigated to http://localhost:47891 — the Gamut home page loaded with the sidebar listing QA-20261123-193937-6vby and QA-20261123-193936-9myy. Screenshot: step1-home.png (taken after step 2 click, see below).",
-    "2. Clicked QA-20261123-193936-9myy in the sidebar — the agent page opened at /agents/qa-20261123-193936-9myy-fym79va2q3 with the \"How can I help?\" input visible. Screenshot: step1-home.png.",
-    "3. Verified agent status — the status indicator (top right) reads \"idle\", which is an accepted state. PASS.",
-    "4. Typed \"Hello! What is 2+2?\" into the message input and clicked Send — the app navigated to a new session (/sessions/d52523e3-…) and the user message appears in the chat. Screenshots: step4-typed.png, step4-sent.png.",
-    "5. Waited for a response — the assistant reply \"2 + 2 = 4.\" was already rendered when the page was checked, so no waiting was needed. The status returned to \"idle\".",
-    "6. Verified the response mentions \"4\" — it does (\"2 + 2 = 4.\"). Screenshot: step6-response.png."
+    "1. Navigated to http://localhost:47891 — the Gamut app loaded (title \"Gamut\") with the sidebar listing QA-20261123-221205-y3ob and QA-20261123-221204-zt3g.",
+    "2. Clicked the \"QA-20261123-221204-zt3g\" agent in the sidebar — the agent page opened at /agents/qa-20261123-221204-zt3g-446xm4w3av with the agent name in the header. Screenshot: step2-agent-selected.png.",
+    "3. Checked the agent status — the header badge and sidebar both show \"idle\", so the status is as expected.",
+    "4. Typed \"Hello! What is 2+2?\" in the composer and clicked Send — the app navigated to a new session (/sessions/ed28256c-…), the user message appeared in the message list, and the sidebar added a session titled \"Simple Arithmetic Question Ch…\".",
+    "5. Waited for a response — none was needed: the assistant reply \"2 + 2 = 4.\" was already in the message list when I checked after sending. The composer's send button was disabled and no \"Working...\" activity indicator was visible.",
+    "6. Verified the response — the assistant reply \"2 + 2 = 4.\" contains \"4\". Screenshot: step4-message-sent.png."
   ],
   "bugs": [],
-  "durationMs": 44820,
-  "sessionId": "9a3f3a87-0923-4b43-8c49-5bd6576208a4",
+  "durationMs": 37515,
+  "sessionId": "ac255102-f2af-42bc-b4f6-671049102045",
   "cost": {
-    "inputTokens": 8053,
-    "outputTokens": 5251,
-    "cacheCreationTokens": 160579,
-    "cacheReadTokens": 670948,
+    "inputTokens": 8591,
+    "outputTokens": 7157,
+    "cacheCreationTokens": 77962,
+    "cacheReadTokens": 521093,
     "model": "claude-haiku-5-5",
-    "totalCostUsd": 0.302127
+    "totalCostUsd": 0.193938
   }
 }

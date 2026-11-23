@@ -1,23 +1,23 @@
 {
   "storyId": "browser-test",
   "passed": true,
-  "reason": "Sent the \"Open a browser and go to https://example.com. Tell me the page title.\" prompt to agent QA-20261123-193937-6vby and verified the reply names \"Example Domain\".",
+  "reason": "Sent a browser task to agent QA-20261123-221205-y3ob and checked that the reply reports the page title \"Example Domain\".",
   "steps": [
-    "Navigated to http://localhost:47891 — page loaded with the \"Your Agents\" sidebar listing QA-20261123-193937-6vby and QA-20261123-193936-9myy.",
-    "Clicked the QA-20261123-193937-6vby agent in the sidebar — agent page opened at /agents/qa-20261123-193937-6vby-lb8fsqnoop, status \"idle\", with an empty message box. Screenshot: step1-agent-opened.png.",
-    "Typed the message into the composer and clicked Send — a new session \"Check Example.com Page Title\" was created, the user message appeared, and the agent status changed to \"working\" with a Browser-related ToolSearch tool call shown.",
-    "Waited 180 seconds — the session finished. The agent went back to \"idle\" and the turn showed \"Worked for 4s · 3 tool calls · 163,881 tokens\".",
-    "Verified the response — the agent replied \"The page title is \"Example Domain\". The browser is closed now.\" This matches the expected \"Example Domain\". Screenshot: step5-response-verified.png."
+    "Navigated to http://localhost:47891 — Gamut home loaded with the sidebar listing QA-20261123-221205-y3ob and QA-20261123-221204-zt3g. No errors.",
+    "Clicked QA-20261123-221205-y3ob in the sidebar — agent page opened at /agents/qa-20261123-221205-y3ob-jooasavrq1 with an empty chat input and status \"idle\".",
+    "Typed \"Open a browser and go to https://example.com. Tell me the page title.\" and clicked Send — the message was posted, a session \"Check Example.com Page Title\" was created, and the status changed to \"working\".",
+    "Waited for the response (up to 3 minutes) — the reply appeared within seconds (\"Worked for 4s · 3 tool calls\"), the status returned to \"idle\", and the send button was disabled again.",
+    "Verified the response and took a screenshot — the reply reads: 'The page title is \"Example Domain\". The page loaded normally, and I closed the browser afterwards.' Screenshot step5-response-example-domain.png shows this."
   ],
   "bugs": [],
-  "durationMs": 73041,
-  "sessionId": "4b22ff88-0ae4-4bf6-b5a8-98523f04eba4",
+  "durationMs": 67414,
+  "sessionId": "a92840a7-05fb-4145-97af-c7b480d65328",
   "cost": {
-    "inputTokens": 7803,
-    "outputTokens": 3616,
-    "cacheCreationTokens": 49593,
-    "cacheReadTokens": 620521,
+    "inputTokens": 8184,
+    "outputTokens": 5057,
+    "cacheCreationTokens": 63781,
+    "cacheReadTokens": 621792,
     "model": "claude-haiku-5-5",
-    "totalCostUsd": 0.149926
+    "totalCostUsd": 0.175374
   }
 }
