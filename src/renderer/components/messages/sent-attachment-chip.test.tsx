@@ -8,8 +8,8 @@ const openFolder = vi.fn()
 let sizeBytes: number | null = 2048
 const useFileSize = vi.fn((_apiPath: string | null) => ({ data: sizeBytes }))
 
-vi.mock('@renderer/context/file-preview-context', () => ({
-  useFilePreview: () => ({ openFile, openFolder }),
+vi.mock('@renderer/context/agent-file-opener-context', () => ({
+  useAgentFileOpener: () => ({ openFile, openFolder }),
 }))
 vi.mock('@renderer/lib/env', () => ({ getApiBaseUrl: () => 'http://api.test' }))
 vi.mock('@renderer/hooks/use-file-size', () => ({ useFileSize: (apiPath: string | null) => useFileSize(apiPath) }))

@@ -1,4 +1,5 @@
 import { createContext, useContext, useMemo, useSyncExternalStore, type ReactNode } from 'react'
+import { AgentFileOpenerContext } from './agent-file-opener-context'
 import { SessionTray } from '@renderer/components/tray/session-tray'
 
 import { trayResidents } from '@renderer/components/tray/tray-residents'
@@ -22,6 +23,15 @@ export function SessionTrayProvider({ agentSlug, sessionId, children }: {
 }) {
   const value = useMemo(() => sessionTray(agentSlug, sessionId), [agentSlug, sessionId])
   return <TrayContext.Provider value={value}>{children}</TrayContext.Provider>
+}
+
+/** An embedded session has its own transcript, and cannot open its host's tray. */
+export function WithoutSessionTray({ children }: { children: ReactNode }) {
+  return (
+    <TrayContext.Provider value={null}>
+      <AgentFileOpenerContext.Provider value={null}>{children}</AgentFileOpenerContext.Provider>
+    </TrayContext.Provider>
+  )
 }
 
 export function useSessionTray() { return useContext(TrayContext) }

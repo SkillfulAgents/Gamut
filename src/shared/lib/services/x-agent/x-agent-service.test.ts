@@ -92,6 +92,7 @@ const fakeActor = {
     isKnown: vi.fn(async () => true),
     attach: vi.fn(async () => {}),
     metadata: vi.fn(async () => null),
+    recordInvocation: vi.fn(async (..._args: unknown[]) => {}),
     list: vi.fn(async () => [{ id: SESSION_ID, name: 'A session', createdAt: new Date(0), lastActivityAt: new Date(0) }]),
     live: vi.fn(async () => ({ isActive: mockIsActive(), isAwaitingInput: false })),
     waitForIdle: (...args: unknown[]) => mockWaitForIdle(...args),
@@ -173,6 +174,29 @@ beforeEach(async () => {
 
 afterEach(async () => {
   await handle.close()
+})
+
+describe('caller session invocation references', () => {
+  const caller = agentXAgentCaller(CALLER_AGENT, 'calling-session')
+
+  it.each([
+    [undefined, NEW_SESSION_ID],
+    [SESSION_ID, SESSION_ID],
+  ])('records an accepted call to %s before waiting for its reply', async (sessionId, expectedId) => {
+    const result = await invokeAgent(caller, { slug: TARGET, prompt: 'Research the topic', sessionId, sync: true, callerToolUseId: 'tool-123' })
+    expect(result.ok).toBe(true)
+    expect(fakeActor.sessions.recordInvocation).toHaveBeenCalledWith('calling-session', {
+      agentSlug: TARGET, sessionId: expectedId, toolUseId: 'tool-123', prompt: 'Research the topic', calledAt: expect.any(String),
+    })
+    expect(fakeActor.sessions.recordInvocation.mock.invocationCallOrder[0]).toBeLessThan(mockWaitForIdle.mock.invocationCallOrder[0])
+  })
+
+  it('creates no reference when the continuation cannot be delivered', async () => {
+    mockDeliver.mockRejectedValueOnce(new Error('Container unavailable'))
+    const result = await invokeAgent(caller, { slug: TARGET, prompt: 'Continue', sessionId: SESSION_ID })
+    expect(result.ok).toBe(false)
+    expect(fakeActor.sessions.recordInvocation).not.toHaveBeenCalled()
+  })
 })
 
 describe('the sync wait a caller asks for', () => {

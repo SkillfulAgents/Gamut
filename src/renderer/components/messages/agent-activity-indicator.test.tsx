@@ -13,6 +13,8 @@ const render = (ui: ReactElement) => renderView(ui, {
   wrapper: ({ children }) => <SessionBackgroundTasksProvider sessionId="s-1" agentSlug="agent-1">{children}</SessionBackgroundTasksProvider>,
 })
 
+vi.mock('@renderer/hooks/use-turn-agent-calls', () => ({ useTurnAgentCalls: () => [] }))
+
 // Mock useMessageStream
 const mockStreamState = {
   isActive: false,

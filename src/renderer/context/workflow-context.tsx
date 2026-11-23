@@ -7,6 +7,11 @@ export function WorkflowProvider({ children, sessionId }: { children: ReactNode;
   return tray ? children : <SessionTrayProvider sessionId={sessionId ?? null}>{children}</SessionTrayProvider>
 }
 
+/** Some transcripts are embedded without a workflow drawer. */
+export function useOpenWorkflow() {
+  return useSessionTray()?.openWorkflow
+}
+
 export function useWorkflow() {
   const { openWorkflow, viewWorkflowAgent } = useRequiredTray()
   return { openWorkflow, viewWorkflowAgent }

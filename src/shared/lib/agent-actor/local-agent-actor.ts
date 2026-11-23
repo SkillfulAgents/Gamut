@@ -1,4 +1,5 @@
 import pLimit from 'p-limit'
+import { readSessionToolHistory } from '@shared/lib/services/session-tool-history'
 import type { containerHost } from '@shared/lib/container/container-host'
 import { autoSleepTimeoutMsFrom } from '@shared/lib/container/idle-alarm'
 import { processTimer } from '@shared/lib/container/process-timer'
@@ -410,6 +411,14 @@ function createSessionOps(
     readMetadata: () => deps.sessionService.readSessionMetadata(store),
     exportMetadata: () => exportSessionMetadata(store),
     ingestMetadataFile: () => ingestSessionMetadataFile(store),
+    recordInvocation: (sessionId, invocation) => store.index.update(sessionId, current => {
+      if (!current) return null
+      const previous = current.meta?.invokedSessions ?? []
+      return { ...current.meta, invokedSessions: [
+        ...previous.filter(call => call.sessionId !== invocation.sessionId || call.agentSlug !== invocation.agentSlug),
+        invocation,
+      ] }
+    }),
     updateMetadata: (sessionId, updates) => deps.sessionService.updateSessionMetadata(store, sessionId, updates),
     fileRealPathWithinAgent: (sessionId) => deps.sessionService.sessionFileRealPathWithinAgent(store, sessionId),
     usage: (sessionId) =>
@@ -454,7 +463,7 @@ function createSessionOps(
     },
     stopTask: async (sessionId, taskId) => (await client()).stopTask(sessionId, taskId),
     contextBreakdown: (sessionId, refresh) => readSessionContext(store, sessionId, refresh, async () => {
-      if (deps.containerHost.runtime(slug).getCachedInfo().status !== 'running') return { breakdown: null }
+      if (state.runtime().getCachedInfo().status !== 'running') return { breakdown: null }
       return (await client()).getContextBreakdown(sessionId)
     }),
     waitForIdle: (sessionId, opts) => live.waitForIdle(sessionId, opts),
@@ -492,6 +501,8 @@ function createMessageOps(
     },
 
     withCompact: (sessionId) => deps.sessionService.getSessionMessagesWithCompact(store, sessionId),
+    toolHistory: (sessionId, names) =>
+      readSessionToolHistory(deps.sessionService.streamSessionMessagesWithCompact(store, sessionId), names),
     transcriptView: (sessionId, opts) =>
       readTranscriptView(deps.sessionService.streamSessionMessagesWithCompact(store, sessionId), opts),
     findDeliveredFile: (sessionId, deliveryId) =>

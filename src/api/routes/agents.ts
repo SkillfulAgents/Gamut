@@ -255,6 +255,7 @@ import {
 import { widgetRefreshService, withRefreshingFlags } from '@shared/lib/services/widget-refresh-service'
 import { widgetSchemeSchema, widgetSizeSchema } from '@shared/lib/widgets/widget-schema'
 import { getSessionIdsWithUnreadMentions, getSessionIdsWithUnreadNotifications, getUnreadMentionsByAgents, getUnreadNotificationPreviewsByAgents } from '@shared/lib/services/notification-service'
+import { invokedSessionResult, INVOKE_AGENT_TOOL, type InvokedSession } from '@shared/lib/services/x-agent/invoked-session-schema'
 import { notificationManager } from '@shared/lib/notifications/notification-manager'
 import { markSessionUnread, clearSessionUnread, getSessionIdsMarkedUnread, getSessionIdsMarkedUnreadByAgents } from '@shared/lib/services/session-unread-service'
 import { deleteSessionAndRecords } from '@shared/lib/services/session-deletion'
@@ -2775,6 +2776,32 @@ agents.delete('/:id/sessions/:sessionId/tool-calls/:toolCallId', AgentUser(), as
     console.error('Failed to remove tool call:', error)
     return c.json({ error: 'Failed to remove tool call' }, 500)
   }
+})
+
+// The activity indicator needs only live delivery receipts. The opened tray also reads legacy transcripts.
+agents.get('/:id/sessions/:sessionId/invocations', AgentRead(), async (c) => {
+  const slug = getAgentId(c)
+  const sessionId = c.req.param('sessionId')
+  const actor = agentRegistry.get(slug)
+  if (!(await actor.sessions.fileRealPathWithinAgent(sessionId))) return c.json({ error: 'Session not found' }, 404)
+  const recorded = (await actor.sessions.metadata(sessionId))?.invokedSessions ?? []
+  if (c.req.query('history') !== 'true') return c.json(recorded)
+  const history = await actor.messages.toolHistory(sessionId, [INVOKE_AGENT_TOOL])
+  const legacy: InvokedSession[] = []
+  for (const item of history) {
+    if (item.type !== 'assistant') continue
+    for (const call of item.toolCalls) {
+      const result = invokedSessionResult(call.result)
+      if (!result || call.isError) continue
+      legacy.push({
+        agentSlug: typeof call.input.slug === 'string' ? call.input.slug : slug,
+        sessionId: result.sessionId,
+        prompt: typeof call.input.prompt === 'string' ? call.input.prompt.slice(0, 300) : '',
+        calledAt: new Date(item.createdAt).toISOString(),
+      })
+    }
+  }
+  return c.json([...legacy, ...recorded])
 })
 
 agents.get('/:id/sessions/:sessionId/subagents', AgentRead(), async (c) => {

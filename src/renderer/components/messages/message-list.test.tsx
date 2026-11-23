@@ -2403,6 +2403,12 @@ describe('MessageList', () => {
       expect(screen.queryByTestId('provider-error-card')).not.toBeInTheDocument()
     })
 
+    it('shows the current error inline when the read-only transcript has no composer', () => {
+      mockMessagesData.data = [createUserMessage(), routedError()]
+      renderWithProviders(<MessageList sessionId="child" agentSlug="called-agent" readOnly />)
+      expect(screen.getByTestId('provider-error-card')).toBeVisible()
+    })
+
     it('keeps the routed row in the transcript once a normal reply follows', () => {
       mockMessagesData.data = [
         createUserMessage({ content: { text: 'summarize' } }),

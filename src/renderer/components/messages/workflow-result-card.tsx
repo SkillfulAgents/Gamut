@@ -1,6 +1,6 @@
 import { CheckCircle2 } from 'lucide-react'
 import { AgentMarkdown } from './agent-markdown'
-import { useWorkflow } from '@renderer/context/workflow-context'
+import { useOpenWorkflow } from '@renderer/context/workflow-context'
 import type { WorkflowResultNotification } from '@shared/lib/utils/task-notifications'
 
 /**
@@ -14,7 +14,7 @@ import type { WorkflowResultNotification } from '@shared/lib/utils/task-notifica
  * still knows its runId, and the drawer rehydrates the tree from disk.
  */
 export function WorkflowResultCard({ notification, agentSlug }: { notification: WorkflowResultNotification; agentSlug?: string }) {
-  const { openWorkflow } = useWorkflow()
+  const openWorkflow = useOpenWorkflow()
   const runId = notification.runId
 
   const header = (
@@ -29,7 +29,7 @@ export function WorkflowResultCard({ notification, agentSlug }: { notification: 
 
   return (
     <div className="text-sm border border-border/70 rounded-md overflow-hidden">
-      {runId ? (
+      {runId && openWorkflow ? (
         <button
           type="button"
           onClick={() => openWorkflow(runId, notification.title)}

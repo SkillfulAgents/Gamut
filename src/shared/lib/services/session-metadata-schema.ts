@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { invokedSessionSchema } from './x-agent/invoked-session-schema'
 import type { SessionMetadata } from '@shared/lib/types/agent'
 import { savedContextSchema } from '@shared/lib/container/context-breakdown-schema'
 
@@ -103,6 +104,7 @@ export const sessionMetadataSchema = z
     model: z.string().optional(),
     llmProviderId: z.string().nullish(),
     errorProviders: z.record(z.string(), z.string()).optional(),
+    invokedSessions: z.array(invokedSessionSchema).optional(),
     invokedByAgentSlug: z.string().optional(),
     // Widget repair session: automated, and the slug is the dedupe key that
     // stops a permanently broken widget opening one session per refresh.
