@@ -9,6 +9,8 @@ import type { ApiMessageOrBoundary, ApiToolCall } from '@shared/lib/types/api'
 
 export interface BackgroundTaskRef {
   taskId: string
+  /** SDK task that owns this background command. */
+  parentTaskId?: string
   startedAt: number
   isWorkflow?: boolean
   isSubagent?: boolean

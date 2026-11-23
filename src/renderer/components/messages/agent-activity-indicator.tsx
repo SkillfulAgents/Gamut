@@ -95,13 +95,14 @@ export function AgentActivityIndicator({ sessionId, agentSlug }: AgentActivityIn
   const elapsed = useElapsedTimer(isActive ? timerStartTime : null)
 
   const { data: subagents } = useSessionSubagents(agentSlug, sessionId)
-  const subagentRows: ActivitySubagentItem[] = (subagents?.entries ?? []).filter(entry => entry.activeSubagent).map(entry => ({
+  const subagentRows: ActivitySubagentItem[] = (subagents?.entries ?? []).filter(entry => entry.activeSubagent || entry.waitingForChildren).map(entry => ({
     id: entry.id,
     name: entry.name,
     description: entry.description,
-    taskId: entry.agentId,
+    // Only the child command can be stopped once the SDK retires the parent task.
+    taskId: entry.waitingForChildren ? null : entry.agentId,
     status: entry.status === 'running' ? 'running' : 'completed',
-    progressSummary: entry.backgroundRunning && entry.isCompleted ? 'background work still running' : entry.activeSubagent?.progressSummary ?? null,
+    progressSummary: entry.waitingForChildren || (entry.backgroundRunning && entry.isCompleted) ? 'background work still running' : entry.activeSubagent?.progressSummary ?? null,
   }))
 
   // Name each background task after the tool call that launched it (the

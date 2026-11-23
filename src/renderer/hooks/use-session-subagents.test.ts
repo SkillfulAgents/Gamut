@@ -32,6 +32,20 @@ describe('session subagent inventory', () => {
     expect(client.getQueryData(options.queryKey)?.entries.map(row => row.status)).toEqual(['completed', 'unknown'])
   })
 
+  it('waits for the last owned command across reconnect, even after the SDK retires the agent task', () => {
+    const files = [{ id: 'a', finished: true }, { id: 'other', finished: true }]
+    const sleep = { taskId: 'sleep', startedAt: 1, parentTaskId: 'a' }
+    const second = { ...sleep, taskId: 'second' }
+    const unrelated = { taskId: 'root', startedAt: 1 }
+    const finished = { ...snapshot, completedSubagents: new Set(['launch']) }
+    const state = reconcileSubagents(files, { ...finished, backgroundTasks: [sleep, second, unrelated] })
+    expect(state.byId.get('a')).toMatchObject({ status: 'running', waitingForChildren: true })
+    expect(state.byId.get('other')?.status).toBe('completed')
+    const reconnect = { ...finished, activeSubagents: [], backgroundTasks: [second, unrelated] }
+    expect(reconcileSubagents(files, reconnect).byId.get('a')).toMatchObject({ status: 'running', waitingForChildren: true })
+    expect(reconcileSubagents(files, { ...reconnect, backgroundTasks: [unrelated] }).byId.get('a')?.status).toBe('completed')
+  })
+
   it('honors user stops, ignores workflow runs and keeps background work live after a child turn finishes', () => {
     const state = { ...snapshot, activeSubagents: [launch, { ...launch, agentId: 'workflow', subagentType: null }],
       completedSubagents: new Set(['launch']), backgroundTasks: [{ taskId: 'a', startedAt: 0, isSubagent: true }] }

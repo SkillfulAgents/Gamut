@@ -970,6 +970,23 @@ describe('AgentActivityIndicator', () => {
     expect(screen.queryByTestId('background-task-row')).not.toBeInTheDocument()
   })
 
+  it('keeps the owner live while offering Stop only on its surviving command', () => {
+    mockStreamState.isActive = true
+    mockStreamState.activeSubagents = [
+      { subagentType: 'Explore', parentToolId: 'launch', agentId: 'owner' },
+    ]
+    mockStreamState.completedSubagents = new Set(['launch'])
+    mockStreamState.backgroundTasks = [
+      { taskId: 'sleep', startedAt: Date.now(), parentTaskId: 'owner', taskType: 'local_bash' },
+    ]
+    render(<AgentActivityIndicator sessionId="s-1" agentSlug="agent-1" />)
+    const owner = screen.getByTestId('subagent-activity-row')
+    expect(owner).toHaveAttribute('data-tracer-live', 'true')
+    expect(owner).toHaveTextContent('background work still running')
+    expect(screen.getAllByTestId('stop-task-button')).toHaveLength(1)
+    expect(screen.getByTestId('background-task-row')).toContainElement(screen.getByTestId('stop-task-button'))
+  })
+
   it('collapses activity details into an active-only summary', () => {
     mockStreamState.isActive = true
     mockStreamState.activeStartTime = Date.now()

@@ -833,6 +833,7 @@ function getOrCreateEventSource(
           const task: BackgroundTaskRef = {
             taskId: data.taskId,
             startedAt: data.startedAt,
+            parentTaskId: data.parentTaskId,
             isWorkflow: data.isWorkflow,
             isSubagent: data.isSubagent,
             taskType: data.taskType,

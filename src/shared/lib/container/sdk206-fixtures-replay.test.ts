@@ -687,7 +687,12 @@ describe.each(['sdk296', 'sdk300', 'sdk303', 'sdk311', 'sdk318', 'sdk321', 'sdk3
     expect(childEnd).toBeGreaterThan(0)
     // The child is a background task of the session in its own right: started
     // and ended once, and no session_idle while it ran.
-    expect(sseEvents.filter((e) => e['type'] === 'background_task_started' && e['taskId'] === childId)).toHaveLength(1)
+    const childEvents = sseEvents.filter(e => e['type'] === 'background_task_started' && e['taskId'] === childId)
+    expect(childEvents).toHaveLength(1)
+    expect(childEvents[0]).toMatchObject({ parentTaskId: childStart!['parent_task_id'] })
+    expect(sseEvents).toContainEqual(expect.objectContaining({
+      backgroundTasks: [expect.objectContaining({ taskId: childId, parentTaskId: childStart!['parent_task_id'] })],
+    }))
     for (const snap of timeline.slice(0, childEnd)) {
       expect(snap.sessionIdleCount, `idle at t=${snap.t} while ${childId} ran`).toBe(0)
     }

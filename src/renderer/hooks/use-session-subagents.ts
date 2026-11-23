@@ -20,6 +20,7 @@ export interface SessionSubagent {
   status: 'running' | 'completed' | 'cancelled' | 'unknown'
   activeSubagent: SubagentInfo | null
   backgroundRunning: boolean
+  waitingForChildren: boolean
   isCompleted: boolean
 }
 
@@ -39,6 +40,16 @@ export function reconcileSubagents(files: SubagentRef[], snapshot?: SubagentSnap
     if (file.toolUseId) launchIds.set(file.toolUseId, file.id)
   }
   const background = new Map(snapshot?.backgroundTasks.filter(task => task.isSubagent).map(task => [task.taskId, task]))
+  // The SDK can retire the agent's own task while a command it launched is still live.
+  const parentsWithLiveChildren = new Set<string>()
+  for (const task of snapshot?.backgroundTasks ?? []) {
+    if (!task.parentTaskId) continue
+    parentsWithLiveChildren.add(task.parentTaskId)
+    // A reconnect can supply only the command, before its known owner's first file is visible.
+    if (!groups.has(task.parentTaskId) && previous?.byId.get(task.parentTaskId)?.agentId === task.parentTaskId) {
+      groups.set(task.parentTaskId, { runs: [] })
+    }
+  }
   for (const run of snapshot?.activeSubagents ?? []) {
     const agentId = run.agentId ?? (run.parentToolId && launchIds.get(run.parentToolId))
     const id = agentId || run.parentToolId
@@ -59,16 +70,18 @@ export function reconcileSubagents(files: SubagentRef[], snapshot?: SubagentSnap
     const prior = previous?.byId.get(id) ?? (run?.parentToolId ? previous?.byId.get(run.parentToolId) : undefined)
     const task = background.get(id)
     const isCompleted = !!run && ended(run)
+    const turnRunning = !!run && !!snapshot?.isActive && !isCompleted
+    const waitingForChildren = parentsWithLiveChildren.has(id) && !task && !turnRunning
     let status: SessionSubagent['status'] = 'unknown'
-    if (task || (run && snapshot?.isActive && !isCompleted)) status = 'running'
+    if (task || turnRunning || waitingForChildren) status = 'running'
     else if (file?.stoppedByUser) status = 'cancelled'
     else if (isCompleted || file?.finished || prior?.status === 'completed') status = 'completed'
     const entry: SessionSubagent = {
-      id, agentId: file?.id ?? run?.agentId ?? task?.taskId ?? null,
+      id, agentId: file?.id ?? run?.agentId ?? task?.taskId ?? prior?.agentId ?? null,
       toolUseId: file?.toolUseId ?? prior?.toolUseId ?? runs[0]?.parentToolId ?? null,
       name: run?.subagentType || file?.agentType || task?.subagentType || prior?.name || 'Agent',
       description: run?.description || file?.description || task?.description || prior?.description || '',
-      status, activeSubagent: run, backgroundRunning: !!task, isCompleted,
+      status, activeSubagent: run, backgroundRunning: !!task, waitingForChildren, isCompleted,
     }
     entries.push(entry)
     byId.set(id, entry)
