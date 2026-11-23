@@ -463,7 +463,7 @@ function createSessionOps(
     },
     stopTask: async (sessionId, taskId) => (await client()).stopTask(sessionId, taskId),
     contextBreakdown: (sessionId, refresh) => readSessionContext(store, sessionId, refresh, async () => {
-      if (deps.containerHost.runtime(slug).getCachedInfo().status !== 'running') return { breakdown: null }
+      if (state.runtime().getCachedInfo().status !== 'running') return { breakdown: null }
       return (await client()).getContextBreakdown(sessionId)
     }),
     waitForIdle: (sessionId, opts) => live.waitForIdle(sessionId, opts),
