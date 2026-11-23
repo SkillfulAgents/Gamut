@@ -67,7 +67,7 @@ export interface WebFetchHostResult {
 }
 
 /** The header's contract is one field per line, so a field can't be allowed to carry a newline. */
-const oneLine = (value: string) => value.replace(/[\r\n]+/g, ' ')
+export const oneLine = (value: string) => value.replace(/[\r\n]+/g, ' ')
 
 /**
  * Format the host /web-fetch/fetch response into the text block the agent reads: a title/url header

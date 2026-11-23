@@ -1,7 +1,26 @@
 import { tool } from '@anthropic-ai/claude-agent-sdk'
 import { z } from 'zod'
 import { callHost, textResult, XAgentError } from './host-client'
-import { transcriptResultSchema } from './host-response-schemas'
+import { transcriptResultSchema, type TranscriptResult } from './host-response-schemas'
+import { oneLine } from '../web/format-results'
+
+type TranscriptLine = TranscriptResult['messages'][number]
+
+
+function senderLabel(sender: NonNullable<TranscriptLine['sender']>): string {
+  if (sender.kind === 'person') return sender.name.trim() ? `${JSON.stringify(sender.name)} (${sender.id})` : sender.id
+  if (sender.kind === 'agent') return `agent ${sender.slug}`
+  return `via ${oneLine(sender.provider)}`
+}
+
+function lineFacts(m: TranscriptLine): string {
+  return [
+    m.at,
+    m.kind,
+    m.forked ? 'forked' : undefined,
+    m.sender ? senderLabel(m.sender) : undefined,
+  ].filter(Boolean).join(' · ')
+}
 
 export const getSessionTranscriptTool = tool(
   'get_agent_session_transcript',
@@ -10,6 +29,8 @@ export const getSessionTranscriptTool = tool(
 Pass limit to get only the most recent N messages (limit: 1 = the agent's final message). Omit limit for the whole view. Prefer a small limit.
 
 By default the view is spoken turns only. Tool calls, tool results, and thinking are collapsed into a stub. Pass full_transcript: true to see today's compact view (tool names and tool results).
+
+Each message header shows when it was written, what a user-role line is when no person wrote it (tool_result, task_notification, compact_summary, injected, system, interrupt, command_output), "forked" for a line copied from the session this one was forked from, and who the app recorded as sending it (a person's name and id, "agent <slug>", or "via <integration>"). A user message with no sender shown has no recorded sender. A line can carry both: its kind says no person wrote the text, its sender says whom the app recorded it under.
 
 If sync=true and the session is currently running, the tool waits up to ~2 minutes for the target agent's turn to complete before returning. If the turn is still in progress after that, it returns the transcript so far with status 'running' — call again with sync=true to keep waiting. Otherwise it returns the current transcript immediately.`,
   {
@@ -38,7 +59,9 @@ If sync=true and the session is currently running, the tool waits up to ~2 minut
         : data.messages
         .map((m, i) => {
           const tool = m.toolName ? ` [${m.toolName}]` : ''
-          return `--- #${offset + i + 1} ${m.role}${tool} ---\n${m.content}`
+          const facts = lineFacts(m)
+          // Indented so message text cannot pose as another line's header.
+          return `--- #${offset + i + 1}${facts ? ` [${facts}]` : ''} ${m.role}${tool} ---\n${m.content.replace(/^--- #/gm, '  --- #')}`
         })
         .join('\n\n')
       const deliveredFiles = data.deliveredFiles.map((file) => {

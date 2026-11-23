@@ -69,6 +69,18 @@ vi.mock('@shared/lib/services/session-defaults', () => ({
 }))
 vi.mock('@shared/lib/notifications/global-feed', () => ({ globalFeed: { publish: vi.fn() } }))
 
+const sendersLookup = vi.hoisted(() => ({ fails: false }))
+vi.mock('@shared/lib/services/message-author-annotation-service', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@shared/lib/services/message-author-annotation-service')>()
+  return {
+    ...actual,
+    transcriptSenders: async (...args: Parameters<typeof actual.transcriptSenders>) => {
+      if (sendersLookup.fails) throw new Error('db down')
+      return actual.transcriptSenders(...args)
+    },
+  }
+})
+
 const TARGET = 'target-agent'
 const OTHER = 'other-agent'
 const CALLER_AGENT = 'caller-agent'
@@ -92,7 +104,8 @@ const fakeActor = {
     isKnown: vi.fn(async () => true),
     attach: vi.fn(async () => {}),
     metadata: vi.fn(async () => null),
-    list: vi.fn(async () => [{ id: SESSION_ID, name: 'A session', createdAt: new Date(0), lastActivityAt: new Date(0) }]),
+    list: vi.fn(async (): Promise<Array<Record<string, unknown>>> => [{ id: SESSION_ID, name: 'A session', createdAt: new Date(0), lastActivityAt: new Date(0) }]),
+    readMetadata: vi.fn(async (): Promise<Record<string, Record<string, unknown>>> => ({})),
     live: vi.fn(async () => ({ isActive: mockIsActive(), isAwaitingInput: false })),
     waitForIdle: (...args: unknown[]) => mockWaitForIdle(...args),
     start: (...args: unknown[]) => mockStart(...args),
@@ -100,7 +113,7 @@ const fakeActor = {
   messages: {
     findLastEntry: vi.fn(async () => undefined),
     deliver: (...args: unknown[]) => mockDeliver(...args),
-    transcriptView: vi.fn(async () => ({ messages: [], total: 0, deliveredFiles: [] })),
+    transcriptView: vi.fn(async (): Promise<{ messages: Array<Record<string, unknown>>; total: number; deliveredFiles: [] }> => ({ messages: [], total: 0, deliveredFiles: [] })),
     findDeliveredFile: vi.fn(async () => ({ id: 'd1', filename: 'out.txt', sizeBytes: 4, filePath: '/workspace/out.txt' })),
   },
 }
@@ -416,5 +429,83 @@ describe('the promoted note under a configured sub-second wait', () => {
     mockWaitForIdle.mockResolvedValueOnce('timeout')
     const created = await invoke(caller, { slug: TARGET, prompt: 'hi', sync: true, syncWaitMs: 400 })
     expect(created).toEqual({ ok: true, value: { sessionId: NEW_SESSION_ID, status: 'running', error: routeNote('400ms') } })
+  })
+})
+
+describe('what a reader sees of who spoke and how a session started', () => {
+  const caller = () => agentXAgentCaller(CALLER_AGENT)
+
+  it('names the recorded sender on its line: a person by id and name, an agent by slug, an integration by provider, never email or the card', async () => {
+    authModeEnabled = true
+    await seedRole(USER_ID, CALLER_AGENT, 'owner')
+    await seedRole(USER_ID, TARGET, 'viewer')
+    await testDb.insert(schema.messageAuthor).values([
+      { id: 'm-person', sessionId: SESSION_ID, agentSlug: TARGET, userId: USER_ID },
+      { id: 'm-notice', sessionId: SESSION_ID, agentSlug: TARGET, userId: USER_ID },
+      { id: 'm-agent', sessionId: SESSION_ID, agentSlug: TARGET, authorAgentSlug: OTHER, billedUserId: USER_ID },
+      {
+        id: 'm-slack', sessionId: SESSION_ID, agentSlug: TARGET, integrationId: 'int-1',
+        display: JSON.stringify({
+          version: 1,
+          integration: { id: 'int-1', name: 'Team Slack', provider: 'slack', family: 'chat' },
+          event: { type: 'message', label: 'Message' },
+          request: { text: 'hi', author: { name: 'Dana Card' } },
+          source: { kind: 'direct' },
+        }),
+      },
+    ])
+    fakeActor.messages.transcriptView.mockResolvedValueOnce({
+      messages: [
+        { id: 'm-person', role: 'user', content: 'rebase please', at: '2026-11-12T18:12:00.000Z' },
+        { id: 'm-notice', role: 'user', content: 'sign-in request', kind: 'system' },
+        { id: 'm-agent', role: 'user', content: 'from another agent' },
+        { id: 'm-slack', role: 'user', content: 'hi' },
+        { id: 'm-none', role: 'user', content: 'nobody recorded' },
+        { id: 'a-1', role: 'assistant', content: 'done' },
+      ],
+      total: 6,
+      deliveredFiles: [],
+    })
+    const result = await getTargetTranscript(caller(), { slug: TARGET, sessionId: SESSION_ID })
+    expect(result.ok && result.value.messages).toEqual([
+      { role: 'user', content: 'rebase please', at: '2026-11-12T18:12:00.000Z', sender: { kind: 'person', id: USER_ID, name: 'User' } },
+      { role: 'user', content: 'sign-in request', kind: 'system', sender: { kind: 'person', id: USER_ID, name: 'User' } },
+      { role: 'user', content: 'from another agent', sender: { kind: 'agent', slug: OTHER } },
+      { role: 'user', content: 'hi', sender: { kind: 'integration', provider: 'slack' } },
+      { role: 'user', content: 'nobody recorded' },
+      { role: 'assistant', content: 'done' },
+    ])
+    expect(JSON.stringify(result)).not.toMatch(/user@test|Dana Card|Team Slack/)
+  })
+
+  it('says how each session started, and which agent started one', async () => {
+    fakeActor.sessions.list.mockResolvedValueOnce([
+      { id: SESSION_ID, name: 'Chat', createdAt: new Date(0), lastActivityAt: new Date(0), origin: 'user' },
+      { id: 'session-2', name: 'Invoked', createdAt: new Date(0), lastActivityAt: new Date(0), origin: 'agent' },
+    ])
+    fakeActor.sessions.readMetadata.mockResolvedValueOnce({ 'session-2': { invokedByAgentSlug: OTHER } })
+    const result = await getTargetSessions(caller(), { slug: TARGET, limit: 50, offset: 0 })
+    expect(result.ok && result.value.sessions.map(({ origin, invokedBy }) => ({ origin, invokedBy }))).toEqual([
+      { origin: 'user', invokedBy: undefined },
+      { origin: 'agent', invokedBy: OTHER },
+    ])
+  })
+
+  it('reads the transcript without senders when their lookup fails outside auth, and fails it with auth', async () => {
+    const lines = { messages: [{ id: 'm-1', role: 'user', content: 'hi' }], total: 1, deliveredFiles: [] as [] }
+    sendersLookup.fails = true
+    try {
+      fakeActor.messages.transcriptView.mockResolvedValueOnce(lines)
+      const local = await getTargetTranscript(caller(), { slug: TARGET, sessionId: SESSION_ID })
+      expect(local.ok && local.value.messages).toEqual([{ role: 'user', content: 'hi' }])
+
+      authModeEnabled = true
+      await seedRole(USER_ID, CALLER_AGENT, 'owner')
+      await seedRole(USER_ID, TARGET, 'viewer')
+      fakeActor.messages.transcriptView.mockResolvedValueOnce(lines)
+      await expect(getTargetTranscript(caller(), { slug: TARGET, sessionId: SESSION_ID })).rejects.toThrow('db down')
+    } finally {
+      sendersLookup.fails = false
+    }
   })
 })

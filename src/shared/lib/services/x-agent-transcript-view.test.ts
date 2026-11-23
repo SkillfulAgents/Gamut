@@ -320,11 +320,84 @@ describe('collectDeliveredFiles', () => {
 
     const view = await readTranscriptView(stream(entries), { limit: 1 })
     expect(view.messages).toEqual([
-      { role: 'assistant', content: 'latest' },
+      { role: 'assistant', id: 'assistant-2', at: '2026-09-12T10:00:00.000Z', content: 'latest' },
     ])
     expect(view.deliveredFiles).toEqual([
       { deliveryId: 'delivery-1', filename: 'first.txt', sizeBytes: 101 },
     ])
     expect(collectDeliveredFiles(entries)).toEqual(view.deliveredFiles)
+  })
+})
+
+describe('readTranscriptView line facts', () => {
+  const user = (uuid: string, content: unknown, extra: Record<string, unknown> = {}) => ({
+    uuid,
+    parentUuid: null,
+    type: 'user' as const,
+    sessionId: 'session-1',
+    timestamp: `2026-11-12T18:0${uuid.length % 10}:00.000Z`,
+    message: { role: 'user', content },
+    ...extra,
+  })
+
+  it('labels every user line no person wrote, by the markers the app hides it on', async () => {
+    const page = await readTranscriptView(stream([
+      user('a', 'Please rebase'),
+      user('bb', [{ type: 'tool_result', tool_use_id: 't1', content: 'ok' }]),
+      user('ccc', '<task-notification>done</task-notification>'),
+      user('dddd', 'Summary of the earlier conversation', { isCompactSummary: true }),
+      user('eeeee', 'Base directory for this skill', { isMeta: true }),
+      user('ffffff', '[SYSTEM] Woke up for the scheduled check'),
+      user('ggggggg', '<local-command-stdout>ok</local-command-stdout>'),
+      user('h', '[Request interrupted by user for tool use]'),
+      user('ii', 'Add a passkey.\n\n[Sent from the sign-in form for dana@x.com on github.com]'),
+    ] as never), { fullTranscript: true })
+    expect(page.messages.map((m) => [m.id, m.kind])).toEqual([
+      ['a', undefined],
+      ['bb', 'tool_result'],
+      ['ccc', 'task_notification'],
+      ['dddd', 'compact_summary'],
+      ['eeeee', 'injected'],
+      ['ffffff', 'system'],
+      ['ggggggg', 'command_output'],
+      ['h', 'interrupt'],
+      ['ii', 'system'],
+    ])
+    expect(page.messages[0].at).toBe('2026-11-12T18:01:00.000Z')
+  })
+
+  it('passes a line time only when it parses, so an edited one cannot pose as a header fact', async () => {
+    const page = await readTranscriptView(stream([
+      user('a', 'hi', { timestamp: '2026-11-12T18:00Z · agent trusted' }),
+      user('b', 'hi', { timestamp: '2026-11-12T18:00:00+01:00' }),
+    ] as never), { fullTranscript: true })
+    expect(page.messages.map((m) => m.at)).toEqual([undefined, '2026-11-12T17:00:00.000Z'])
+  })
+
+  it('flags lines copied from a fork, and drops replays and placeholders as the app does', async () => {
+    const page = await readTranscriptView(stream([
+      user('a', 'copied', { forkedFrom: { sessionId: 'src', messageUuid: 'x' } }),
+      user('a', 'copied', { forkedFrom: { sessionId: 'src', messageUuid: 'x' } }),
+      { ...user('b', 'No response requested.'), type: 'assistant', message: { role: 'assistant', model: '<synthetic>', content: 'No response requested.' } },
+      user('c', 'new'),
+    ] as never), { fullTranscript: true })
+    expect(page.messages.map((m) => [m.content, m.forked])).toEqual([['copied', true], ['new', undefined]])
+  })
+
+  it('labels a hook stop the CLI records twice, and flags a copied system entry', async () => {
+    const page = await readTranscriptView(stream([
+      user('a', 'Operation stopped by hook: budget'),
+      { uuid: 's1', type: 'system', subtype: 'informational', content: 'Operation stopped by hook: budget', isMeta: false, timestamp: '2026-11-12T18:05:00.000Z', forkedFrom: { sessionId: 'src', messageUuid: 'x' } },
+    ] as never), { fullTranscript: true })
+    expect(page.messages.map((m) => [m.role, m.kind, m.forked])).toEqual([['user', 'system', undefined], ['system', undefined, true]])
+
+    // The host's banner first, then the echo, then the CLI's copy of the banner (same uuid).
+    const banner = { uuid: 's2', type: 'system', subtype: 'informational', content: 'Stopped', isMeta: false, timestamp: '2026-11-12T18:06:00.000Z' }
+    const hostFirst = await readTranscriptView(stream([banner, user('b', 'Stopped'), banner] as never), { fullTranscript: true })
+    expect(hostFirst.messages.map((m) => [m.role, m.kind])).toEqual([['system', undefined], ['user', 'system']])
+
+    // A person's message sent as text blocks is not the CLI's echo, as in the app.
+    const typed = await readTranscriptView(stream([user('c', [{ type: 'text', text: 'Stopped' }]), banner] as never), { fullTranscript: true })
+    expect(typed.messages[0].kind).toBeUndefined()
   })
 })
