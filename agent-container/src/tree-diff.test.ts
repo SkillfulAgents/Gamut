@@ -1,16 +1,12 @@
-import { afterEach, describe, it, expect } from 'vitest'
+import { beforeEach, describe, it, expect } from 'vitest'
 import {
-  acknowledgeTreeValue,
   formatUnknownRef,
   goneRefOf,
   lineWithoutRef,
   diffTrees,
   formatTreeDiff,
-  getTreeBaseline,
-  lineFromPreviousDocument,
   parseTreeRefs,
-  resetTreeBaseline,
-  setTreeBaseline,
+  TreeBaselines,
   treeDiffIsEmpty,
 } from './tree-diff'
 
@@ -43,7 +39,8 @@ const FULL = `- heading "Probe five" [level=1, ref=e1]
   - checkbox "Agree" [checked=false, ref=e8]
 - button "Add to cart" [ref=e3]`
 
-afterEach(() => resetTreeBaseline())
+let trees = new TreeBaselines()
+beforeEach(() => { trees = new TreeBaselines() })
 
 describe('parseTreeRefs', () => {
   it('keeps ref lines only, with name, attributes, value and the enclosing ref', () => {
@@ -373,53 +370,52 @@ describe('formatUnknownRef', () => {
 })
 
 describe('previous document', () => {
-  afterEach(() => resetTreeBaseline())
   it('keeps the last document\'s lines to explain its refs after a load', () => {
-    setTreeBaseline('https://a.com/', '- button "Decline" [ref=e532]', 'snapshot', 1000, 111)
-    setTreeBaseline('https://a.com/', '- button "Search" [ref=e600]', 'action', 2000, 222)
-    expect(lineFromPreviousDocument('@e532')).toEqual({ text: 'button "Decline" [ref=e532]', url: 'https://a.com/' })
-    expect(lineFromPreviousDocument('e600')).toBeNull()
+    trees.set('https://a.com/', '- button "Decline" [ref=e532]', 'snapshot', 1000, 111)
+    trees.set('https://a.com/', '- button "Search" [ref=e600]', 'action', 2000, 222)
+    expect(trees.fromPreviousDocument('@e532')).toEqual({ text: 'button "Decline" [ref=e532]', url: 'https://a.com/' })
+    expect(trees.fromPreviousDocument('e600')).toBeNull()
   })
 })
 
 describe('baseline per document', () => {
   it('follows an SPA across URL changes by its load start, and drops it on a new document', () => {
-    setTreeBaseline('https://hotels.example/search?d=1', INTERACTIVE, 'snapshot', 1000, 1700.5)
-    expect(getTreeBaseline('https://hotels.example/search?d=2', 1700.5)).not.toBeNull()
-    expect(getTreeBaseline('https://hotels.example/search?d=1', 1800.25)).toBeNull()
+    trees.set('https://hotels.example/search?d=1', INTERACTIVE, 'snapshot', 1000, 1700.5)
+    expect(trees.get('https://hotels.example/search?d=2', 1700.5)).not.toBeNull()
+    expect(trees.get('https://hotels.example/search?d=1', 1800.25)).toBeNull()
     // Without a load start on either side, the URL decides.
-    expect(getTreeBaseline('https://hotels.example/search?d=1')).not.toBeNull()
+    expect(trees.get('https://hotels.example/search?d=1')).not.toBeNull()
     // Lines seen on the document carry over across its URL changes.
-    setTreeBaseline('https://hotels.example/search?d=3', '- button "Close" [ref=e90]', 'action', 2000, 1700.5)
-    expect(getTreeBaseline('https://hotels.example/search?d=3', 1700.5)!.seen.get('e3')).toBe('button "Add to cart" [ref=e3]')
+    trees.set('https://hotels.example/search?d=3', '- button "Close" [ref=e90]', 'action', 2000, 1700.5)
+    expect(trees.get('https://hotels.example/search?d=3', 1700.5)!.seen.get('e3')).toBe('button "Add to cart" [ref=e3]')
   })
 })
 
 describe('tree baseline', () => {
   it('is kept per page: another URL has none', () => {
-    setTreeBaseline('https://a.com/', INTERACTIVE, 'snapshot', 1000)
-    expect(getTreeBaseline('https://a.com/')).toMatchObject({ takenAt: 1000, source: 'snapshot' })
-    expect(getTreeBaseline('https://a.com/other')).toBeNull()
-    setTreeBaseline('', INTERACTIVE, 'snapshot')
-    expect(getTreeBaseline('https://a.com/')).toBeNull()
+    trees.set('https://a.com/', INTERACTIVE, 'snapshot', 1000)
+    expect(trees.get('https://a.com/')).toMatchObject({ takenAt: 1000, source: 'snapshot' })
+    expect(trees.get('https://a.com/other')).toBeNull()
+    trees.set('', INTERACTIVE, 'snapshot')
+    expect(trees.get('https://a.com/')).toBeNull()
   })
 
   it('remembers every line seen on the page across reads, and forgets it on another page', () => {
-    setTreeBaseline('https://a.com/', INTERACTIVE, 'snapshot')
-    setTreeBaseline('https://a.com/', '- button "Close cart" [ref=e48]', 'action')
-    const b = getTreeBaseline('https://a.com/')!
+    trees.set('https://a.com/', INTERACTIVE, 'snapshot')
+    trees.set('https://a.com/', '- button "Close cart" [ref=e48]', 'action')
+    const b = trees.get('https://a.com/')!
     expect(b.seen.get('e3')).toBe('button "Add to cart" [ref=e3]')
     expect(b.seen.get('e48')).toBe('button "Close cart" [ref=e48]')
-    setTreeBaseline('https://b.com/', '- link "x" [ref=e90]', 'snapshot')
-    expect([...getTreeBaseline('https://b.com/')!.seen.keys()]).toEqual(['e90'])
+    trees.set('https://b.com/', '- link "x" [ref=e90]', 'snapshot')
+    expect([...trees.get('https://b.com/')!.seen.keys()]).toEqual(['e90'])
   })
 
   it('takes read-back values until the next read replaces it', () => {
-    setTreeBaseline('https://a.com/', INTERACTIVE, 'snapshot')
-    acknowledgeTreeValue('https://a.com/', '@e9', 'Ada')
-    acknowledgeTreeValue('https://other.com/', '@e9', 'ignored')
-    expect([...getTreeBaseline('https://a.com/')!.acknowledged]).toEqual([['e9', 'Ada']])
-    setTreeBaseline('https://a.com/', INTERACTIVE, 'action')
-    expect(getTreeBaseline('https://a.com/')!.acknowledged.size).toBe(0)
+    trees.set('https://a.com/', INTERACTIVE, 'snapshot')
+    trees.acknowledge('https://a.com/', '@e9', 'Ada')
+    trees.acknowledge('https://other.com/', '@e9', 'ignored')
+    expect([...trees.get('https://a.com/')!.acknowledged]).toEqual([['e9', 'Ada']])
+    trees.set('https://a.com/', INTERACTIVE, 'action')
+    expect(trees.get('https://a.com/')!.acknowledged.size).toBe(0)
   })
 })

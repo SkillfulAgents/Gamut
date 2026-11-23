@@ -29,7 +29,7 @@ vi.mock('./session-persistence', () => ({
     getAllSessions() { return [...persisted.values()] }
   },
 }))
-vi.mock('./browser-state', () => ({ releaseBrowserLock: () => false }))
+vi.mock('./browser-state', () => ({ releaseBrowserSession: () => false }))
 vi.mock('./claude-code', () => ({ ClaudeCodeProcess: class {} }))
 
 import { SessionManager } from './session-manager'

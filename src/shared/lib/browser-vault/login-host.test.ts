@@ -25,7 +25,7 @@ const container = vi.hoisted(() => ({
   /** Per-field outcomes the fill answers with; null answers the counts only. */
   fillOutcomes: null as string[] | null,
   /** The browser /browser/status reports; null: none (404). */
-  browser: null as { active: boolean; sessionId: string | null; location: 'host' | 'container' | null } | null,
+  browser: null as { active: boolean; sessionIds: string[]; location: 'host' | 'container' | null } | null,
   /** How /browser/session/restore answers. */
   restore: { status: 200, body: {} as Record<string, unknown> },
   /** The fill is sent and no answer comes back. */
@@ -634,7 +634,7 @@ describe('decideLoginRequest with saved sessions', () => {
   }
 
   beforeEach(() => {
-    container.browser = { active: true, sessionId: 's-1', location: 'container' }
+    container.browser = { active: true, sessionIds: ['s-1'], location: 'container' }
     container.restore = { status: 200, body: { restored: true, skippedRecords: 0, observation: { digest: { url: 'https://github.com/', navigated: true } } } }
   })
 
@@ -682,7 +682,7 @@ describe('decideLoginRequest with saved sessions', () => {
     expect(restoreCalls()).toEqual([])
     // A page offering only to sign in with another account is a first page (in a session where no step of octocat's went in yet).
     container.calls = []
-    container.browser = { active: true, sessionId: 's-2', location: 'container' }
+    container.browser = { active: true, sessionIds: ['s-2'], location: 'container' }
     container.context = { ...GITHUB, fields: [], providers: ['google'] }
     expect(await decide({ username: 'octocat' }, 's-2')).toEqual({ action: 'settled' })
     expect(restoreCalls()).toHaveLength(1)
@@ -708,7 +708,7 @@ describe('decideLoginRequest with saved sessions', () => {
     expect(answers()[0].value).toMatchObject({ type: 'accounts' })
     await rememberSignInIdentity('agent-a', 's-1', 'github.com', 'octocat')
     expect(await decide({ username: 'octocat' })).toEqual({ action: 'settled' })
-    container.browser = { active: true, sessionId: 's-2', location: 'container' }
+    container.browser = { active: true, sessionIds: ['s-2'], location: 'container' }
     container.context = { ...GITHUB, fields: [field('otp', 'Code')] }
     expect(await decide({ username: 'octocat' }, 's-2')).toMatchObject({ action: 'ask' })
     expect(restoreCalls()).toEqual([])

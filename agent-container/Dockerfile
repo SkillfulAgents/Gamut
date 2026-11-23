@@ -312,8 +312,12 @@ ENV AGENT_BROWSER_STREAM_PORT=9223
 # Rather than fighting the layout with symlinks (brittle across playwright versions),
 # we point agent-browser at the stable chromium-current symlink the Dockerfile sets up.
 ENV AGENT_BROWSER_EXECUTABLE_PATH=/opt/playwright-browsers/chromium-current
-ENV AGENT_BROWSER_ARGS="--no-sandbox,--disable-dev-shm-usage,--disable-blink-features=AutomationControlled,--disable-features=AutomationControlled,--disable-infobars,--disable-background-timer-throttling,--disable-popup-blocking,--disable-backgrounding-occluded-windows,--disable-renderer-backgrounding,--disable-component-update"
 ENV AGENT_BROWSER_USER_AGENT="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+# The user agent is a Chrome flag too: agent-browser sets AGENT_BROWSER_USER_AGENT
+# only on the pages of the instance that launched Chrome, and each session
+# drives an instance of its own attached to that Chrome (server.ts), whose
+# tabs would otherwise say HeadlessChrome.
+ENV AGENT_BROWSER_ARGS="--no-sandbox,--disable-dev-shm-usage,--disable-blink-features=AutomationControlled,--disable-features=AutomationControlled,--disable-infobars,--disable-background-timer-throttling,--disable-popup-blocking,--disable-backgrounding-occluded-windows,--disable-renderer-backgrounding,--disable-component-update,--user-agent=${AGENT_BROWSER_USER_AGENT}"
 ENV AGENT_BROWSER_PROFILE=/workspace/.browser-profile
 # Where a download the page starts (a clicked attachment link, a blob the page
 # saves) lands. The headless shell drops such downloads unless told where to
@@ -324,7 +328,7 @@ ENV AGENT_BROWSER_PROFILE=/workspace/.browser-profile
 ENV AGENT_BROWSER_DOWNLOAD_PATH=/workspace/downloads
 # agent-browser 0.33.1+ shuts its daemon (and Chrome) down after an hour
 # without a command. The browser's lifecycle is ours (browser_open/close, the
-# session lock, the live view), so never time out.
+# sessions using it, the live view), so never time out.
 ENV AGENT_BROWSER_IDLE_TIMEOUT_MS=0
 # agent-browser 0.36+ enables WebMCP (site-registered tools) and announces
 # page tools in the output of whatever command runs next — an observer eval

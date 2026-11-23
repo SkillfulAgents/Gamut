@@ -108,8 +108,12 @@ describe('browser stream proxy', () => {
     return client
   }
 
-  it('passes only a numeric width on to the container', async () => {
-    await connect('?width=841&secret=abc')
+  it('passes only the session and a numeric width on to the container', async () => {
+    await connect('?sessionId=s-1&width=841&secret=abc')
+    await vi.waitFor(() => expect(upstreamUrls).toEqual(['/browser/stream?sessionId=s-1&width=841']))
+
+    upstreamUrls = []
+    await connect('?width=841')
     await vi.waitFor(() => expect(upstreamUrls).toEqual(['/browser/stream?width=841']))
 
     upstreamUrls = []

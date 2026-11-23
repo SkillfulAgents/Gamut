@@ -293,14 +293,14 @@ framework sessions), and a session saved again for each would go round
 between the agents that share it. A capture or a restore lets go of the
 other accounts' marks (below) on every site of the registrable domain.
 
-The capture reads on a hidden tab of its own, beside the agent's work.
-agent-browser makes a tab it discovers the active one by itself, with no
-command, and falls back to the last tab once that one closes, so a session
-operation pins the daemon to the agent's tab while it runs (its `pinTab`,
-set and cleared around the operation), and runs alone in the browser
-(`browser-gate.ts`): it waits for the agent-browser commands under way (the
-agent's, the container's own tab queries), and one that starts after it
-asked waits for it.
+The capture reads on a hidden tab of its own, beside the agent's work. Each
+session's agent-browser instance is pinned to that session's tab
+(`--pin-tab`), so neither the capture's tab nor a restore's reload moves it.
+A session operation runs alone for its session (`browser-gate.ts`): it waits
+for that session's agent-browser commands under way, and one of that session
+that starts after it asked waits for it. Other sessions' commands go on, on
+their own tabs; operations run one at a time, whoever's, since they read and
+write site state the sessions share.
 
 **Restore.** Inside request_login, when an account is chosen on the first
 page of a sign-in: the agent names it, or the user picks it in the card as it

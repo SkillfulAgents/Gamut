@@ -2345,7 +2345,7 @@ describe('useMessageStream', () => {
   // ---- Reconnects ----
 
   describe('a connection that reopens', () => {
-    const browserStatus = (status: { active: boolean; sessionId?: string }) =>
+    const browserStatus = (status: { active: boolean; sessionIds?: string[] }) =>
       vi.mocked(globalThis.fetch).mockResolvedValue({ json: () => Promise.resolve(status) } as Response)
     const browserStatusCalls = () =>
       vi.mocked(globalThis.fetch).mock.calls.filter(([url]) => String(url).endsWith('/browser/status')).length
@@ -2382,7 +2382,7 @@ describe('useMessageStream', () => {
       expect(result.current.browserActive).toBe(false)
 
       // The server resumes it: the missed frames, no 'connected'.
-      browserStatus({ active: true, sessionId: 'session-1' })
+      browserStatus({ active: true, sessionIds: ['session-1'] })
       await act(async () => {
         es.simulateOpen()
         es.simulateMessage({ type: 'stream_delta', text: 'lo' })

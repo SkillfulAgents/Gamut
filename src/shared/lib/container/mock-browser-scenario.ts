@@ -88,7 +88,7 @@ export class BrowserScenario implements MockScenario {
     const httpServer = http.createServer((req, res) => {
       if (req.url === '/browser/status') {
         res.writeHead(200, { 'Content-Type': 'application/json' })
-        res.end(JSON.stringify({ active: true, sessionId }))
+        res.end(JSON.stringify({ active: true, sessionIds: [sessionId] }))
         return
       }
       res.writeHead(404)

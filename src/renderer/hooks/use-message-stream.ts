@@ -521,11 +521,11 @@ function getOrCreateEventSource(
     const revision = ++browserStatusRevision
     fetch(`${baseUrl}/api/agents/${agentSlug}/browser/status`)
       .then((res) => res.json())
-      .then((status: { active?: boolean; sessionId?: string }) => {
+      .then((status: { active?: boolean; sessionIds?: string[] }) => {
         if (revision !== browserStatusRevision || eventSources.get(key) !== es || typeof status.active !== 'boolean') return
         const latest = streamStates.get(sessionId)
-        // Only mark browser active if it belongs to THIS session
-        const activeForThisSession = (status.active ?? false) && status.sessionId === sessionId
+        // Only mark browser active if THIS session is using it
+        const activeForThisSession = (status.active ?? false) && (status.sessionIds ?? []).includes(sessionId)
         if (latest && (!latest.browserStatusKnown || latest.browserActive !== activeForThisSession)) {
           streamStates.set(sessionId, { ...latest, browserActive: activeForThisSession, browserStatusKnown: true })
           streamListeners.get(sessionId)?.forEach((listener) => listener())

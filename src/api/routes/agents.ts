@@ -8193,14 +8193,14 @@ agents.get('/:id/browser/status', AgentRead(), async (c) => {
     const info = await agentRegistry.get(slug).container.status()
 
     if (info.status !== 'running') {
-      return c.json({ active: false, sessionId: null })
+      return c.json({ active: false, sessionIds: [] })
     }
 
     const response = await actor.container.fetch('/browser/status')
     return c.json(await response.json())
   } catch (error) {
     console.error('Failed to get browser status:', error)
-    return c.json({ active: false, sessionId: null })
+    return c.json({ active: false, sessionIds: [] })
   }
 })
 

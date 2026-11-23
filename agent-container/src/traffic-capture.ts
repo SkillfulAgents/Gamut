@@ -408,20 +408,11 @@ export function formatCaptureSummary(opts: {
 
 // --- Capture state ---------------------------------------------------------------
 
+/** A recording under way, one per browser session (it is that session's agent-browser instance's). */
 export interface CaptureState {
   startedAt: number
   /** The page the capture started on — first-party is judged against it. */
   url: string
-}
-
-let capture: CaptureState | null = null
-
-export function getCapture(): CaptureState | null {
-  return capture
-}
-
-export function setCapture(state: CaptureState | null): void {
-  capture = state
 }
 
 /** File name for one endpoint's body: `<n>-<host><path>.json|txt`, filesystem-safe. */

@@ -11,7 +11,7 @@ import * as fs from 'fs'
 import * as os from 'os'
 import * as path from 'path'
 
-vi.mock('./browser-state', () => ({ releaseBrowserLock: () => false }))
+vi.mock('./browser-state', () => ({ releaseBrowserSession: () => false }))
 
 const persistedSessions = new Map<string, Record<string, unknown>>()
 vi.mock('./session-persistence', () => ({

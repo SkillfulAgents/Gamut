@@ -30,14 +30,15 @@ export interface SessionRouteDeps {
   browserActive(): boolean
   /** A connection to the browser itself, not a page. */
   connectBrowser(): Promise<CdpConnection>
-  /** The CDP target id of agent-browser's active tab: the one the agent works in. */
-  activeTabId(): Promise<string | null>
-  /** Run an operation with agent-browser kept on that tab: the operation opens tabs of its own, which it would follow. */
-  keepActiveTab<T>(work: () => Promise<T>): Promise<T>
+  /**
+   * The CDP target id of the session's tab: the one its agent-browser instance
+   * is pinned to, so the tabs an operation opens of its own never move it.
+   */
+  activeTabId(sessionId: string): Promise<string | null>
   /** The address bar's URL digest now. */
-  observeUrl(): Promise<Record<string, unknown> | null>
-  /** The agent's tab loaded another document under the CLI: what is kept about the old one goes. */
-  pageReplaced(): void
+  observeUrl(sessionId: string): Promise<Record<string, unknown> | null>
+  /** The session's tab loaded another document under the CLI: what is kept about the old one goes. */
+  pageReplaced(sessionId: string): void
 }
 
 const scopeFields = {
@@ -71,11 +72,11 @@ export function registerSessionRoutes(app: Hono, deps: SessionRouteDeps): void {
   const refusal = (sessionId: string): string | null =>
     deps.validateSession(sessionId) ?? (deps.browserActive() ? null : 'no browser is open')
 
-  /** Run alone in the browser (browser-gate.ts), still the session's when its turn comes, the agent kept on its tab. */
-  const alone = <T>(sessionId: string, work: () => Promise<T>): Promise<T> => browserAlone(async () => {
+  /** Run alone in the session's tab (browser-gate.ts), still the session's when its turn comes. */
+  const alone = <T>(sessionId: string, work: () => Promise<T>): Promise<T> => browserAlone(sessionId, async () => {
     const refused = refusal(sessionId)
     if (refused) throw new BrowserTakenError(refused)
-    return deps.keepActiveTab(work)
+    return work()
   })
 
   /**
@@ -115,7 +116,7 @@ export function registerSessionRoutes(app: Hono, deps: SessionRouteDeps): void {
     if (refused) return c.json({ error: refused }, 409)
     try {
       // Asked before the turn: finding the agent's tab asks agent-browser, which waits for no operation to run.
-      const tabId = await deps.activeTabId().catch(() => null)
+      const tabId = await deps.activeTabId(sessionId).catch(() => null)
       const result = await alone(sessionId, async () => {
         const cdp = await deps.connectBrowser()
         try {
@@ -151,7 +152,7 @@ export function registerSessionRoutes(app: Hono, deps: SessionRouteDeps): void {
     const untouched = { touched: false, changed: false, cleared: false }
     if (refused) return c.json({ error: refused, ...untouched }, 409)
     try {
-      const tabId = await deps.activeTabId()
+      const tabId = await deps.activeTabId(sessionId)
       if (!tabId) throw new SessionRestoreError('no browser page is open', false, false, false)
       const outcome = await alone(sessionId, async () => {
         const cdp = await deps.connectBrowser()
@@ -159,10 +160,10 @@ export function registerSessionRoutes(app: Hono, deps: SessionRouteDeps): void {
           return await restoreSession(cdp, { site, origin }, bundle, tabId)
         } finally {
           cdp.close()
-          deps.pageReplaced()
+          deps.pageReplaced(sessionId)
         }
       })
-      const digest = await deps.observeUrl().catch(() => null)
+      const digest = await deps.observeUrl(sessionId).catch(() => null)
       const { settled } = outcome
       const settle = settled ? `; the tab settled ${(settled.waitedMs / 1000).toFixed(1)} s after loading${settled.movedTo ? `, gone on to ${settled.movedTo}` : ''}` : ''
       console.log(`[Session] Restored ${site}${outcome.skippedRecords ? ` (${outcome.skippedRecords} record(s) left out)` : ''}${settle}`)
