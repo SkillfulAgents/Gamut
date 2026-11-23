@@ -6,14 +6,19 @@
  * its token is never accepted on `/api/*`.
  *
  * Order: not served in auth mode (until OAuth lands), 404 while the admin
- * switch is off, then authentication, then the SDK handler inside the user's
- * request scope.
+ * switch is off, then reach (in the desktop app, a request from another
+ * machine is refused unless the admin chose `network`), then authentication,
+ * then the SDK handler inside the user's request scope. Reach comes before
+ * authentication, so a device that may not reach the server learns nothing
+ * about the token it sent.
  */
 import { Hono } from 'hono'
 import { isAuthMode } from '@shared/lib/auth/mode'
 import { runWithRequestUser } from '@shared/lib/platform-attribution/request-context'
 import { authenticateMcpRequest } from '@shared/lib/mcp-server/authenticate'
-import { isMcpServerEnabled } from '@shared/lib/mcp-server/mcp-server-settings'
+import { getSettings } from '@shared/lib/config/settings'
+import { isMcpServerEnabledFrom, mcpServerReachFrom } from '@shared/lib/mcp-server/mcp-server-settings'
+import { checksLoopbackSource, isLoopbackSource } from '../middleware/local-mode-auth'
 import { authInfoFor, mcpHandler } from '@shared/lib/mcp-server/server'
 
 export const MCP_ROUTE_PATH = '/mcp'
@@ -22,7 +27,11 @@ const mcp = new Hono()
 
 mcp.all('/', async (c) => {
   if (isAuthMode()) return c.json({ error: 'Not found' }, 404)
-  if (!(await isMcpServerEnabled())) return c.json({ error: 'Not found' }, 404)
+  const settings = await getSettings()
+  if (!isMcpServerEnabledFrom(settings)) return c.json({ error: 'Not found' }, 404)
+  if (checksLoopbackSource() && mcpServerReachFrom(settings) === 'this-computer' && !isLoopbackSource(c)) {
+    return c.json({ error: 'This MCP server accepts requests from this computer only. Allow other devices in Gamut Settings → MCP Server.' }, 403)
+  }
   const auth = await authenticateMcpRequest(c.req.raw)
   if (!auth.ok) return auth.response
   return runWithRequestUser(auth.ctx.userId, () => mcpHandler().fetch(c.req.raw, { authInfo: authInfoFor(auth.ctx) }))
