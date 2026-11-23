@@ -6,7 +6,7 @@
  * Every call goes through the same steps here: the person's rate limit, the
  * credential's scope, the tool, then one audit row (tool-call-guard.ts).
  */
-import { CLIENT_INFO_META_KEY, type McpServer, type ServerContext } from '@modelcontextprotocol/server'
+import { CLIENT_INFO_META_KEY, type McpServer, type ProtocolEra, type ServerContext } from '@modelcontextprotocol/server'
 import type { McpCallContext } from './context'
 import { MAX_TOOL_NAME_LENGTH, type McpAuditTarget, type McpToolCall, type McpToolDefinition } from './tool-definition'
 import { errorResult, jsonResult, runTool } from './tool-result'
@@ -58,7 +58,13 @@ function progressSender(context: ServerContext | undefined): McpToolCall['progre
   }
 }
 
-export function registerTools(server: McpServer, ctx: McpCallContext, tools: readonly McpToolDefinition[] = MCP_TOOLS): void {
+export function registerTools(
+  server: McpServer,
+  ctx: McpCallContext,
+  tools: readonly McpToolDefinition[] = MCP_TOOLS,
+  options: { era?: ProtocolEra } = {},
+): void {
+  const { era } = options
   for (const tool of tools) {
     if (tool.name.length > MAX_TOOL_NAME_LENGTH) throw new Error(`MCP tool name too long: ${tool.name}`)
     server.registerTool(
@@ -78,7 +84,7 @@ export function registerTools(server: McpServer, ctx: McpCallContext, tools: rea
         const admission = await admitToolCall(ctx.userId)
         if (!admission.admitted) return errorResult(rateLimitedMessage(admission.retryAfterSeconds))
         if (!ctx.scopes.includes(tool.scope)) {
-          await auditToolCall({ ctx, tool: tool.name, clientName, target, outcome: 'error' })
+          await auditToolCall({ ctx, tool: tool.name, clientName, era, target, outcome: 'error' })
           return errorResult(`${tool.name} needs the "gamut:${tool.scope}" permission, which this connection was not given. Reconnect and allow it.`)
         }
         const call: McpToolCall = {
@@ -88,7 +94,7 @@ export function registerTools(server: McpServer, ctx: McpCallContext, tools: rea
           setAuditTarget: (more) => { target = { ...target, ...more } },
         }
         const result = await runTool(tool.name, async () => jsonResult(await tool.handler(args as never, ctx, call) as Record<string, unknown>))
-        await auditToolCall({ ctx, tool: tool.name, clientName, target, outcome: result.isError ? 'error' : 'ok' })
+        await auditToolCall({ ctx, tool: tool.name, clientName, era, target, outcome: result.isError ? 'error' : 'ok' })
         return result
       },
     )

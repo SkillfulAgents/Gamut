@@ -9,11 +9,11 @@
  * authenticates first and passes who the call acts for in `authInfo.extra`,
  * and the factory builds the server for that context.
  */
-import { createMcpHandler, McpServer, type AuthInfo, type McpHttpHandler, type McpRequestContext } from '@modelcontextprotocol/server'
+import { createMcpHandler, McpServer, type AuthInfo, type McpHttpHandler, type McpRequestContext, type ProtocolEra } from '@modelcontextprotocol/server'
 import { APP_VERSION } from '@shared/lib/config/version'
 import type { McpCallContext } from './context'
 import { SERVER_INSTRUCTIONS } from './guide'
-import { registerTools } from './registry'
+import { MCP_TOOLS, registerTools } from './registry'
 
 export const MCP_SERVER_NAME = 'gamut'
 
@@ -37,12 +37,12 @@ function contextOf(request: McpRequestContext): McpCallContext {
   return ctx
 }
 
-export function buildMcpServer(ctx: McpCallContext): McpServer {
+export function buildMcpServer(ctx: McpCallContext, era?: ProtocolEra): McpServer {
   const server = new McpServer(
     { name: MCP_SERVER_NAME, title: 'Gamut', version: APP_VERSION },
     { instructions: SERVER_INSTRUCTIONS, capabilities: { tools: {} } },
   )
-  registerTools(server, ctx)
+  registerTools(server, ctx, MCP_TOOLS, { era })
   return server
 }
 
@@ -53,7 +53,7 @@ let handler: McpHttpHandler | null = null
  * only the exchanges in flight, and the legacy leg builds a server per request.
  */
 export function mcpHandler(): McpHttpHandler {
-  handler ??= createMcpHandler((request) => buildMcpServer(contextOf(request)), {
+  handler ??= createMcpHandler((request) => buildMcpServer(contextOf(request), request.era), {
     legacy: 'stateless',
     onerror: (error) => console.warn('[mcp-server] request error:', error.message),
   })
