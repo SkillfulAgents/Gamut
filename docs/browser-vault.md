@@ -110,17 +110,20 @@ plain-HTTP one without the user (`vaultFillsInto`, against the account's
 
 ### Steps
 
-A field mapped without a ref is a later step's: on an email-first page the
-agent maps the email and the password without a ref, the user enters both,
-and once the email went into the page the host holds the password
-(`held-values.ts`, per agent, session and site). A later call on
-the same site that maps a password field gets it filled without the user —
-only where a saved account's password could go (no https-typed value into a
-plain-HTTP page) — and only then is it added to the account, if the user
-asked to save it and the account is still theirs and still granted (the next
-step is not always a password). Declining, or signing in on the page by
-hand, drops it. The host also remembers the username the last step went in
-with, so a step without a username field still knows whose account it is.
+A field mapped without a ref belongs to a later step. On an email-first
+page, the user can enter both the email and password on the first card.
+With “Save for later” checked, submitting the card saves the reusable
+fields to the account and grants it to this agent before the email goes
+into the page. This also works when the site skips the password page. A
+failed save is reported to the user and the current sign-in can proceed.
+
+For the current sign-in, the host holds the password for the next page
+(`held-values.ts`, per agent, session and site), including when the user
+leaves “Save for later” unchecked. The next call that maps a password field
+on the same site uses it once, subject to the usual HTTPS check. Declining
+or signing in on the page by hand drops this temporary copy. The host also
+remembers the username from the last step so a later step can identify the
+account.
 
 Both live in AppState (`vault:held`, `vault:identity`; see
 [docs/app-state.md](app-state.md#browser-vault-handoffs)), so every process
@@ -202,9 +205,8 @@ sign-in page again and call request_login with the account's username
 (`kept` in the result):
 
 - A saved account the user picked is granted (`picked`).
-- With "Save for later", what they entered (this step's fields, the next
-  step's, and what an earlier step held to save) is saved and granted
-  (`saved`).
+- With "Save for later", the current and later-step values entered on the
+  card are already saved and granted (`saved`).
 - Without it, or when the save fails, what they entered is held as a later
   step's would be (`held`, 30 minutes, this session), along with what an
   earlier step still holds.
@@ -214,6 +216,14 @@ sign-in page again and call request_login with the account's username
   told to try again with the same account (`vault`).
 
 Only a one-time code is not kept: the user is asked again.
+
+If the host has saved the account and the original form has disappeared,
+or the browser never confirms the fill, the host answers the waiting
+request with the saved account's username. The agent checks whether
+sign-in already succeeded. If the site still needs a sign-in, the agent
+reopens the page and calls `request_login` with that username and the
+current fields. The card confirms the save. A page that does answer but
+reports stale fields gives the agent the same instructions.
 
 ## Saved sessions
 

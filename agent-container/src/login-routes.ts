@@ -465,7 +465,7 @@ export function registerLoginRoutes(app: Hono, deps: LoginRouteDeps): void {
     const body = parsed.data
     const prepared = getPreparedLogin(body.toolUseId)
     if (!prepared || !(await pendingLoginOpened(body.toolUseId, deps.pendingWaitMs ?? 3000))) {
-      return c.json({ error: 'This sign-in request is no longer open' }, 409)
+      return c.json({ error: 'This sign-in request is no longer open', reason: 'form_unavailable' }, 409)
     }
     // The origin the host showed must be the one the browser located: the
     // last check before a value leaves for a page.

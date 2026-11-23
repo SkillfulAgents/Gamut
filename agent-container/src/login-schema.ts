@@ -202,6 +202,8 @@ export const loginAccountsReportSchema = z.object({
   accounts: z.array(vaultAccountViewSchema),
   /** The agent named this account but mapped no field to fill. */
   named: z.boolean().optional(),
+  /** A fill of this account got no confirmation. The host returned it for a fresh sign-in attempt. */
+  fillUnconfirmed: z.literal(true).optional(),
   /** The agent named this username, not one it may use here, and mapped nothing for a form to ask. */
   missing: z.string().max(320).optional(),
 })

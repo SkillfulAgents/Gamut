@@ -103,6 +103,13 @@ export interface FillAccountNote {
   authenticator?: { name?: string }
 }
 
+type LoginFillFailure = {
+  ok: false
+  status: 409 | 502
+  error: string
+  reason?: 'browser_closed' | 'form_unavailable' | 'unconfirmed'
+}
+
 /** Whether the vault makes the account's authenticator codes: it holds an app the site has not rejected. */
 export function authenticatorReady(account: Pick<VaultAccount, 'signInMethods'>): boolean {
   const authenticator = account.signInMethods.authenticator
@@ -131,7 +138,7 @@ export async function fillLoginInContainer(
   values: string[],
   account?: FillAccountNote,
   options: { answer?: false } = {},
-): Promise<{ ok: true; result: LoginFillResult } | { ok: false; status: 409 | 502; error: string; browserClosed?: true }> {
+): Promise<{ ok: true; result: LoginFillResult } | LoginFillFailure> {
   const actor = agentRegistry.get(agentSlug)
   const response = await actor.container.fetch('/browser/login/fill', {
     method: 'POST',
@@ -144,20 +151,30 @@ export async function fillLoginInContainer(
       ...(account ? { account } : {}),
       ...(options.answer === false ? { answer: false } : {}),
     }),
+  }).catch((error: unknown) => {
+    // A submitted form that just saved its account can finish through the
+    // parked tool even if the browser endpoint never answers.
+    if (account?.saved) return null
+    throw error
   })
+  if (!response) return { ok: false, status: 502, error: 'The browser did not confirm the fill', reason: 'unconfirmed' }
   const data: unknown = await response.json().catch(() => null)
   if (!response.ok) {
     const failure = containerErrorSchema.safeParse(data)
-    return {
-      ok: false,
-      status: response.status === 409 ? 409 : 502,
-      error: failure.success ? failure.data.error : 'The sign-in form could not be filled',
-      // The browser that showed the form closed since: the request is still open.
-      ...(response.status === 409 && failure.success && failure.data.reason === 'browser_closed' ? { browserClosed: true as const } : {}),
+    const error = failure.data?.error ?? 'The sign-in form could not be filled'
+    if (response.status === 409) {
+      const reason = failure.data?.reason
+      if (reason === 'browser_closed') return { ok: false, status: 409, error, reason }
+      // Older containers returned only this message when the original form was gone.
+      if (reason === 'form_unavailable' || (!reason && error === 'This sign-in request is no longer open')) {
+        return { ok: false, status: 409, error, reason: 'form_unavailable' }
+      }
+      return { ok: false, status: 409, error }
     }
+    return { ok: false, status: 502, error, ...(response.status >= 500 ? { reason: 'unconfirmed' } : {}) }
   }
   const result = loginFillResultSchema.safeParse(data)
-  if (!result.success) return { ok: false, status: 502, error: 'The browser returned an unreadable result' }
+  if (!result.success) return { ok: false, status: 502, error: 'The browser returned an unreadable result', reason: 'unconfirmed' }
   if (options.answer !== false) await actor.inputs.complete(sessionId, toolUseId, 'answered')
   return { ok: true, result: result.data }
 }
@@ -289,6 +306,13 @@ export async function answerLoginRequest(agentSlug: string, toolUseId: string, r
   return response.ok
 }
 
+/** The parked call gets the usable account even if the browser has lost the form or its reply. */
+export function answerWithSavedAccountAfterFill(agentSlug: string, toolUseId: string, account: VaultAccount): Promise<boolean> {
+  return answerLoginRequest(agentSlug, toolUseId, {
+    type: 'accounts', site: account.site, accounts: [accountView(account)], named: true, fillUnconfirmed: true,
+  })
+}
+
 /** A saved account as the agent may see it: never a value. */
 export function accountView(account: VaultAccount) {
   const authenticator = account.signInMethods.authenticator
@@ -332,10 +356,8 @@ export function usableHeld(held: HeldLoginRead | null, pageOrigin: string): Held
 }
 
 /**
- * After held parts went into the page (their claim settled): when the user
- * asked to save them, add them to the account — only one that still exists,
- * is theirs, and this agent may still use: the user may have deleted or
- * revoked it since, and that is not undone from what was held.
+ * Honor a pending save from an older host after its held parts went into
+ * the page. Look up the original owner's account and check its grant again.
  */
 export async function saveHeldParts(input: {
   claim: HeldClaim
@@ -829,23 +851,30 @@ async function decideFromVault(call: LoginRequestCall, context: LoginContext, si
     if (claim) await settleHeldClaim(claim, fromHeld)
     throw error
   }
-  // The page or the browser refused: nothing went in, and what was held is there for the next try.
-  if (!filled.ok && claim) await settleHeldClaim(claim, [])
+  // A refusal leaves the values held. A lost reply may follow a write.
+  if (!filled.ok && claim) await settleHeldClaim(claim, filled.reason === 'unconfirmed' ? fromHeld : [])
   // The browser closed first: there is nothing for the user to answer. The
   // account, or what was held, signs the agent in once it opens the page again.
-  if (!filled.ok && filled.browserClosed) {
+  if (!filled.ok && filled.reason === 'browser_closed') {
     const kept = account ? { how: 'vault' as const, username: account.username } : { how: 'held' as const, ...(shown ? { username: shown } : {}) }
     if (await answerLoginRequest(agentSlug, toolUseId, { type: 'browser_closed', site, kept })) return { action: 'settled' }
   }
+  if (!filled.ok && filled.reason === 'form_unavailable' && account && await answerWithSavedAccountAfterFill(agentSlug, toolUseId, account)) {
+    return { action: 'settled' }
+  }
   // The page or the browser refused: the user can still answer the form.
-  if (!filled.ok) return ask({ mode: 'complete', ...(identity ? { username: identity } : {}), ...(account ? { accountId: account.id } : {}), covered }, context)
+  if (!filled.ok) {
+    const remaining = claim && filled.reason === 'unconfirmed'
+      ? valuesFor(context.fields, identity, fillable).flatMap((value, index) => value ? [index] : [])
+      : covered
+    return ask({ mode: 'complete', ...(identity ? { username: identity } : {}), ...(account ? { accountId: account.id } : {}), covered: remaining }, context)
+  }
 
   // Only what went into the page counts: the browser may have written none of it.
   const wentIn = fieldsWentIn(filled.result, context.fields.length)
   // What went in is used; a held part the browser could not write is there for the next try.
   const usedHeld = fromHeld.filter((part) => context.fields.some((field, index) => partKeyOf(field) === part && wentIn[index]))
   if (claim) await settleHeldClaim(claim, usedHeld)
-  // Saved once filled: the step it was for did come.
   if (claim && held) await saveHeldParts({ claim, held, used: usedHeld, username: identity })
   if (identity) await rememberSignInIdentity(agentSlug, sessionId, site, identity)
   // Saved or held for this step: either way the account's password was tried

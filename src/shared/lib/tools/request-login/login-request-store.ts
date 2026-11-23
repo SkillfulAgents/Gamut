@@ -39,7 +39,8 @@ export type LoginRequestState =
   /** The user signs in through another account: `provider` is that account's username. */
   | { status: 'via'; provider: string }
   /** The browser had closed: nothing went into a page. `kept`: what the agent's next try signs in with. */
-  | { status: 'browser_closed'; kept: LoginKept | null }
+  | { status: 'browser_closed'; kept: LoginKept | null; saveError?: string }
+  | { status: 'fill_unconfirmed'; username: string }
   /** The picked account's saved session went in instead of its values (`restored` false: tried, and it did not). */
   | { status: 'session'; restored: boolean; username: string | null }
   /** A way to verify it's you, picked: clicked on the page (or, for a prompt on the user's device, answered). */
