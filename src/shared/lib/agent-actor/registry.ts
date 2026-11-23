@@ -12,7 +12,6 @@ import { getAgentWorkspaceDir } from '@shared/lib/utils/file-storage'
 import { syncAgentConnectionEnvironment } from '@shared/lib/container/connection-runtime-sync'
 import { loadDailyUsageData, loadSessionUsageTotals } from '@shared/lib/services/usage-service'
 import { localHostPort } from '@shared/lib/host/local-host-port'
-import { background } from '@shared/lib/background'
 import { LocalAgentActor, type LocalActorDeps } from './local-agent-actor'
 import { serializingActor } from './serializing-actor'
 import type { AgentState } from './agent-state'
@@ -97,30 +96,6 @@ export function createAgentRegistry(
     drop: (slug) => handles.get(slug)?.state.dropRuntime(),
   })
 
-  // Orders the re-arms' timeout reads: only the newest one to start re-arms.
-  let idleRearms = 0
-  const rearmIdleAlarms = (timeoutMs?: number): void => {
-    const rearm = ++idleRearms
-    if (timeoutMs !== undefined) {
-      for (const actor of handles.values()) actor.state.idleAlarm.rearm(timeoutMs)
-      return
-    }
-    if (handles.size === 0) return
-    background((async () => {
-      let read: number
-      try {
-        read = await deps.containerHost.autoSleepTimeoutMs()
-      } catch (error) {
-        // Each alarm keeps what it armed; its next mark or fire reads again.
-        console.error('[AgentRegistry] Could not read the auto-sleep timeout to re-arm the idle alarms:', error)
-        return
-      }
-      // A later re-arm started meanwhile decides instead.
-      if (rearm !== idleRearms) return
-      for (const actor of handles.values()) actor.state.idleAlarm.rearm(read)
-    })(), { name: 'agent-registry.rearm-idle-alarms' })
-  }
-
   // The routers over the actors' stores get the same: one directory each,
   // reading through the handles, so nothing is stored anywhere but on them.
   // A test double may not carry the port; the real routers do.
@@ -140,7 +115,6 @@ export function createAgentRegistry(
 
   return {
     get: (slug): AgentActor => outward(get(slug)),
-    rearmIdleAlarms,
     evict: async (slug) => evict(slug),
     evictAll: async () => {
       // Release every handle, its runtime with it. At shutdown the containers

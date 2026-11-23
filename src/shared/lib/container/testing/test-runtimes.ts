@@ -13,7 +13,6 @@
  *   agents.reset()  // between tests
  */
 import { ContainerWatch } from '../container-watch'
-import { IdleAlarm } from '../idle-alarm'
 import type { ContainerHost } from '../container-host'
 import type { ContainerRuntime, RuntimeAgent } from '../container-runtime'
 import type { RuntimeSessions } from '../agent-sessions-access'
@@ -59,7 +58,8 @@ export function attachTestRuntimes(host: ContainerHost): TestRuntimes {
     const given = parts(slug, self)
     const agent: RuntimeAgent = {
       sessions: NO_LIVE_SESSIONS,
-      idleAlarm: new IdleAlarm({ timeoutMs: async () => 0, lastActivityAt: () => undefined, isBusy: () => false, sleep: async () => {} }),
+      // No actor here, so nothing sleeps these containers.
+      idleAlarm: { arm: () => {}, disarm: () => {} },
       containerWatch: new ContainerWatch({ checkHealth: async () => {}, checkStatus: async () => {} }),
       instructions: async () => null,
       ...given,

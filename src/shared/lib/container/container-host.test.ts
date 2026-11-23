@@ -638,7 +638,7 @@ describe('ContainerRuntime.ensureRunning — mount volumes', () => {
     mockHealth.mockReturnValueOnce(new Promise((resolve) => { answer = resolve }))
     mockStop.mockResolvedValueOnce({ forceStopUsed: false, stopped: false })
     // The agent's alarm, as its actor would hold it.
-    const alarm = new IdleAlarm({ timeoutMs: async () => 30 * 60_000, lastActivityAt: () => agents.runtime('test-agent').sleepableSince(), isBusy: () => false, sleep: async () => {} })
+    const alarm = new IdleAlarm({ timeoutMs: async () => 30 * 60_000, lastActivityAt: () => agents.runtime('test-agent').sleepableSince(), isBusy: () => false, sleep: async () => {}, wakeAt: () => {}, cancelWake: () => {} })
     agents.drop('test-agent')
     const previous: TestRuntimeParts = agents.use((slug, self) => ({ ...previous(slug, self), idleAlarm: alarm }))
     const runtime = agents.runtime('test-agent')
@@ -652,7 +652,7 @@ describe('ContainerRuntime.ensureRunning — mount volumes', () => {
 
       await vi.waitFor(() => expect(alarm.isArmed()).toBe(true))
     } finally {
-      alarm.cancel()
+      alarm.disarm()
       agents.use(previous)
       agents.drop('test-agent')
     }

@@ -58,9 +58,9 @@ export interface AgentState {
   readonly deferredNaming: Set<string>
   /**
    * Puts the agent's container to sleep once it has been idle for the
-   * auto-sleep timeout. The container runtime arms it from its activity marks
-   * and cancels it when the container stops; the agent is busy while one of
-   * its live sessions is active or awaiting input.
+   * auto-sleep timeout. The container runtime tells it when the container is
+   * up and when it is down; the agent is busy while one of its live sessions
+   * is active or awaiting input.
    */
   readonly idleAlarm: IdleAlarm
   /**
@@ -209,7 +209,7 @@ export function releaseAgentState(state: AgentState): void {
   state.widgetRefreshes.dispose()
   state.mcpSessions.clear()
   state.deferredNaming.clear()
-  state.idleAlarm.cancel()
+  state.idleAlarm.disarm()
   state.containerWatch.stop()
   state.dropRuntime()
 }
