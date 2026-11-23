@@ -17,6 +17,7 @@ import { appendAttachedFiles } from '../utils/attached-files'
 import { heicUploadAsJpeg } from '@/api/routes/heic-jpeg'
 import { parseEmailIntegrationConfig, emailMessageSchema, emailSendSchema, type EmailMessage, type EmailSend } from './config-schema'
 import { EmailPolicyError, emailSessionAllowed, agentUserEmails, emailAddress, inboundAllowed, recipientAllowed, wasContacted } from './policy'
+import { runWithAgent } from '@shared/lib/platform-attribution/request-context'
 
 /** Provider-independent thread routing, admission, input framing and final-only delivery. */
 export abstract class EmailAgentIntegration extends AgentIntegration {
@@ -197,7 +198,7 @@ export abstract class EmailAgentIntegration extends AgentIntegration {
     const hash = createHash('sha256').update(JSON.stringify([this.record.id, context.sessionId, parentId, parts, turn.attachments])).digest('hex')
     const parent = await this.getMessage(parentId)
     const draft = output.type === 'message' ? { action: 'send', text: output.text }
-      : parts.length ? await composeEmailReply(parent, await this.getThread(parent.threadId), parts, turn.attachments.length)
+      : parts.length ? await runWithAgent(context.integration.agentSlug, async () => composeEmailReply(parent, await this.getThread(parent.threadId), parts, turn.attachments.length))
       : { action: 'send', text: 'Please find the attached files.' }
     if (draft.action === 'send') await this.send({ text: draft.text, attachmentIds: turn.attachments, replyToMessageId: parentId, idempotencyKey: hash })
   }

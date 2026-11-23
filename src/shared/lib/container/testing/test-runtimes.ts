@@ -61,7 +61,7 @@ export function attachTestRuntimes(host: ContainerHost): TestRuntimes {
       sessions: NO_LIVE_SESSIONS,
       idleAlarm: new IdleAlarm({ timeoutMs: async () => 0, lastActivityAt: () => undefined, isBusy: () => false, sleep: async () => {} }),
       containerWatch: new ContainerWatch({ checkHealth: async () => {}, checkStatus: async () => {} }),
-      instructions: async () => null,
+      displayName: async () => null,
       ...given,
     }
     runtime = host.createRuntime(slug, agent)

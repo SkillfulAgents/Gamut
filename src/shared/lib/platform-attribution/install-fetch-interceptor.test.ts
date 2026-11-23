@@ -27,7 +27,13 @@ vi.mock('@shared/lib/db/schema', () => ({
 
 vi.mock('drizzle-orm', () => ({ eq: () => '=', and: () => '&', desc: () => 'DESC' }))
 
-import { runWithRequestUser } from './index'
+const mockAgentRecord = vi.fn()
+vi.mock('@shared/lib/agent-actor/agent-catalog', () => ({
+  agentCatalog: { get: (slug: string) => mockAgentRecord(slug) },
+}))
+
+import { runOutsideAttribution, runWithRequestUser } from './index'
+import { runWithAgent } from './request-context'
 import {
   _uninstallPlatformFetchInterceptorForTest,
   installPlatformFetchInterceptor,
@@ -128,5 +134,86 @@ describe('installPlatformFetchInterceptor', () => {
     for (const [, init] of realFetchMock.mock.calls) {
       expect(new Headers((init as RequestInit).headers).get('Authorization')).toBe(`Bearer ${ORG_TOKEN}::sub_alice`)
     }
+  })
+})
+
+describe('agent on platform calls', () => {
+  const sent = () => new Headers((realFetchMock.mock.calls[0][1] as RequestInit).headers)
+
+  beforeEach(() => {
+    mockAgentRecord.mockReset()
+    mockAgentRecord.mockResolvedValue({ slug: 'abc', name: 'Analytics Tzar 📊' })
+  })
+
+  it('sends the agent and its name from the agent list, beside the attribution', async () => {
+    await runWithRequestUser('user_alice', () => runWithAgent('abc', () => fetch('https://proxy.test/v1/exa/search')))
+    expect(sent().get('X-Superagent-Agent-Id')).toBe('abc')
+    expect(sent().get('X-Superagent-Agent-Name')).toBe(encodeURIComponent('Analytics Tzar 📊'))
+    expect(sent().get('Authorization')).toBe(`Bearer ${ORG_TOKEN}::sub_alice`)
+  })
+
+  it('replaces agent headers a caller passed, and drops them when no agent is in scope', async () => {
+    const forged = { 'x-superagent-agent-id': 'evil', 'X-Superagent-Agent-Name': 'Evil' }
+    await runWithAgent('abc', () => fetch('https://proxy.test/v1/exa/search', { headers: forged }))
+    await fetch('https://proxy.test/v1/exa/search', { headers: { ...forged, Authorization: 'Bearer own-key', 'X-Other': 'kept' } })
+    expect(sent().get('X-Superagent-Agent-Id')).toBe('abc')
+    expect(sent().get('X-Superagent-Agent-Name')).toBe(encodeURIComponent('Analytics Tzar 📊'))
+    const unscoped = new Headers((realFetchMock.mock.calls[1][1] as RequestInit).headers)
+    expect(unscoped.get('X-Superagent-Agent-Id')).toBeNull()
+    expect(unscoped.get('X-Superagent-Agent-Name')).toBeNull()
+    expect(unscoped.get('Authorization')).toBe('Bearer own-key')
+    expect(unscoped.get('X-Other')).toBe('kept')
+  })
+
+  it('leaves an opaque access key as the caller set it, and still sends the agent', async () => {
+    mockGetPlatformAccessToken.mockReturnValue('plat_sa_opaque_key')
+    await runWithRequestUser('user_alice', () => runWithAgent('abc', () => fetch('https://proxy.test/v1/exa/search', { headers: { Authorization: 'Bearer recall-owner-key' } })))
+    expect(sent().get('Authorization')).toBe('Bearer recall-owner-key')
+    expect(sent().get('X-Superagent-Agent-Id')).toBe('abc')
+  })
+
+  it('cleans the name the way the container does', async () => {
+    mockAgentRecord.mockResolvedValue({ slug: 'abc', name: 'Sales\n  Bot' })
+    await runWithAgent('abc', () => fetch('https://proxy.test/v1/exa/search'))
+    expect(sent().get('X-Superagent-Agent-Name')).toBe('Sales%20Bot')
+  })
+
+  it('rewrites a scoped org call to the acting member and leaves a detached call its own bearer, agent or not', async () => {
+    await runWithRequestUser('user_alice', () => runWithAgent('abc', () => fetch('https://proxy.test/v1/recall', { headers: { Authorization: 'Bearer other' } })))
+    await runWithRequestUser('user_alice', () => runWithAgent('abc', () => runOutsideAttribution(() => fetch('https://proxy.test/v1/webhook-events', { headers: { Authorization: 'Bearer relay::m1' } }))))
+    expect(sent().get('Authorization')).toBe(`Bearer ${ORG_TOKEN}::sub_alice`)
+    expect(sent().get('X-Superagent-Agent-Id')).toBe('abc')
+    const detached = new Headers((realFetchMock.mock.calls[1][1] as RequestInit).headers)
+    expect(detached.get('Authorization')).toBe('Bearer relay::m1')
+    expect(detached.get('X-Superagent-Agent-Id')).toBeNull()
+  })
+
+  it('follows the token in use, not the one at install', async () => {
+    mockGetPlatformAccessToken.mockReturnValue('plat_sa_opaque_key')
+    await runWithRequestUser('user_alice', () => fetch('https://proxy.test/v1/exa/search', { headers: { Authorization: 'Bearer own-key' } }))
+    mockGetPlatformAccessToken.mockReturnValue(ORG_TOKEN)
+    await runWithRequestUser('user_alice', () => fetch('https://proxy.test/v1/exa/search', { headers: { Authorization: 'Bearer own-key' } }))
+    expect(sent().get('Authorization')).toBe('Bearer own-key')
+    expect(new Headers((realFetchMock.mock.calls[1][1] as RequestInit).headers).get('Authorization')).toBe(`Bearer ${ORG_TOKEN}::sub_alice`)
+  })
+
+  it('tags the inner agent when scopes nest, and none outside attribution', async () => {
+    await runWithAgent('a', () => runWithAgent('b', () => fetch('https://proxy.test/v1/messages')))
+    await runWithAgent('a', () => runOutsideAttribution(() => fetch('https://proxy.test/v1/messages')))
+    expect(sent().get('X-Superagent-Agent-Id')).toBe('b')
+    expect(new Headers((realFetchMock.mock.calls[1][1] as RequestInit).headers).get('X-Superagent-Agent-Id')).toBeNull()
+  })
+
+  it.each([['fails', () => mockAgentRecord.mockRejectedValue(new Error('db down'))], ['finds no agent', () => mockAgentRecord.mockResolvedValue(null)]])(
+    'sends the id alone when the name lookup %s, and the call still goes out', async (_case, arrange) => {
+      arrange()
+      await runWithAgent('abc', () => fetch('https://proxy.test/v1/exa/search'))
+      expect(sent().get('X-Superagent-Agent-Id')).toBe('abc')
+      expect(sent().get('X-Superagent-Agent-Name')).toBeNull()
+    })
+
+  it('leaves calls to other hosts alone', async () => {
+    await runWithAgent('abc', () => fetch('https://example.com/x'))
+    expect(realFetchMock.mock.calls[0][1]).toBeUndefined()
   })
 })

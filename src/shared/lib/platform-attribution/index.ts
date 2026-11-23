@@ -94,12 +94,16 @@ class PlatformAttribution implements Attribution {
   }
 }
 
-async function buildAttribution(memberId: string | null, settings?: AttributionSettings): Promise<Attribution | null> {
+// The member is read only for an org token: an opaque key carries none.
+async function buildAttribution(
+  member: string | null | (() => Promise<string | null>),
+  settings?: AttributionSettings,
+): Promise<Attribution | null> {
   const token = await platformToken(settings)
   if (!token) return null
-  const orgScoped = decodeOrgIdFromToken(token) !== null
-  if (orgScoped && !memberId) return null
-  return new PlatformAttribution(token, memberId, orgScoped)
+  if (decodeOrgIdFromToken(token) === null) return new PlatformAttribution(token, null, false)
+  const memberId = typeof member === 'function' ? await member() : member
+  return memberId ? new PlatformAttribution(token, memberId, true) : null
 }
 
 const attributionContext = new AsyncLocalStorage<{ auth: Attribution }>()
@@ -129,7 +133,7 @@ export function runOutsideAttribution<T>(fn: () => T): T {
 // platform call in one request (the fetch interceptor runs per call) shares it,
 // and the next request resolves again (see requestScopedAttribution).
 function fromCurrentRequest(): Promise<Attribution | null> {
-  return requestScopedAttribution(async (userId) => buildAttribution(await resolveMemberIdForUserId(userId)))
+  return requestScopedAttribution((userId) => buildAttribution(() => resolveMemberIdForUserId(userId)))
 }
 
 // True when the active platform token is an org JWT, so every proxy call must

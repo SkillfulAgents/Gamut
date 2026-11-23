@@ -139,4 +139,21 @@ describe('IsAgent attribution scope', () => {
     const headers = new Headers((init as RequestInit).headers)
     expect(headers.get('Authorization')).toBe(`Bearer ${token}::sub_member_1`)
   })
+
+  it('tags platform fetches with the agent on a single-user install, where no user scope opens', async () => {
+    mockIsAuthMode.mockReturnValue(false)
+    mockGetPlatformAccessToken.mockReturnValue('plat_sa_opaque_key')
+    globalThis.fetch = realFetchMock as unknown as typeof fetch
+    installPlatformFetchInterceptor()
+
+    const app = new Hono()
+    app.use('*', IsAgent())
+    app.get('/x', async (c) => {
+      await fetch('https://proxy.test/v1/exa/search', { method: 'POST' })
+      return c.json({ ok: true })
+    })
+    await app.request('http://localhost/x', { headers: { Authorization: 'Bearer proxy-token-abc' } })
+    const headers = new Headers((realFetchMock.mock.calls[0][1] as RequestInit).headers)
+    expect(headers.get('X-Superagent-Agent-Id')).toBe('my-agent')
+  })
 })

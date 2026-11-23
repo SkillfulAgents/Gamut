@@ -8,6 +8,7 @@ import { ComputerUsePermissionManager } from '@shared/lib/computer-use/permissio
 import type { AgentRuntimes } from '@shared/lib/container/container-host'
 import type { RuntimeAgent } from '@shared/lib/container/container-runtime'
 import { createAgentRegistry } from './registry'
+import { agentCatalog } from './agent-catalog'
 import { LiveSessions } from './live/live-sessions'
 import type { AgentState } from './agent-state'
 import type { LocalActorDeps, LocalAgentActor } from './local-agent-actor'
@@ -238,7 +239,7 @@ describe('createAgentRegistry', () => {
     expect(a.memories).not.toBe(b.memories)
     for (const runtime of fake.runtimes.values()) expect(runtime.ensureRunning).not.toHaveBeenCalled()
   })
-  it('hands its runtime the agent\'s own live sessions, idle alarm, watch and instructions', async () => {
+  it('hands its runtime the agent\'s own live sessions, idle alarm, watch and name', async () => {
     const registry = createAgentRegistry(fake.deps)
     const actor = registry.get('a') as LocalAgentActor
     actor.state.runtime()
@@ -248,10 +249,11 @@ describe('createAgentRegistry', () => {
     expect(agent.sessions).toBe(actor.state.sessions)
     expect(agent.idleAlarm).toBe(actor.state.idleAlarm)
     expect(agent.containerWatch).toBe(actor.state.containerWatch)
-    // Instructions are the actor's config document.
-    const getDoc = vi.spyOn(actor.config, 'get').mockResolvedValue('---\nname: A\n---\n')
-    expect(await agent.instructions()).toBe('---\nname: A\n---\n')
-    expect(getDoc).toHaveBeenCalledWith('instructions')
+    // The name is the agent list's, not the instructions document's.
+    const get = vi.spyOn(agentCatalog, 'get').mockResolvedValue({ name: 'A' } as Awaited<ReturnType<typeof agentCatalog.get>>)
+    expect(await agent.displayName()).toBe('A')
+    expect(get).toHaveBeenCalledWith('a')
+    get.mockRestore()
   })
 
   describe('the container host reaches the actors\' runtimes', () => {

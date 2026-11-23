@@ -36,6 +36,7 @@ import { getCurrentUserId } from '@shared/lib/auth/config'
 import { logAuditEvent } from '@shared/lib/services/audit-log-service'
 import { deliverSessionWake } from '@shared/lib/scheduler/wake-delivery'
 import { Authenticated, EntityAgentRole } from '../middleware/auth'
+import { runWithAgent } from '@shared/lib/platform-attribution/request-context'
 
 const scheduledTasksRouter = new Hono()
 
@@ -354,7 +355,7 @@ scheduledTasksRouter.post('/:taskId/describe-schedule', TaskAgentRole('viewer'),
     }
 
     const { client, model } = await getConfiguredLlmClientAndModel()
-    const description = await createSummarizerText(client, {
+    const description = await runWithAgent(task.agentSlug, () => createSummarizerText(client, {
       model,
       messages: [
         {
@@ -369,7 +370,7 @@ Examples:
 "0 0 1 * *" → "First day of every month at midnight"`,
         },
       ],
-    })
+    }))
     if (!description) {
       return c.json({ error: 'Failed to generate description' }, 500)
     }
@@ -396,7 +397,7 @@ scheduledTasksRouter.post('/:taskId/parse-schedule', TaskAgentRole('user'), asyn
     }
 
     const { client, model } = await getConfiguredLlmClientAndModel()
-    const expression = await createSummarizerText(client, {
+    const expression = await runWithAgent(task.agentSlug, () => createSummarizerText(client, {
       model,
       messages: [
         {
@@ -411,7 +412,7 @@ Examples:
 "First day of every month at midnight" → 0 0 1 * *`,
         },
       ],
-    })
+    }))
     if (!expression) {
       return c.json({ error: 'Failed to generate cron expression' }, 500)
     }

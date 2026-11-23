@@ -296,14 +296,14 @@ describe('ContainerRuntime.ensureRunning — env var construction', () => {
     expect(mockGetOrCreateHostToken).toHaveBeenCalledWith('test-agent')
   })
 
-  describe('what a start takes from the agent workspace, through its actor', () => {
-    const instructions = vi.fn<(slug: string) => Promise<string | null>>()
+  describe('the display name a start takes, through its actor', () => {
+    const displayName = vi.fn<(slug: string) => Promise<string | null>>()
     let previous: TestRuntimeParts
 
     beforeEach(() => {
-      instructions.mockReset().mockResolvedValue(null)
+      displayName.mockReset().mockResolvedValue(null)
       agents.drop('test-agent')
-      previous = agents.use((slug) => ({ ...previous(slug, () => agents.runtime(slug)), instructions: () => instructions(slug) }))
+      previous = agents.use((slug) => ({ ...previous(slug, () => agents.runtime(slug)), displayName: () => displayName(slug) }))
     })
 
     afterEach(() => {
@@ -340,16 +340,16 @@ describe('ContainerRuntime.ensureRunning — env var construction', () => {
       expect(mockStart.mock.calls[0][0].envVars.BROWSER_HIGH_DPI).toBeUndefined()
     })
 
-    it('hands the display name from the instructions to the start, and starts without one when reading fails', async () => {
+    it('hands the agent list name to the start, cleaned for the env file, and starts without one when reading fails', async () => {
       setupAccountMocks([])
-      instructions.mockResolvedValue('---\nname: My Agent\n---\nBody')
+      displayName.mockResolvedValue('My\nAgent')
       await agents.runtime('test-agent').ensureRunning()
-      expect(instructions).toHaveBeenCalledWith('test-agent')
+      expect(displayName).toHaveBeenCalledWith('test-agent')
       expect(mockStart.mock.calls[0][0].agentName).toBe('My Agent')
 
       agents.drop('test-agent')
       mockStart.mockClear()
-      instructions.mockRejectedValue(new Error('workspace unreachable'))
+      displayName.mockRejectedValue(new Error('database unreachable'))
       await agents.runtime('test-agent').ensureRunning()
       expect(mockStart).toHaveBeenCalledOnce()
       expect(mockStart.mock.calls[0][0].agentName).toBeUndefined()

@@ -59,9 +59,28 @@ export function getRequestUserId(): string | undefined {
   return userContext.getStore()?.userId
 }
 
-// fn, and everything it schedules, runs with no request user.
+// The agent whose work this is, apart from who is billed for it: an attribution
+// override keeps it, and an agent on a single-user install, with no request
+// user, still has it.
+const agentContext = new AsyncLocalStorage<{ agentSlug: string }>()
+
+/**
+ * Run fn, and every async operation it schedules, as work for this agent, so
+ * the platform calls it makes carry the agent (install-fetch-interceptor.ts).
+ * The slug must come from what the app checked or stored: a validated proxy
+ * token, an integration or task record. An inner scope wins over an outer one.
+ */
+export function runWithAgent<T>(agentSlug: string | null | undefined, fn: () => T): T {
+  return agentSlug ? agentContext.run({ agentSlug }, fn) : fn()
+}
+
+export function currentAgentSlug(): string | null {
+  return agentContext.getStore()?.agentSlug ?? null
+}
+
+// fn, and everything it schedules, runs with no request user and no agent.
 export function runOutsideRequestUser<T>(fn: () => T): T {
-  return userContext.exit(fn)
+  return userContext.exit(() => agentContext.exit(fn))
 }
 
 /**

@@ -139,6 +139,13 @@ describe('requireAgentCaller', () => {
     expect(await (await app.request('/', { headers: bearer('other-token') })).json()).toEqual({ caller: 'other' })
   })
 
+  it("runs the route as the caller's work, so its platform calls carry the caller", async () => {
+    const { currentAgentSlug } = await import('@shared/lib/platform-attribution/request-context')
+    const app = whoAmI().use('*', requireAgentCaller).get('/', c => c.json({ agent: currentAgentSlug() }))
+
+    expect(await (await app.request('/', { headers: bearer('agent-token') })).json()).toEqual({ agent: 'agent' })
+  })
+
   it('does not take a caller another middleware left on the context for a validated one', async () => {
     const app = whoAmI()
       .use('*', async (c, next) => { c.set('callerSlug', 'victim'); await next() })

@@ -2151,8 +2151,8 @@ export abstract class BaseContainerClient extends EventEmitter implements Contai
 
   // Who this container belongs to, for providers that attribute LLM usage per
   // agent. The display name arrives with each start (StartOptions.agentName),
-  // read by the caller through the agent's actor, so a rename takes effect on
-  // the next restart and the runtime never reads the workspace itself.
+  // read by the caller from the agent list, so a rename takes effect on the
+  // next restart.
   protected agentIdentityForEnv(agentName?: string): AgentIdentity {
     return {
       id: this.config.agentId,
