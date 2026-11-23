@@ -156,24 +156,6 @@ export async function runHostToolInTaskManager(env: Pick<Env, 'TASK_MANAGER' | '
 }
 
 /**
- * Whether webhooks can be received, as the relay in the task manager object sees it. An agent's
- * container start reads it for its webhook tools. A failed read (the object restarting after a
- * deploy) counts as unavailable: the agent starts without webhook tools rather than not at all.
- */
-export async function webhookRelayAvailableInTaskManager(env: Pick<Env, 'TASK_MANAGER' | 'VERSION'>): Promise<boolean> {
-  try {
-    const own = servingTaskManager()
-    if (own) return await own.webhookRelayAvailable()
-    await reachCurrentCode(env.TASK_MANAGER, OBJECT_NAME, env.VERSION?.timestamp)
-    return await env.TASK_MANAGER.getByName(OBJECT_NAME).webhookRelayAvailable()
-  } catch (error) {
-    console.warn('[task-manager] reading the webhook relay status failed; the agent starts without webhook tools:', error)
-    captureException(error, { level: 'warning', tags: { component: 'task-manager', operation: 'webhook-relay-status' } })
-    return false
-  }
-}
-
-/**
  * Resolves once the org's database is at this deploy's schema and data. The task manager object
  * migrates it once per deploy.
  */
@@ -326,13 +308,6 @@ export class TaskManagerDurableObject extends DurableObject<Env> {
   async runHostTool(request: HostToolRequest): Promise<HostToolResult> {
     await this.start()
     return serving.run(this, async () => (await import('@shared/lib/host/tools')).runHostTool(request))
-  }
-
-  /** Whether the relay here can receive webhooks (webhookRelayAvailableInTaskManager). */
-  async webhookRelayAvailable(): Promise<boolean> {
-    await this.start()
-    const { getWebhookRelay } = await import('@shared/lib/webhook-relay')
-    return getWebhookRelay().snapshot().available
   }
 
   /** An API request that needs the services running here (serveInTaskManager). */

@@ -81,9 +81,6 @@ export class ContainerHost {
       get onBeforeContainerStop() {
         return self.onBeforeContainerStop
       },
-      get webhookRelayAvailable() {
-        return self.webhookRelayAvailable
-      },
       afterForceStop: (slug: string) => self.afterForceStop(slug),
     }
   })()

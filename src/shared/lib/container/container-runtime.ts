@@ -80,8 +80,6 @@ export interface RuntimeHost {
    * readiness so the VM restarts.
    */
   afterForceStop(slug: string): void
-  /** Whether webhooks can be received, as the process that runs the webhook relay sees it; null: the relay of this process. */
-  readonly webhookRelayAvailable: (() => Promise<boolean>) | null
 }
 
 /** What a runtime needs from its agent, which the agent's actor holds. */

@@ -12,7 +12,13 @@ import { sleepingStoreOn } from '../cloudflare-container-control'
 vi.mock('@shared/lib/error-reporting', () => ({ captureException: vi.fn() }))
 // The app must not boot to list a sleeping agent: its session index is in the object's own SQLite.
 const { boot, syncAgentStatus } = vi.hoisted(() => ({ boot: vi.fn(), syncAgentStatus: vi.fn(async () => {}) }))
-vi.mock('../boot', () => ({ boot, syncAgentStatus, runAgentActorOp: async () => ({ value: 'from the actor' }), autoSleepTimeoutMs: async () => 30 * 60_000 }))
+vi.mock('../boot', () => ({
+  boot,
+  syncAgentStatus,
+  runAgentActorOp: async () => ({ value: 'from the actor' }),
+  ownAgentActor: () => ({ waitIdleWith: vi.fn(), idleWaitEnded: vi.fn(async () => {}) }),
+  autoSleepTimeoutMs: async () => 30 * 60_000,
+}))
 
 // Workers' FixedLengthStream, which Node lacks: here a pass-through.
 beforeAll(() => {

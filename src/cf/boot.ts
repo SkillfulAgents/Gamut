@@ -24,26 +24,25 @@ import { initializeServices, prepareDeployment, prepareProcess, registerBackgrou
 import { captureException } from '@shared/lib/error-reporting'
 import { initializeBackgroundWork, isBackgroundWorkInitialized, taskManager } from '@shared/lib/background-work'
 import { getErrorReporter, initErrorReporting } from '@shared/lib/error-reporting'
-import { agentRegistry, containerHost } from '@shared/lib/agent-actor'
+import { agentRegistry } from '@shared/lib/agent-actor'
 import { setActorDeps } from '@shared/lib/agent-actor/registry'
 import { setWorkspaceRemoval } from '@shared/lib/agent-actor/workspace-removal'
 import { createProcessHostPort } from '@shared/lib/host/local-host-port'
 import { createConfigOps } from '@shared/lib/agent-actor/config-ops'
 import { CLI_TRANSCRIPTS_DIR, type SessionStore } from '@shared/lib/agent-actor/session-store'
 import type { AgentSlug } from '@shared/lib/agent-actor/types'
-import type { SessionStoreHooks } from '@shared/lib/agent-actor/local-agent-actor'
+import { LocalAgentActor, type SessionStoreHooks } from '@shared/lib/agent-actor/local-agent-actor'
 import { SessionIndex } from '@shared/lib/agent-actor/session-index'
 import { ingestSessionMetadataFile } from '@shared/lib/services/session-metadata-file'
 // eslint-disable-next-line local-rules/no-agent-internals-outside-actor -- the agent's object sets its container's inactivity timeout from the same timeout the alarm reads
-import { autoSleepTimeoutMsFrom } from '@shared/lib/container/container-runtime'
-import { processIdleTimer, type IdleTimer } from '@shared/lib/container/idle-alarm'
+import { autoSleepTimeoutMsFrom } from '@shared/lib/container/idle-alarm'
 import type { ExecutionContext, SqlStorage } from 'cloudflare:workers'
 import { CloudflareAppState } from './objects/cloudflare-app-state'
 import { CloudflareBlobStore, CloudflareUploadByteStore } from './cloudflare-host-files'
 import { CloudflareImageService } from './cloudflare-image-service'
 import { createCloudflareErrorReporter } from './lib/cloudflare-error-reporting'
 import { CloudflareKeyManager } from './cloudflare-key-manager'
-import { CloudflareTaskManager, announceSessionStart, runHostToolInTaskManager, webhookRelayAvailableInTaskManager } from './objects/cloudflare-task-manager'
+import { CloudflareTaskManager, announceSessionStart, runHostToolInTaskManager } from './objects/cloudflare-task-manager'
 import { agentContainers, withAgentObject, sleepingStore } from './cloudflare-container-control'
 import { installCloudflareContainers } from '@shared/lib/container/cloudflare-container-runtime'
 import { createCloudflareFileOps } from './cloudflare-file-ops'
@@ -111,32 +110,11 @@ export async function syncAgentStatus(slug: AgentSlug): Promise<void> {
   await agentRegistry.get(slug).container.syncStatus()
 }
 
-/**
- * The agent's idle check, in its own object, when the object's alarm goes off: the agent's idle
- * alarm decides, and puts the agent to sleep or sets the next check (agentIdleTimer).
- */
-export async function checkIdle(slug: AgentSlug): Promise<void> {
-  await agentRegistry.get(slug).container.checkIdle()
-}
-
-/**
- * What the agent's idle alarm waits with. In the agent's own object it is the object's alarm,
- * which outlives this isolate; when it goes off, the object runs checkIdle. Anywhere else, this
- * isolate's timer.
- */
-function agentIdleTimer(slug: AgentSlug): IdleTimer {
-  const here = processIdleTimer()
-  return {
-    set(ms, fire) {
-      const own = servingAgentObject(slug)
-      if (own) own.scheduleIdleCheckBy(Date.now() + ms)
-      else here.set(ms, fire)
-    },
-    clear() {
-      here.clear()
-      void servingAgentObject(slug)?.cancelIdleCheck()
-    },
-  }
+/** The agent's actor object, used directly only inside the agent's own object (cloudflare-agent.ts). */
+export function ownAgentActor(slug: AgentSlug): LocalAgentActor {
+  const actor = agentRegistry.get(slug)
+  if (!servingAgentObject(slug) || !(actor instanceof LocalAgentActor)) throw new Error(`The actor of agent ${slug} is used directly only inside its own object`)
+  return actor
 }
 
 /** The agent auto-sleep timeout in the org's settings; 0 when auto-sleep is off. */
@@ -264,7 +242,6 @@ function wireAgents(env: Env): void {
       announceSessionStart: (slug, sessionId) => announceSessionStart(env, slug, sessionId),
       runHostTool: (request) => runHostToolInTaskManager(env, request),
     }),
-    idleTimer: agentIdleTimer,
   })
   // A deleted agent's saved files are in its object and R2, not in a directory here. They are removed
   // after the answer, by a task that is tried again if it fails: the purge lists and deletes every
@@ -272,7 +249,6 @@ function wireAgents(env: Env): void {
   setWorkspaceRemoval(async (slug) => {
     await taskManager().at(Date.now(), `${PURGE_WORKSPACE_TASK}:${slug}`, { taskType: PURGE_WORKSPACE_TASK, payload: { slug } })
   })
-  containerHost.useWebhookRelayStatus(() => webhookRelayAvailableInTaskManager(env))
 }
 
 /** The SQLite of the agent's object, where its session index is kept. The actor that uses the index runs only in that object. */

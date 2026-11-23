@@ -283,16 +283,9 @@ export interface ContainerOps {
   /** `containerManager.keepAlive` */
   keepAlive(): Promise<void>
   /**
-   * Decide now whether the idle container sleeps, as the agent's idle alarm
-   * does when its wait ends: a deployment whose wait outlives the process
-   * (see `LocalActorDeps.idleTimer`) calls this when the wait goes off.
-   */
-  checkIdle(): Promise<void>
-  /**
-   * Read now whether the container runs, and update what the app shows. A
-   * container whose runner hears it exit (`ContainerClient.reportsExits`) is
-   * not polled: its deployment calls this when it exits, and when a new
-   * process first serves the agent.
+   * Read now whether the container runs, and update what the app shows. For a
+   * deployment that hears the container exit instead of polling it: it calls
+   * this when the container exits, and when a new process first serves the agent.
    */
   syncStatus(): Promise<void>
   /** `containerManager.getCachedInfo` — the cached status; no runtime is queried. */

@@ -28,7 +28,7 @@ vi.mock('@shared/lib/host/tools', () => ({ runHostTool: hostTools.runHostTool })
 const relay = vi.hoisted(() => ({ available: false }))
 vi.mock('@shared/lib/webhook-relay', () => ({ getWebhookRelay: () => ({ snapshot: () => ({ available: relay.available }) }) }))
 
-import { CloudflareTaskManager, DeployStepNotReady, TaskManagerDurableObject, announceSessionStart, runHostToolInTaskManager, servingTaskManager, webhookRelayAvailableInTaskManager, ensureMigrated, ensureOrgPrepared, needsLiveConnections, prepareDeploy, serveInTaskManager } from './cloudflare-task-manager'
+import { CloudflareTaskManager, DeployStepNotReady, TaskManagerDurableObject, announceSessionStart, runHostToolInTaskManager, servingTaskManager, ensureMigrated, ensureOrgPrepared, needsLiveConnections, prepareDeploy, serveInTaskManager } from './cloudflare-task-manager'
 import type { Env } from '../index'
 import { captureException } from '@shared/lib/error-reporting'
 
@@ -550,23 +550,6 @@ describe("an agent session's host tools", () => {
   })
 })
 
-describe("the webhook relay's status for an agent's container start", () => {
-  it('is read from the relay in the task manager object, after its services started', async () => {
-    app.startBackgroundServices.mockClear()
-    const { object } = testObject()
-    managerFor(object)
-    const objects = { getByName: () => object } as unknown as DurableObjectNamespace<TaskManagerDurableObject>
-
-    relay.available = true
-    expect(await webhookRelayAvailableInTaskManager({ TASK_MANAGER: objects })).toBe(true)
-    relay.available = false
-    expect(await webhookRelayAvailableInTaskManager({ TASK_MANAGER: objects })).toBe(false)
-
-    expect(app.startBackgroundServices).toHaveBeenCalledTimes(1)
-    object.stopDispatch()
-  })
-})
-
 describe('requests that need the live chat connections', () => {
   it('names the routes that read or change a connection, and no other', () => {
     for (const path of [
@@ -721,16 +704,5 @@ describe('migrating the database', () => {
     await Promise.all([ensureMigrated({ TASK_MANAGER: objects }), ensureOrgPrepared({ TASK_MANAGER: objects })])
     expect(app.migrateDatabase).toHaveBeenCalledTimes(1)
     expect(app.prepareOrg).toHaveBeenCalledTimes(1)
-  })
-})
-
-describe('webhookRelayAvailableInTaskManager when the read fails', () => {
-  it('counts a failed read of the relay status as unavailable, so the container still starts', async () => {
-    vi.spyOn(console, 'warn').mockImplementation(() => {})
-    const env = {
-      TASK_MANAGER: { getByName: () => ({ webhookRelayAvailable: async () => { throw new Error('internal error; reference = abc') } }) },
-    } as unknown as Env
-
-    expect(await webhookRelayAvailableInTaskManager(env)).toBe(false)
   })
 })

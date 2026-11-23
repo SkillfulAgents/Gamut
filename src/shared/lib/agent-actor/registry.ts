@@ -131,7 +131,7 @@ if (process.env.NODE_ENV !== 'production') {
   globalForRegistry.agentActorStates = agentActorStates
 }
 
-type ReplacedActorDeps = Required<Pick<LocalActorDeps, 'host' | 'createSessionStore' | 'idleTimer'>> & {
+type ReplacedActorDeps = Required<Pick<LocalActorDeps, 'host' | 'createSessionStore'>> & {
   /** What `get` hands out in place of the actor in this process, such as a client of the agent's actor in another process. */
   transport: (actor: AgentActor) => AgentActor
 }
@@ -140,10 +140,9 @@ let replaced: ReplacedActorDeps | undefined
 
 /**
  * Replaces the actor dependencies a runtime whose agents run outside this
- * process provides itself: their host, where their files are, what their idle
- * alarms wait with, and how `get` reaches them. Called once at boot, before
- * the first `get`: a handle already handed out keeps what it was made with.
- * Desktop and the Node server replace none.
+ * process provides itself: their host, where their files are, and how `get`
+ * reaches them. Called once at boot, before the first `get`: a handle already
+ * handed out keeps what it was made with. Desktop and the Node server replace none.
  */
 export function setActorDeps(deps: ReplacedActorDeps): void {
   replaced = deps

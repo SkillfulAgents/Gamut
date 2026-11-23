@@ -5,6 +5,8 @@ import { autoSleepTimeoutMsFrom } from '@shared/lib/container/idle-alarm'
 import { processTimer } from '@shared/lib/container/process-timer'
 import { getSettings } from '@shared/lib/config/settings'
 import type { ContainerRuntime } from '@shared/lib/container/container-runtime'
+import { autoSleepTimeoutMsFrom, processIdleTimer, type IdleTimer } from '@shared/lib/container/idle-alarm'
+import { getSettings } from '@shared/lib/config/settings'
 import type { ContainerClient } from '@shared/lib/container/types'
 import type { userInputRequestManager } from '@shared/lib/tools/requests/request-manager'
 import type { reviewManager } from '@shared/lib/proxy/review-manager'
@@ -199,7 +201,7 @@ export class LocalAgentActor implements AgentActor {
     this.memories = createMemoryOps(this.store.files)
     this.config = this.store.config
     this.live = async () => liveSummary(slug, this.state, deps)
-    this.container = createContainerOps(slug, this.state, deps)
+    this.container = createContainerOps(slug, runtime, deps)
     const delivery = createSessionDelivery(slug, this.store, this.state.sessions, runtime, deps)
     this.sessions = createSessionOps(slug, this.store, this.state, delivery, deps)
     this.messages = createMessageOps(slug, this.store, this.state, delivery, deps)
@@ -323,8 +325,7 @@ function liveSummary(slug: AgentSlug, state: AgentState, deps: LocalActorDeps): 
   }
 }
 
-function createContainerOps(slug: AgentSlug, state: AgentState, deps: LocalActorDeps): ContainerOps {
-  const runtime = () => state.runtime()
+function createContainerOps(slug: AgentSlug, runtime: () => ContainerRuntime, deps: LocalActorDeps): ContainerOps {
   const client = () => runtime().getClient()
   return {
     start: async () => {
@@ -332,7 +333,6 @@ function createContainerOps(slug: AgentSlug, state: AgentState, deps: LocalActor
     },
     stop: (...args) => runtime().stopContainer(...args),
     keepAlive: async () => runtime().keepAlive(),
-    checkIdle: () => state.idleAlarm.fire(),
     syncStatus: async () => {
       await runtime().syncAgentStatus()
     },

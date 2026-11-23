@@ -23,6 +23,8 @@ import { ASLEEP_HEADER, sleepingStoreOn, type AgentCalls, type ByteRange, type S
 import { WorkspaceFileError } from '@shared/lib/agent-actor/workspace-path'
 import type { AgentListing, AgentLiveSummary } from '@shared/lib/agent-actor/types'
 import { runAsAgentObject, type ActorOutcome } from './cloudflare-agent-actor'
+import type { LocalAgentActor } from '@shared/lib/agent-actor/local-agent-actor'
+import type { IdleTimer } from '@shared/lib/container/idle-alarm'
 import { checkedCall, restartIfOlder, type Checked, type Restarting } from '../lib/object-version'
 import { needsLiveConnections, serveInTaskManager } from './cloudflare-task-manager'
 import { captureException } from '@shared/lib/error-reporting'
@@ -187,6 +189,13 @@ export class AgentDurableObject extends DurableObject<Env> {
   private idleCheckFailures = 0
   /** When this instance last set the object's alarm for; null when it set none, or it went off. */
   private idleCheckAt: number | null = null
+  /** What the actor's idle alarm waits with: this object's alarm, which outlives the isolate. */
+  private readonly idleWait: IdleTimer = {
+    set: (ms) => this.scheduleIdleCheckBy(Date.now() + ms),
+    clear: () => {
+      this.cancelIdleCheck().catch((error: unknown) => console.error(`[AgentDurableObject ${this.agentName()}] cancelling the idle check failed:`, error))
+    },
+  }
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, nearStorage(env))
@@ -205,15 +214,16 @@ export class AgentDurableObject extends DurableObject<Env> {
     return this.containerFetch(request, CONTAINER_INTERNAL_PORT)
   }
 
-  /** SuperAgent's idle check for this agent (checkIdle in boot.ts): its idle alarm sleeps it, or sets the next check. */
+  /** The agent's idle check, when this object's alarm goes off: the actor's idle alarm sleeps it, or waits again. */
   async checkIdle(): Promise<void> {
     const slug = this.agentSlug()
     try {
       await runAsAgentObject(slug, this, async () => {
         const app = await import('../boot')
         await app.boot(this.env)
+        const actor = this.ownActor(app, slug)
         await this.syncStatus(app, slug)
-        return app.checkIdle(slug)
+        return actor.idleWaitEnded()
       })
       this.idleCheckFailures = 0
     } catch (error) {
@@ -276,9 +286,17 @@ export class AgentDurableObject extends DurableObject<Env> {
     return runAsAgentObject(slug, this, async () => {
       const app = await import('../boot')
       await app.boot(this.env)
+      this.ownActor(app, slug)
       await this.syncStatus(app, slug)
       return app.runAgentActorOp(slug, path, args, actingUserId)
     })
+  }
+
+  /** The agent's actor object here, told to wait with this object's alarm before it sets one. */
+  private ownActor(app: typeof import('../boot'), slug: string): LocalAgentActor {
+    const actor = app.ownAgentActor(slug)
+    actor.waitIdleWith(this.idleWait)
+    return actor
   }
 
   /**
@@ -339,6 +357,7 @@ export class AgentDurableObject extends DurableObject<Env> {
       await runAsAgentObject(slug, this, async () => {
         const app = await import('../boot')
         await app.boot(this.env)
+        this.ownActor(app, slug)
         await this.syncStatus(app, slug)
       })
     } catch (error) {
