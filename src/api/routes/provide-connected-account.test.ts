@@ -205,6 +205,12 @@ vi.mock('@shared/lib/utils/file-storage', () => ({
 // Import the agents router after all mocks are set up
 import agents from './agents'
 import { userInputRequestManager } from '@shared/lib/tools/requests/request-manager'
+import { agentRegistry } from '@shared/lib/agent-actor/registry'
+
+// The registry wires the routers when it is made, which under test is on its first use.
+beforeEach(() => {
+  agentRegistry.get('test-agent')
+})
 
 function createApp() {
   const app = new Hono()
