@@ -1,8 +1,8 @@
-[TEST_PASS]
-[REASON] Sent the browser-task prompt to agent QA-20261121-202923-us0p and verified the reply names "Example Domain" as the page title.
-[STEP] 1. Navigated to http://localhost:47891 — Gamut home page loaded with the "QA-20261121-202923-us0p" agent listed under Your Agents.
-[STEP] 2. Opened the QA-20261121-202923-us0p agent — the agent page loaded at /agents/qa-20261121-202923-us0p-xo285z5hov, status "idle". I used the agent card link in the main Home content area, not the sidebar entry.
-[STEP] 3. Typed "Open a browser and go to https://example.com. Tell me the page title." and submitted with Enter — the text stayed in the input and no session started. I then clicked the Send button, which created session "Check Example.com Page Title" and the message appeared in the chat. Enter did not submit, but the input placeholder reads "Press cmd+enter to send", so this may be expected UI behaviour.
-[STEP] 4. Waited up to 3 minutes for a response — the agent ran 3 tool calls (ToolSearch, Open Browser → https://example.com, Close Browser) and finished in about 7s with no error. The response arrived within the wait window.
-[STEP] 5. Verified the response mentions "Example Domain" — the reply reads: The page title is "Example Domain". I've closed the browser. Screenshot taken of the verified response.
-[BUG_FOUND] Not a confirmed bug, observation only: the sidebar session link's href in the accessibility snapshot is /agents/xo285z5hov/sessions/bef588f0-…, which omits the "qa-20261121-202923-us0p-" slug prefix that the agent link uses (/agents/qa-20261121-202923-us0p-xo285z5hov). I did not click it to check whether it routes correctly.
+[TEST_FAIL]
+[REASON] Ran the 5-step agent chat check: open QA-20261123-185054-553j, send the example.com title request, wait for the reply, and verify it mentions "Example Domain". The reply did mention it, but the first send attempt did not submit.
+[BUG_FOUND] Pressing Enter in the agent's message box did not send the message. The text stayed in the input and the Send button stayed enabled. The message only sent after clicking the Send button. Expected: Enter sends the message (the placeholder says "Press cmd+enter to send"). Actual: Enter left the text in the input; a click on Send was needed.
+[STEP] Step 1: Navigated to http://localhost:47891 — the Gamut home page loaded with the sidebar listing QA-20261123-185054-553j and QA-20261123-185053-el6n. Page title "Gamut", no errors.
+[STEP] Step 2: Clicked the "QA-20261123-185054-553j" agent card — the agent page opened (URL /agents/qa-20261123-185054-553j-0exc8vf4h8) with the message input and status "idle".
+[STEP] Step 3: Typed "Open a browser and go to https://example.com. Tell me the page title." and pressed Enter — the text stayed in the input and was not sent (see bug above). Clicked Send — the message was sent, a new session "Browser Page Title Check" was created, and the agent status changed to "working".
+[STEP] Step 4: Waited up to 3 minutes for the response — the reply appeared within seconds ("Worked for 4s · 3 tool calls · 163,065 tokens"). Agent status returned to "idle".
+[STEP] Step 5: Verified the response text — it reads 'The page title is "Example Domain". The browser has been closed.' The text "Example Domain" is present. Screenshot taken of the viewport showing the reply.

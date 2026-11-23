@@ -1,8 +1,8 @@
 [TEST_PASS]
-[REASON] Opened agent QA-20261121-202922-z9zo, confirmed it was idle, sent "Hello! What is 2+2?", and verified the reply contains "4".
-[STEP] Step 1: Navigated to http://localhost:47891 — the Gamut app loaded with both agents listed in the sidebar.
-[STEP] Step 2: Clicked QA-20261121-202922-z9zo in the sidebar — its agent page opened at /agents/qa-20261121-202922-z9zo-n5mmg21n1z.
-[STEP] Step 3: Checked the agent status — the status indicator reads "idle", which satisfies the running-or-idle requirement.
-[STEP] Step 4: Typed "Hello! What is 2+2?" in the composer and clicked Send — a new session "Basic Arithmetic Question Check" opened, the message appeared in the chat, and the status changed to "working".
-[STEP] Step 5: Waited for the "Working..." indicator to clear (up to 180 seconds) — it cleared, the status returned to "idle", and the wait finished well within the limit.
-[STEP] Step 6: Verified the response — the assistant replied "2 + 2 = 4." A screenshot was taken (step6-response.png).
+[REASON] Opened agent QA-20261123-185053-el6n, confirmed idle status, sent "Hello! What is 2+2?", and verified the reply "2 + 2 = 4." appeared.
+[STEP] Step 1: Navigated to http://localhost:47891 — the Gamut home page loaded with the sidebar listing both agents (QA-20261123-185054-553j and QA-20261123-185053-el6n). Screenshot not taken at this step; the post-click screenshot followed step 2.
+[STEP] Step 2: Clicked "QA-20261123-185053-el6n" in the sidebar — the agent page opened at /agents/qa-20261123-185053-el6n-2hug868oya. Screenshot step1-agent-selected.png taken.
+[STEP] Step 3: Verified agent status — the header status indicator reads "idle", which satisfies the "running" or "idle" requirement.
+[STEP] Step 4: Typed "Hello! What is 2+2?" into the message input and sent it — the message was submitted and the view navigated to a new session ("Simple Arithmetic Question Check"). Note: an earlier click on the model/effort selector was a mistake on my part, not an app bug. I closed that popup with Escape and made no changes. Screenshot step4-message-typed.png taken before sending.
+[STEP] Step 5: Waited for a response — the reply appeared immediately after sending, so no waiting was needed. The activity indicator was not observed in the captured snapshots.
+[STEP] Step 6: Verified the response — the message list shows the user bubble "Hello! What is 2+2?" and the assistant reply "2 + 2 = 4.", which mentions "4". Screenshot step6-response-verified.png taken. The header still reads "idle" afterwards.
