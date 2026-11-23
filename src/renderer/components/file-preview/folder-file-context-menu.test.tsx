@@ -134,7 +134,7 @@ describe('FolderFileContextMenu', () => {
 
     expect(screen.getByRole('button', { name: 'Copy contents' })).toBeVisible()
     expect(screen.getByRole('button', { name: 'Download' })).toBeVisible()
-    expect(screen.getByRole('button', { name: 'Bookmark' })).toBeVisible()
+    expect(screen.getByRole('button', { name: 'Pin' })).toBeVisible()
     expect(screen.getByRole('button', { name: 'Rename' })).toBeVisible()
     expect(screen.getByRole('button', { name: 'Delete' })).toBeVisible()
   })
@@ -154,7 +154,7 @@ describe('FolderFileContextMenu', () => {
     expect(screen.getByRole('button', { name: 'Download' })).toBeVisible()
     expect(screen.queryByRole('button', { name: 'Rename' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Delete' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Bookmark' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Pin' })).not.toBeInTheDocument()
   })
 
   it('offers copy and download on a drive file, and none of the workspace actions', () => {
@@ -163,7 +163,7 @@ describe('FolderFileContextMenu', () => {
 
     expect(screen.getByRole('button', { name: 'Copy contents' })).toBeVisible()
     expect(screen.getByRole('button', { name: 'Download' })).toBeVisible()
-    expect(screen.queryByRole('button', { name: 'Bookmark' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Pin' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Rename' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Delete' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Reveal in Finder' })).not.toBeInTheDocument()
@@ -174,7 +174,7 @@ describe('FolderFileContextMenu', () => {
 
     expect(screen.queryByRole('button', { name: 'Copy contents' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Download' })).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Bookmark' })).toBeVisible()
+    expect(screen.getByRole('button', { name: 'Pin' })).toBeVisible()
     expect(screen.getByRole('button', { name: 'Rename' })).toBeVisible()
     expect(screen.getByRole('button', { name: 'Delete' })).toBeVisible()
   })
@@ -182,7 +182,7 @@ describe('FolderFileContextMenu', () => {
   it('bookmarks files and directories with their workspace paths', async () => {
     const user = userEvent.setup()
     const { unmount } = renderMenu()
-    await user.click(screen.getByRole('button', { name: 'Bookmark' }))
+    await user.click(screen.getByRole('button', { name: 'Pin' }))
 
     await waitFor(() => expect(mocks.updateBookmarks).toHaveBeenCalledWith([
       { name: 'notes.md', file: '/workspace/reports/notes.md' },
@@ -191,7 +191,7 @@ describe('FolderFileContextMenu', () => {
     unmount()
     mocks.updateBookmarks.mockClear()
     renderMenu({ name: 'drafts', path: '/workspace/reports/drafts', type: 'directory' })
-    await user.click(screen.getByRole('button', { name: 'Bookmark' }))
+    await user.click(screen.getByRole('button', { name: 'Pin' }))
 
     await waitFor(() => expect(mocks.updateBookmarks).toHaveBeenCalledWith([
       { name: 'drafts', folder: '/workspace/reports/drafts' },
@@ -206,7 +206,7 @@ describe('FolderFileContextMenu', () => {
     ]
     renderMenu()
 
-    await user.click(screen.getByRole('button', { name: 'Remove bookmark' }))
+    await user.click(screen.getByRole('button', { name: 'Unpin' }))
 
     await waitFor(() => expect(mocks.updateBookmarks).toHaveBeenCalledWith([
       { name: 'Other', file: '/workspace/reports/other.md' },
