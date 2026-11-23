@@ -1,0 +1,9 @@
+[TEST_PASS]
+[REASON] Opened agent QA-20261123-202818-uveb, sent the example.com page-title request, and confirmed the reply names "Example Domain".
+[STEP] Navigated to http://localhost:47891 — the Gamut home page loaded with the sidebar listing QA-20261123-202818-uveb and QA-20261123-202817-aouc under "Your Agents". Took a snapshot to locate the agent.
+[STEP] Clicked the QA-20261123-202818-uveb entry in the sidebar — its chat view opened (header "QA-20261123-202818-uveb", status "idle", empty message box). Took a screenshot; it shows the agent page as expected.
+[STEP] Typed "Open a browser and go to https://example.com. Tell me the page title." and pressed Enter — Enter inserted a new line and did not send, because the input placeholder reads "Press cmd+enter to send". I then clicked the Send button, and the message posted to a new session titled "Browser Page Title Check" with the status "working". Took a screenshot showing the sent message and the working state. This was a mistake in my key choice, not an app bug.
+[STEP] Waited up to 3 minutes for "Example Domain" to appear — it appeared within the wait window. The agent replied "The page title is "Example Domain". The page loaded normally, and I closed the browser afterward." The status returned to "idle". The collapsed "Worked for 5s · 3 tool calls · 163,111 tokens" summary was shown above the reply.
+[STEP] Verified the response mentions "Example Domain" — confirmed. Took a final screenshot showing the reply text and the idle status.
+
+Observations (not counted as bugs): I did not see individual browser_* tool-call cards or a live browser preview panel during the run. The tool calls were folded into the collapsed "Worked for 5s · 3 tool calls" summary, and the only tool card I saw while working was a ToolSearch entry. The agent said it closed the browser afterward, so the preview's absence after the run is expected.

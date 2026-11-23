@@ -1,0 +1,23 @@
+{
+  "storyId": "browser-test",
+  "passed": true,
+  "reason": "Opened agent QA-20261123-202818-uveb, sent the example.com page-title request, and confirmed the reply names \"Example Domain\".",
+  "steps": [
+    "Navigated to http://localhost:47891 — the Gamut home page loaded with the sidebar listing QA-20261123-202818-uveb and QA-20261123-202817-aouc under \"Your Agents\". Took a snapshot to locate the agent.",
+    "Clicked the QA-20261123-202818-uveb entry in the sidebar — its chat view opened (header \"QA-20261123-202818-uveb\", status \"idle\", empty message box). Took a screenshot; it shows the agent page as expected.",
+    "Typed \"Open a browser and go to https://example.com. Tell me the page title.\" and pressed Enter — Enter inserted a new line and did not send, because the input placeholder reads \"Press cmd+enter to send\". I then clicked the Send button, and the message posted to a new session titled \"Browser Page Title Check\" with the status \"working\". Took a screenshot showing the sent message and the working state. This was a mistake in my key choice, not an app bug.",
+    "Waited up to 3 minutes for \"Example Domain\" to appear — it appeared within the wait window. The agent replied \"The page title is \"Example Domain\". The page loaded normally, and I closed the browser afterward.\" The status returned to \"idle\". The collapsed \"Worked for 5s · 3 tool calls · 163,111 tokens\" summary was shown above the reply.",
+    "Verified the response mentions \"Example Domain\" — confirmed. Took a final screenshot showing the reply text and the idle status."
+  ],
+  "bugs": [],
+  "durationMs": 67760,
+  "sessionId": "5ac3ff15-28c3-42c3-bfaa-c23dd6027fc2",
+  "cost": {
+    "inputTokens": 8170,
+    "outputTokens": 7354,
+    "cacheCreationTokens": 65916,
+    "cacheReadTokens": 715609,
+    "model": "claude-haiku-5-5",
+    "totalCostUsd": 0.198896
+  }
+}
