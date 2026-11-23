@@ -192,35 +192,33 @@ export function createLocalAgentRegistry(): AgentRegistry {
 }
 
 // Installed by the entry point before anything uses an agent, like AppState
-// and the database: desktop and the Node server install
-// `createLocalAgentRegistry()`, a deployment whose actors run elsewhere its
-// own. In this module, not on globalThis: a dev-server edit that re-evaluates
-// it leaves the slot empty, and the dev server installs a registry of the new code.
-let installed: AgentRegistry | null = null
+// and the database: desktop and the Node server install the local registry, a
+// deployment whose actors run elsewhere its own. In this module, not on
+// globalThis: a dev-server edit that re-evaluates it leaves the slot empty, and
+// the dev server installs a registry of the new code.
+//
+// Tests only: the local registry, installed when this module loads, so a test
+// needs no entry point. Under `npm run test:actor-transport` every actor is
+// reached through the serializing test transport, as across a wire.
+let installed: AgentRegistry | null = process.env.VITEST
+  ? process.env.SUPERAGENT_ACTOR_TRANSPORT === 'serializing'
+    ? serializingRegistry(createLocalAgentRegistry())
+    : createLocalAgentRegistry()
+  : null
 
 function current(): AgentRegistry {
-  // Tests only: the local registry, installed on first use, so a test needs no
-  // entry point. Under `npm run test:actor-transport` every actor is reached
-  // through the serializing test transport, as across a wire.
-  if (!installed && process.env.VITEST) {
-    installed = process.env.SUPERAGENT_ACTOR_TRANSPORT === 'serializing'
-      ? serializingRegistry(createLocalAgentRegistry())
-      : createLocalAgentRegistry()
-  }
   if (!installed) {
     throw new Error('The agent registry is not initialized. The entry point must call initializeAgentRegistry() before anything uses an agent.')
   }
   return installed
 }
 
-export function isAgentRegistryInitialized(): boolean {
-  return installed !== null
-}
-
-/** Installs the process's agent registry, once. */
-export function initializeAgentRegistry(registry: AgentRegistry): void {
-  if (installed) throw new Error('The agent registry is already initialized; an entry point initializes it once.')
-  installed = registry
+/**
+ * Installs the process's agent registry. A repeat call does nothing. It takes
+ * the factory, not a registry: building one wires the host and the routers to it.
+ */
+export function initializeAgentRegistry(createRegistry: () => AgentRegistry): void {
+  installed ??= createRegistry()
 }
 
 /** The registry's actors, each reached through one serializing transport. */

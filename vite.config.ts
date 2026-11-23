@@ -100,12 +100,10 @@ export default defineConfig({
           if (!isAppStateInitialized()) {
             await initializeLocalAppState()
           }
-          // Then the agents, as the web server does. Re-checked like the database:
-          // an edit that re-evaluates the registry module leaves it with none.
-          const { isAgentRegistryInitialized, initializeAgentRegistry, createLocalAgentRegistry } = await server.ssrLoadModule(registryModule)
-          if (!isAgentRegistryInitialized()) {
-            initializeAgentRegistry(createLocalAgentRegistry())
-          }
+          // Then the agents, as the web server does. On every request, like the
+          // database: an edit that re-evaluates the registry module leaves it with none.
+          const { initializeAgentRegistry, createLocalAgentRegistry } = await server.ssrLoadModule(registryModule)
+          initializeAgentRegistry(createLocalAgentRegistry)
           // Then key custody, as the web server does: the vault seals through it.
           // Concurrent requests share one install (ensureKeyManager).
           const { installServerKeyManager } = await server.ssrLoadModule(keysModule)

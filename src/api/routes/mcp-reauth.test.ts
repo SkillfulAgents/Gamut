@@ -98,8 +98,6 @@ beforeEach(() => {
   testDb = drizzle(sqlite, { schema })
   migrate(testDb, { migrationsFolder: 'src/shared/lib/db/migrations' })
   currentUserId = 'member'
-  // The registry wires the routers when it is made, which under test is on its first use.
-  agentRegistry.get('shared-agent')
   syncEnvironment.mockReset().mockResolvedValue(true)
   activeSessions.mockReset().mockReturnValue([])
   interrupt.mockReset().mockResolvedValue({ interrupted: true, processKept: true })
