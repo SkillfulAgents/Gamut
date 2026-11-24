@@ -137,9 +137,11 @@ export function IntegrationSetupWizard({ provider, label, verb = 'Connect', head
           Every step is laid out in the same grid cell, the ones not open hidden, so the
           flow is as tall as its tallest step and the dialog keeps one height as you move
           through it. A shorter step sits in the middle of that height. The even padding
-          keeps the tallest clear of the close button.
+          keeps the tallest clear of the close button. The one column is pinned to the
+          width there is, so a step with something wide in it (a manifest) scrolls that
+          instead of pushing every step past the dialog's edge.
         */}
-        <div className="my-auto grid py-6">
+        <div className="my-auto grid grid-cols-[minmax(0,1fr)] py-6">
           {steps.map((s, i) => {
             const open = i === index
             return (

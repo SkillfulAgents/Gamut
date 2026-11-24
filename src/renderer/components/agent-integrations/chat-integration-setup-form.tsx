@@ -20,7 +20,7 @@ import {
   useTestAgentIntegrationCredentials,
   AgentIntegrationApiError,
 } from '@renderer/hooks/use-agent-integrations'
-import { Copy, Check, Eye, EyeOff } from 'lucide-react'
+import { Copy, Check } from 'lucide-react'
 import { IMESSAGE_PHONE_E164, type ChatProvider } from '@shared/lib/chat-integrations/config-schema'
 import { slackAppManifest, type SlackAppIdentity } from '@shared/lib/chat-integrations/slack-manifest'
 import { useAgent } from '@renderer/hooks/use-agents'
@@ -212,7 +212,6 @@ export function ChatIntegrationSetupForm({
   const [testResult, setTestResult] = useState<{ valid: boolean; info?: string } | null>(null)
   const [slackSetupMode, setSlackSetupMode] = useState<'manifest' | 'manual'>('manifest')
   const [manifestCopied, setManifestCopied] = useState(false)
-  const [manifestPreview, setManifestPreview] = useState(false)
   const { data: agent } = useAgent(provider === 'slack' ? agentSlug : null)
   const slackApp = slackAppIdentity(agent, integrationName)
 
@@ -325,26 +324,23 @@ export function ChatIntegrationSetupForm({
       subtitle: 'The manifest sets up the Slack app for you. You’ll paste it into Slack in the next step.',
       content: <>
         {leading}
-        <div className="flex flex-wrap items-center gap-2">
+        {/* Always shown, with its copy button pinned to the corner: outside the scrolling text, so it stays put. */}
+        <div className="relative">
+          <pre className="max-h-44 overflow-auto rounded-card border bg-muted/40 p-3 pr-24 text-2xs leading-relaxed select-all" data-testid="slack-manifest">
+            {generateSlackManifest(slackApp)}
+          </pre>
           <Button
-            type="button" variant="outline" size="sm"
+            type="button" variant="outline" size="sm" className="absolute right-2 top-2 h-7 gap-1.5 bg-background px-2 text-xs"
+            aria-label={manifestCopied ? 'Manifest copied' : 'Copy manifest'} data-testid="slack-manifest-copy"
             onClick={async () => {
               await navigator.clipboard.writeText(generateSlackManifest(slackApp))
               setManifestCopied(true)
               setTimeout(() => setManifestCopied(false), 2000)
             }}
           >
-            {manifestCopied ? <><Check className="h-3.5 w-3.5" aria-hidden="true" /> Copied</> : <><Copy className="h-3.5 w-3.5" aria-hidden="true" /> Copy manifest</>}
-          </Button>
-          <Button type="button" variant="ghost" size="sm" className="text-muted-foreground" onClick={() => setManifestPreview(!manifestPreview)}>
-            {manifestPreview ? <><EyeOff className="h-3.5 w-3.5" aria-hidden="true" /> Hide</> : <><Eye className="h-3.5 w-3.5" aria-hidden="true" /> Preview</>}
+            {manifestCopied ? <><Check className="h-3.5 w-3.5" aria-hidden="true" /> Copied</> : <><Copy className="h-3.5 w-3.5" aria-hidden="true" /> Copy</>}
           </Button>
         </div>
-        {manifestPreview && (
-          <pre className="text-2xs leading-relaxed bg-muted/40 border rounded-card p-3 overflow-x-auto max-h-40 select-all">
-            {generateSlackManifest(slackApp)}
-          </pre>
-        )}
         <IntegrationSetupNote>Prefer to add each setting yourself? {modeSwitch('Set up from scratch', 'manual')}</IntegrationSetupNote>
       </>,
     },

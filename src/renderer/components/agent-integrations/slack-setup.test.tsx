@@ -189,6 +189,21 @@ describe('SlackSetup', () => {
     expect(screen.getByLabelText('App-Level Token')).toBeInTheDocument()
   })
 
+  it('shows the manifest from the start, with a copy button on it', async () => {
+    state.relayAvailable = false
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
+    setup()
+    await waitFor(() => expect(client.getQueryData(['agents', 'a'])).toBeTruthy())
+    // No button to reveal it: the manifest is there to read.
+    const manifest = await screen.findByTestId('slack-manifest')
+    await waitFor(() => expect(JSON.parse(manifest.textContent!).display_information.name).toBe('Infra Agent'))
+    expect(screen.queryByRole('button', { name: 'Preview' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Copy manifest' }))
+    await waitFor(() => expect(screen.getByTestId('slack-manifest-copy')).toHaveTextContent('Copied'))
+    expect(writeText).toHaveBeenCalledWith(manifest.textContent)
+  })
+
   it('has the icon step in both Socket Mode setups, with the colour for an app made from scratch', async () => {
     state.relayAvailable = false
     setup()
