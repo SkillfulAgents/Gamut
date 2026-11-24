@@ -52,7 +52,6 @@ import type { ApiMessage, ApiCompactBoundary, ApiMemoryRecall, ApiInformational,
 import { isBlockingUserInputToolName } from '@shared/lib/tools/user-input-tools'
 import { parseSenderPrefix } from '@shared/lib/utils/sender-prefix'
 import { useMessageListScroll } from './use-message-list-scroll'
-import { TranscriptScrollbar } from './transcript-scrollbar'
 import {
   collectEmbeddedImageAliases,
   reuseEqualEmbeddedImageAliases,
@@ -798,7 +797,6 @@ export function MessageList({ sessionId, agentSlug, pendingUserMessages, pending
     handleScroll,
     handleWheelGesture,
     handlePointerDown,
-    handleScrollbarPress,
     handleScrollKey,
     handleTouchStart,
     handleTouchMove,
@@ -1035,8 +1033,7 @@ export function MessageList({ sessionId, agentSlug, pendingUserMessages, pending
 
   return (
     // Under a floating header the transcript reaches up behind it (--header-overlap, globals.css).
-    // Clipped vertically only: docked beside the drawer, the scrollbar's rail reaches past the right edge.
-    <div className="relative flex-1 min-h-0 overflow-y-clip mt-[calc(-1*var(--header-overlap,0px))]">
+    <div className="relative flex-1 min-h-0 overflow-hidden mt-[calc(-1*var(--header-overlap,0px))]">
       {/* A labelled, focusable scroll region is intentional: keyboard users
           need to be able to drive the transcript with its scroll keys. */}
       {/* eslint-disable jsx-a11y/no-noninteractive-tabindex */}
@@ -1380,7 +1377,6 @@ export function MessageList({ sessionId, agentSlug, pendingUserMessages, pending
         </div>
       </div>
       {/* eslint-enable jsx-a11y/no-noninteractive-tabindex */}
-      <TranscriptScrollbar scrollRef={scrollRef} onPress={handleScrollbarPress} />
       {!isAtBottom && !suppressScrollToBottom && (
         <button
           onClick={handleScrollToBottom}
