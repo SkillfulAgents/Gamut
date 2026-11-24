@@ -3135,6 +3135,7 @@ agents.get('/:id/sessions/:sessionId', AgentRead(), async (c) => {
       invokedByAgentName: metadata?.invokedByAgentSlug
         ? invokingAgent?.frontmatter.name ?? metadata.invokedByAgentSlug
         : undefined,
+      mcpInvocation: metadata?.mcpInvocation ? { clientName: metadata.mcpInvocation.clientName } : undefined,
       isWidgetRepair: metadata?.isWidgetRepair,
       widgetRepairSlug: metadata?.widgetRepairSlug,
       forkedFromSessionId: metadata?.forkedFromSessionId,

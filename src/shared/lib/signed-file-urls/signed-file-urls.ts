@@ -134,6 +134,13 @@ export interface SignedFileUrl {
 export interface MintOptions {
   /** Shorter than the default if wanted; more than `MAX_SIGNED_FILE_URL_TTL_MS` is refused. */
   ttlMs?: number
+  /**
+   * The origin the URL's holder reaches this app at, when the minter knows it
+   * better than the configuration does: the MCP server passes the origin its
+   * client reached `/mcp` at (itself the configured public address when one is
+   * set). Absent, the configured public address, else the bound one.
+   */
+  baseUrl?: string
 }
 
 // ---------------------------------------------------------------------------
@@ -242,13 +249,14 @@ function lifetime(options: MintOptions): number {
  * (`HOST_PUBLIC_URL`, then the first trusted origin), as the other links the
  * app hands outside use, else the address it is bound to.
  */
-async function signedFilesBaseUrl(): Promise<string> {
+async function signedFilesBaseUrl(options: MintOptions): Promise<string> {
+  if (options.baseUrl) return options.baseUrl.replace(/\/+$/, '')
   return (await resolvePublicAppBaseUrl()) ?? (await getAppBaseUrl())
 }
 
-async function mint(payload: SignedFileTokenPayload): Promise<SignedFileUrl> {
+async function mint(payload: SignedFileTokenPayload, options: MintOptions): Promise<SignedFileUrl> {
   const token = await signFileToken(payload)
-  return { url: `${await signedFilesBaseUrl()}${SIGNED_FILES_ROUTE_PREFIX}/${token}`, expiresAt: new Date(payload.exp) }
+  return { url: `${await signedFilesBaseUrl(options)}${SIGNED_FILES_ROUTE_PREFIX}/${token}`, expiresAt: new Date(payload.exp) }
 }
 
 /**
@@ -271,7 +279,7 @@ export async function mintSignedDownloadUrl(userId: string, target: SignedDownlo
   }
   if (parsed.kind === 'workspace-file' && parsed.path === '') throw new SignedFileUrlError(400, 'Invalid file path')
   const authorized = await authorizeTarget(await principalFor(userId, now), parsed)
-  return mint({ v: SIGNED_FILE_TOKEN_VERSION, jti: newTokenId(), sub: userId, op: 'download', target: authorized, iat: now, exp: now + ttlMs })
+  return mint({ v: SIGNED_FILE_TOKEN_VERSION, jti: newTokenId(), sub: userId, op: 'download', target: authorized, iat: now, exp: now + ttlMs }, options)
 }
 
 /**
@@ -300,7 +308,7 @@ export async function mintSignedUploadUrl(
   // The record a PUT must find: without it the URL is refused.
   const registered = await appState().insertIfAbsent(uploadKey(userId, target.agentSlug, uploadId), { state: 'pending', jti: payload.jti }, { expiry: pendingExpiry(payload) })
   if (!registered.inserted) throw new Error('Upload id collision')
-  const minted = await mint(payload)
+  const minted = await mint(payload, options)
   return { ...minted, uploadId }
 }
 
@@ -491,4 +499,46 @@ export async function resolveSignedUpload(userId: string, agentSlug: string, upl
   }
   const entry = await appState().get(uploadKey(userId, canonical, uploadId))
   return entry?.value.state === 'completed' ? entry.value.result : null
+}
+
+/**
+ * A completed signed upload taken for one use: what `resolveSignedUpload`
+ * answers, with its record consumed in the same step (on the revision read),
+ * so of two calls attaching the same upload id exactly one gets it. Null as
+ * `resolveSignedUpload` is, and for an id already taken. The file stays in
+ * the workspace; only the id is spent.
+ *
+ * `putBack` returns an id taken but not used (a later step of the same call
+ * failed before anything was sent): the same record, with its original
+ * expiry, written only while the key is absent. Once consumed the key is
+ * absent and nothing else writes it (an id is minted once), so the insert
+ * restores exactly what was taken; an id that expired meanwhile stays gone.
+ */
+export async function takeSignedUpload(
+  userId: string,
+  agentSlug: string,
+  uploadId: string,
+): Promise<{ result: SignedUploadResult; putBack: () => Promise<boolean> } | null> {
+  if (!userId || !agentSlug || !uploadId) return null
+  let canonical: string
+  try {
+    canonical = await requireAgentRole(await principalFor(userId, Date.now()), agentSlug, 'user')
+  } catch (error) {
+    if (error instanceof SignedFileUrlError) return null
+    throw error
+  }
+  const key = uploadKey(userId, canonical, uploadId)
+  const entry = await appState().get(key)
+  if (entry?.value.state !== 'completed') return null
+  const taken = await appState().consume(key, { revision: entry.revision })
+  if (!taken.consumed) return null
+  const { value, expiresAt } = entry
+  return {
+    result: value.result,
+    putBack: async () => {
+      if (expiresAt !== null && expiresAt <= Date.now()) return false
+      const restored = await appState().insertIfAbsent(key, value, expiresAt === null ? {} : { expiry: { at: expiresAt } })
+      return restored.inserted
+    },
+  }
 }

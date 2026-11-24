@@ -18,6 +18,7 @@ const configuredWorkers = process.env.PLAYWRIGHT_WORKERS
 
 const webTestIgnore = [
   '**/auth/**',
+  '**/mcp/**',
   // Desktop runtime tests have their own app launcher and config.
   '**/electron/**',
   // Real-container probes with their own config (playwright.live-mcp.config.ts).
@@ -101,8 +102,10 @@ export default defineConfig({
   testDir: './e2e',
   // Auth tests use a separate config (playwright.auth.config.ts); e2e/live
   // holds probes against the REAL container (playwright.live-mcp.config.ts
-  // and the .mjs harnesses), which the mock host cannot satisfy.
-  testIgnore: ['**/auth/**', '**/live/**', '**/electron/**'],
+  // and the .mjs harnesses), which the mock host cannot satisfy. e2e/mcp
+  // switches the MCP server off and regenerates its token mid-run, so it has
+  // its own server and data dir (playwright.mcp.config.ts).
+  testIgnore: ['**/auth/**', '**/live/**', '**/electron/**', '**/mcp/**'],
   outputDir: playwrightOutputDir,
   fullyParallel: true,
   forbidOnly: !!process.env.CI,

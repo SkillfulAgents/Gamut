@@ -33,6 +33,8 @@ export const AUDIT_EVENT_MAP = {
   // unaudited, so absence of a `revoked` row is not proof a session lived out
   // its lifetime.
   session:          ['created', 'revoked'],
+  // A tool call an external agent made through the MCP server (tool-call-guard.ts).
+  mcp_tool:         ['called'],
 } as const satisfies Record<string, readonly string[]>
 
 export type AuditObject = keyof typeof AUDIT_EVENT_MAP

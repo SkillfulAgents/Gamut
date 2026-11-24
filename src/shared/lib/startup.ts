@@ -15,6 +15,7 @@ import { TeamDirectoryProvisioningService } from './team-directory/service'
 import { registerAllAccountProviders } from './account-providers/register'
 import { sessionAutoDeleteMonitor } from './scheduler/session-auto-delete-monitor'
 import { apiLogAutoDeleteMonitor } from './scheduler/api-log-auto-delete-monitor'
+import { McpClientCleanupService } from './mcp-server/oauth/client-cleanup'
 import { accountSyncService } from './scheduler/account-sync-service'
 import { platformService } from './services/platform-service'
 import { getActiveProvider, stopAllProviders } from '../../main/host-browser'
@@ -150,6 +151,8 @@ function backgroundServices(): Service[] {
     // These only schedule their first pass, so they do not take a startup slot.
     sessionAutoDeleteMonitor,
     apiLogAutoDeleteMonitor,
+    // Auth mode: removes dynamically registered MCP clients nobody connected.
+    new McpClientCleanupService(),
     // Syncs OAuth account status with remote providers.
     accountSyncService,
     // Renews team directories' app-creation credentials (Slack's 12-hour configuration token).

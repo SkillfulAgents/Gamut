@@ -1,0 +1,1 @@
+ALTER TABLE `oauth_client` ADD `ever_connected_at` integer;

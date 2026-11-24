@@ -324,7 +324,8 @@ export async function getAgentActivityStats(
   let lastInvokedAtMs = Number.NEGATIVE_INFINITY
   for (const meta of Object.values(metadata)) {
     // Widget repairs share the inbound history, including its home entry.
-    if ((!meta.invokedByAgentSlug && !meta.isWidgetRepair) || !meta.createdAt) continue
+    // So do sessions started through the MCP server.
+    if ((!meta.invokedByAgentSlug && !meta.isWidgetRepair && !meta.mcpInvocation) || !meta.createdAt) continue
     const createdAt = new Date(meta.createdAt)
     if (!Number.isFinite(createdAt.getTime())) continue
     inboundTotal += 1

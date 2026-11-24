@@ -202,7 +202,7 @@ export function AgentHeader({ slug, isViewOnly, startAgent, stopAgent }: AgentHe
             </>
           )
         })()}
-        {sessionId && (session?.invokedByAgentSlug || session?.isWidgetRepair) && (
+        {sessionId && (session?.invokedByAgentSlug || session?.mcpInvocation || session?.isWidgetRepair) && (
           <>
             <BreadcrumbSeparator />
             <AppLink
