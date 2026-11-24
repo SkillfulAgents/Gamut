@@ -165,6 +165,54 @@ describe('CloudflareAgentActor', () => {
   })
 })
 
+describe("container.fetch keeps its caller's timeout, which no signal carries across", () => {
+  /** An object that never answers: a render that hangs in the container. */
+  const hanging: ActorObject = { actorCall: () => new Promise(() => {}) }
+
+  it("stops waiting when the caller's signal fires, though the object has not answered", async () => {
+    const client = new CloudflareAgentActor('sales-agent', reaching(hanging))
+    const controller = new AbortController()
+
+    const response = client.container.fetch('/render', { method: 'POST', body: 'graph TD', signal: controller.signal })
+    controller.abort(new Error('The render took too long'))
+
+    await expect(response).rejects.toThrow('The render took too long')
+  })
+
+  it('does not call the object for a signal that has already fired', async () => {
+    const actorCall = vi.fn(() => new Promise<never>(() => {}))
+    const client = new CloudflareAgentActor('sales-agent', reaching({ actorCall }))
+
+    await expect(client.container.fetch('/render', { signal: AbortSignal.abort(new Error('Too late')) })).rejects.toThrow('Too late')
+    expect(actorCall).not.toHaveBeenCalled()
+  })
+
+  it('discards a response that arrives after the caller stopped waiting', async () => {
+    const cancel = vi.fn()
+    let answer!: (outcome: { value: Response }) => void
+    const client = new CloudflareAgentActor('sales-agent', reaching({ actorCall: () => new Promise((resolve) => { answer = resolve }) }))
+    const controller = new AbortController()
+
+    const response = client.container.fetch('/render', { signal: controller.signal })
+    // The call is on its way to the object before the signal fires.
+    await vi.waitFor(() => expect(answer).toBeDefined())
+    controller.abort(new Error('The render took too long'))
+    await expect(response).rejects.toThrow('The render took too long')
+    answer({ value: new Response(new ReadableStream({ cancel })) })
+
+    await vi.waitFor(() => expect(cancel).toHaveBeenCalled())
+  })
+
+  it('answers as before when the signal never fires', async () => {
+    const fetch = vi.fn(async (path: string) => new Response(`rendered ${path}`))
+    const { client } = overRpc({ container: { fetch } })
+
+    const response = await client.container.fetch('/render', { signal: new AbortController().signal })
+
+    expect(await response.text()).toBe('rendered /render')
+  })
+})
+
 describe("the actor inside the agent's own object", () => {
   const object = {} as AgentDurableObject
 
@@ -181,10 +229,15 @@ describe("the actor inside the agent's own object", () => {
     expect(await runAsAgentObject('sales-agent', object, () => reached.files.getDoc('AGENTS.md'))).toBe('local')
     expect(await runAsAgentObject('support-agent', object, () => reached.files.getDoc('AGENTS.md'))).toBe('remote')
 
-    // Dropped by the registry, it releases what the object held here; the agent is still reached where it runs.
-    await reached.dispose()
-    expect(dispose).toHaveBeenCalledOnce()
+    // Dropped by the registry, it lets go of nothing: the agent's own actor is its object's to keep.
+    await reached.dispose('shutdown')
+    expect(dispose).not.toHaveBeenCalled()
+    expect(await runAsAgentObject('sales-agent', object, () => reached.files.getDoc('AGENTS.md'))).toBe('local')
     expect(await reached.files.getDoc('AGENTS.md')).toBe('remote')
+
+    // Only the object lets its actor go, when its agent is deleted.
+    await evictObjectActor('sales-agent')
+    expect(dispose).toHaveBeenCalledOnce()
   })
 
   it("a new instance of the object gets ops of its own, and what the old one held is released", async () => {

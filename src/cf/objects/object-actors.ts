@@ -40,18 +40,13 @@ export function heldObjectActor(slug: AgentSlug): CloudflareAgentActorDO | undef
   return held.get(slug)?.actor
 }
 
-/** Releases what the agent's object holds in this isolate, if it runs the agent here. */
+/**
+ * Releases what the agent's object holds in this isolate, if it runs the agent here. For the
+ * object itself, when its agent is deleted: nothing else may take an agent's actor from it.
+ */
 export async function evictObjectActor(slug: AgentSlug, reason?: 'shutdown'): Promise<void> {
   const current = held.get(slug)
   if (!current) return
   held.delete(slug)
   await release(slug, current.actor, reason)
-}
-
-/** Releases every agent this isolate runs, storing the session activity each one recorded, as a shutdown does. */
-export async function evictObjectActors(): Promise<void> {
-  const released = [...held.entries()]
-  held.clear()
-  // Every one lets go before the first await.
-  await Promise.all(released.map(([slug, { actor }]) => release(slug, actor, 'shutdown')))
 }

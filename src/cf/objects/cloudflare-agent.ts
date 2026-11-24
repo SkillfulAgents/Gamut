@@ -23,6 +23,7 @@ import { ASLEEP_HEADER, sleepingStoreOn, type AgentCalls, type ByteRange, type S
 import { WorkspaceFileError } from '@shared/lib/agent-actor/workspace-path'
 import type { AgentListing, AgentLiveSummary } from '@shared/lib/agent-actor/types'
 import { runActorOp, runAsAgentObject, type ActorOutcome } from './cloudflare-agent-actor'
+import { evictObjectActor } from './object-actors'
 import { checkedCall, restartIfOlder, type Checked, type Restarting } from '../lib/object-version'
 import { needsLiveConnections, serveInTaskManager } from './cloudflare-task-manager'
 import { captureException } from '@shared/lib/error-reporting'
@@ -182,8 +183,9 @@ export class AgentDurableObject extends DurableObject<Env> {
   private readonly workspace: SavedWorkspace
   /** True once this object has run the agent's actor: from then on it may hold live state in memory. */
   private actorBooted = false
-  // The actor's cached container status starts as stopped in a new object, but the container outlives the object.
-  private statusSynced: Promise<void> | undefined
+  // An actor's cached container status starts as stopped, but the container outlives the actor
+  // and the object: each actor reads it once, so the read is remembered for the actor that made it.
+  private statusSynced: { actor: CloudflareAgentActorDO; done: Promise<void> } | undefined
   /** Idle checks that failed in a row: the next one waits longer, and only the first is reported. */
   private idleCheckFailures = 0
   /** When this instance last set the object's alarm for; null when it set none, or it went off. */
@@ -321,11 +323,14 @@ export class AgentDurableObject extends DurableObject<Env> {
 
   private syncStatus(actor: CloudflareAgentActorDO): Promise<void> {
     // Reads now whether the container runs: it outlives the object's memory, and its exits are not polled.
-    return (this.statusSynced ??= actor.state.runtime().syncAgentStatus().then(() => {}).catch((error: unknown) => {
-      this.statusSynced = undefined
+    if (this.statusSynced?.actor === actor) return this.statusSynced.done
+    const done: Promise<void> = actor.state.runtime().syncAgentStatus().then(() => {}).catch((error: unknown) => {
+      if (this.statusSynced?.done === done) this.statusSynced = undefined
       console.error(`[AgentDurableObject ${actor.slug}] syncing the container status failed:`, error)
       captureException(error, { tags: { component: 'agent-object', operation: 'sync-status' }, extra: { agent: actor.slug } })
-    }))
+    })
+    this.statusSynced = { actor, done }
+    return done
   }
 
   private onContainerExit(outcome: string): void {
@@ -556,6 +561,8 @@ export class AgentDurableObject extends DurableObject<Env> {
     return this.withStore(async () => {
       if (await this.containerUp()) await this.destroy()
       this.launched = false
+      // The agent is gone: what its actor still holds here (live sessions, parked reviews and waits) is let go.
+      await evictObjectActor(this.agentSlug())
       await this.workspace.purge()
       const { dropObjectSessionIndex } = await import('../lib/object-session-index-storage')
       dropObjectSessionIndex(this.sessionIndexSql())

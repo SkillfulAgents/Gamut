@@ -41,7 +41,7 @@ import { agentContainers, withAgentObject } from './cloudflare-container-control
 import { installCloudflareContainers } from '@shared/lib/container/cloudflare-container-runtime'
 import { CloudflareAgentActor, servingAgentObject } from './objects/cloudflare-agent-actor'
 import { CloudflareAgentActorDO } from './objects/cloudflare-agent-actor-do'
-import { evictObjectActors, objectActor } from './objects/object-actors'
+import { objectActor } from './objects/object-actors'
 import type { AgentDurableObject } from './objects/cloudflare-agent'
 import { seedSettings } from './lib/seed-settings'
 import { PurgeWorkspaceTask } from './lib/purge-workspace-task'
@@ -134,10 +134,9 @@ let servicesShutDown = false
 
 export async function stopBackgroundServices(): Promise<void> {
   servicesShutDown = true
+  // The services are this isolate's. The agents whose objects share it are not: each object keeps
+  // its actor, with its live sessions, parked reviews and idle alarm, and its container runs on.
   await shutdownServices()
-  // The registry dropped the actors this isolate asked for. An agent whose object runs it here
-  // without anything in the isolate having asked for it lets go too.
-  await evictObjectActors()
 }
 
 /** True once this isolate's services were shut down: they never start again in it (startup.ts). */

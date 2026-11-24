@@ -1,6 +1,8 @@
 import Database from 'better-sqlite3'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { inactivityTimeoutMs, AgentDurableObject, bridgeWebSocket, serveWorkspaceRequest } from './cloudflare-agent'
+import type { CloudflareAgentActorDO } from './cloudflare-agent-actor-do'
+import { heldObjectActor, objectActor } from './object-actors'
 import { SavedWorkspace, linkTarget, workspaceBlobKey } from '../lib/saved-workspace'
 import { createObjectSessionIndexStorage } from '../lib/object-session-index-storage'
 import type { Env } from '../index'
@@ -11,17 +13,23 @@ import { sleepingStoreOn } from '../cloudflare-container-control'
 
 vi.mock('@shared/lib/error-reporting', () => ({ captureException: vi.fn() }))
 // The app must not boot to list a sleeping agent: its session index is in the object's own SQLite.
-const { boot, syncContainerStatus } = vi.hoisted(() => ({ boot: vi.fn(), syncContainerStatus: vi.fn(async () => {}) }))
+const { boot, syncContainerStatus, actors } = vi.hoisted(() => ({ boot: vi.fn(), syncContainerStatus: vi.fn(async () => {}), actors: new WeakMap<object, unknown>() }))
 vi.mock('../boot', () => ({
   boot,
-  ownAgentActor: (slug: string) => ({
-    slug,
-    live: async () => 'from the actor',
-    listing: async () => 'from the actor',
-    // The actor's own state, as the object reads its container's status through it.
-    state: { runtime: () => ({ syncAgentStatus: syncContainerStatus }) },
-    checkIdle: vi.fn(async () => {}),
-  }),
+  // One actor for each object, as the object holds it; a test drops it from `actors` to stand for a release.
+  ownAgentActor: (slug: string, object: object) => {
+    if (!actors.has(object)) {
+      actors.set(object, {
+        slug,
+        live: async () => 'from the actor',
+        listing: async () => 'from the actor',
+        // The actor's own state, as the object reads its container's status through it.
+        state: { runtime: () => ({ syncAgentStatus: syncContainerStatus }) },
+        checkIdle: vi.fn(async () => {}),
+      })
+    }
+    return actors.get(object)
+  },
   autoSleepTimeoutMs: async () => 30 * 60_000,
 }))
 
@@ -303,6 +311,8 @@ function runningAgent(running = true) {
       r2.set(key, new TextDecoder().decode(bytes))
     },
     get: async (key: string) => (r2.has(key) ? { body: new Response(r2.get(key)).body } : null),
+    // Everything under a prefix in one page, which is all a purge here needs.
+    list: async ({ prefix }: { prefix: string }) => ({ objects: [...r2.keys()].filter((key) => key.startsWith(prefix)).map((key) => ({ key })), truncated: false }),
   }
   Object.assign(object, {
     ctx,
@@ -775,6 +785,35 @@ describe('AgentDurableObject listing its agent', () => {
     exit(booted.object)
     await vi.waitFor(() => expect(syncContainerStatus).toHaveBeenCalledTimes(2))
     log.mockRestore()
+  })
+
+  it("reads the container's status once for each actor: a new actor of the same object reads it again", async () => {
+    const { object } = sleepingAgent()
+    syncContainerStatus.mockClear()
+
+    await object.actorCall('live', [])
+    await object.actorCall('live', [])
+    expect(syncContainerStatus).toHaveBeenCalledTimes(1)
+
+    // The object's actor was let go, and its next call makes another, which knows nothing of the container yet.
+    actors.delete(object)
+    await object.actorCall('live', [])
+    expect(syncContainerStatus).toHaveBeenCalledTimes(2)
+  })
+
+  it('lets its actor go when its agent is deleted, with its saved files and its session index', async () => {
+    const { object, ctx, r2 } = sleepingAgent()
+    const slug = (object as unknown as { agentSlug(): string }).agentSlug()
+    const dispose = vi.fn(async () => {})
+    // The object runs the agent here: its actor may hold live sessions and parked reviews.
+    objectActor(slug, object, () => ({ slug, dispose }) as unknown as CloudflareAgentActorDO)
+
+    await object.purgeWorkspace()
+
+    expect(dispose).toHaveBeenCalledOnce()
+    expect(heldObjectActor(slug)).toBeUndefined()
+    expect(ctx.storage.sql.exec('SELECT COUNT(*) AS files FROM workspace_file').toArray()).toEqual([{ files: 0 }])
+    expect(r2.size).toBe(0)
   })
 
   it('asks the actor when the reading without it fails', async () => {

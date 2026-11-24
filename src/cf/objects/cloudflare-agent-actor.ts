@@ -16,7 +16,7 @@ import { AsyncLocalStorage } from 'node:async_hooks'
 import type { AgentDurableObject } from './cloudflare-agent'
 import { callOnCurrentCode, type Checked, type Restarting } from '../lib/object-version'
 import type { Env } from '../index'
-import { evictObjectActor, heldObjectActor } from './object-actors'
+import { heldObjectActor } from './object-actors'
 import { decodeActorError, encodeActorError, type ActorErrorData } from '@shared/lib/agent-actor/actor-error-codec'
 import {
   ACTOR_GROUPS,
@@ -96,7 +96,8 @@ function fromJsonLines(bytes: ReadableStream<Uint8Array>): ReadableStream<unknow
   }))
 }
 
-// An AbortSignal does not cross RPC. The reads that take one use it only as advice.
+// An AbortSignal does not cross RPC. The reads that take one use it only as advice;
+// `container.fetch`'s is its caller's timeout, which the shim keeps on its own side (`unlessAborted`).
 function withoutSignal(arg: unknown): unknown {
   if (arg instanceof AbortSignal) return undefined
   if (!arg || typeof arg !== 'object' || Object.getPrototypeOf(arg) !== Object.prototype) return arg
@@ -138,9 +139,15 @@ export class CloudflareAgentActor implements AgentActor {
   readonly ready = this.rpc('ready')
   readonly delete = this.rpc('delete')
 
-  /** The registry is dropping this actor: what the agent's object holds in this isolate, if it runs the agent here, is released. Never an RPC. */
-  dispose(reason?: 'shutdown'): Promise<void> {
-    return evictObjectActor(this.slug, reason)
+  /**
+   * The registry is dropping this actor. It holds nothing of the agent, so there is nothing to
+   * let go of: the agent's own actor is its object's, and outlives whoever asked for the agent
+   * from here. An isolate that shuts its services down (a replaced task manager) drops its
+   * shims, and must not take the agents whose objects share the isolate down with them. Never
+   * an RPC.
+   */
+  dispose(_reason?: 'shutdown'): Promise<void> {
+    return Promise.resolve()
   }
 
   readonly container: ContainerOps = {
@@ -343,8 +350,10 @@ export class CloudflareAgentActor implements AgentActor {
     if (local) return runOnActor(local, path, args)
     // Read here, in the caller's own context: `reach` may run the call later, and the object never sees this context.
     const actingUserId = getRequestUserId()
+    const signal = path === CONTAINER_FETCH ? (args[1] as RequestInit | undefined)?.signal : undefined
+    signal?.throwIfAborted()
     const sent = path === CONTAINER_FETCH ? fetchArgs(args) : args.map(withoutSignal)
-    const outcome = await this.reach((agent, callerVersion) => agent.actorCall(path, sent, callerVersion, actingUserId))
+    const outcome = await unlessAborted(this.reach((agent, callerVersion) => agent.actorCall(path, sent, callerVersion, actingUserId)), signal)
     if ('error' in outcome) throw decodeActorError(outcome.error)
     return OBJECT_STREAM_OPS.has(path) ? fromJsonLines(outcome.value as ReadableStream<Uint8Array>) : outcome.value
   }
@@ -355,6 +364,25 @@ export class CloudflareAgentActor implements AgentActor {
     if (own) return (await run(own)) as ActorOutcome
     return callOnCurrentCode(this.env.AGENT, this.slug, this.env.VERSION?.timestamp, (agent, callerVersion) => run(agent, callerVersion))
   }
+}
+
+/**
+ * The object's answer, unless `signal` fires first: then the call rejects with the signal's
+ * reason, as an aborted fetch does, and its caller stops waiting. The object goes on with the
+ * request, since no signal reaches it; a response that arrives after that is discarded.
+ */
+function unlessAborted(answered: Promise<ActorOutcome>, signal?: AbortSignal | null): Promise<ActorOutcome> {
+  if (!signal) return answered
+  return new Promise<ActorOutcome>((resolve, reject) => {
+    const stopWaiting = () => {
+      reject(signal.reason)
+      answered.then((outcome) => {
+        if ('value' in outcome && outcome.value instanceof Response) void outcome.value.body?.cancel().catch(() => {})
+      }, () => {})
+    }
+    signal.addEventListener('abort', stopWaiting, { once: true })
+    answered.then(resolve, reject).finally(() => signal.removeEventListener('abort', stopWaiting))
+  })
 }
 
 /** `container.fetch`'s arguments as they cross RPC: the request without its signal. */
