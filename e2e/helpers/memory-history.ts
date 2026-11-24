@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { expect, type APIRequestContext, type Page } from '@playwright/test'
 import { AGENT_MEMORY_DIR } from '../../src/shared/lib/agent-actor/memory-schema'
-import { LocalAgentActor, type LocalActorDeps } from '../../src/shared/lib/agent-actor/local-agent-actor'
+import { LocalFileOps } from '../../src/shared/lib/agent-actor/local-file-ops'
 import { getAgentWorkspaceDir } from '../../src/shared/lib/utils/file-storage'
 import { openHomeAdvancedSettings, openHomeSection } from './agent-home'
 import { isWebKitTeardownFetchError } from './page-errors'
@@ -24,8 +24,8 @@ async function prepareHistory({ page, request, apiBaseUrl, navigate }: MemoryHis
   expect(agent.slug).toBeTruthy()
   // The app reads a real workspace file. getAgentWorkspaceDir resolves the
   // launcher's isolated SUPERAGENT_DATA_DIR at call time, including Electron.
-  const actor = new LocalAgentActor(agent.slug, { getAgentWorkspaceDir } as LocalActorDeps)
-  await actor.files.putDoc(`${AGENT_MEMORY_DIR}/MEMORY.md`, original)
+  const files = new LocalFileOps(() => getAgentWorkspaceDir(agent.slug))
+  await files.putDoc(`${AGENT_MEMORY_DIR}/MEMORY.md`, original)
 
   await navigate(`/agents/${agent.slug}`)
   await openHomeAdvancedSettings(page)

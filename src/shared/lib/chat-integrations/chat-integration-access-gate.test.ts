@@ -45,6 +45,12 @@ vi.mock('@shared/lib/container/container-host', async () => {
 vi.mock('@shared/lib/proxy/review-manager', () => ({
   reviewManager: { submitDecision: vi.fn() },
 }))
+// The actor's review ops read the agent's own reviews: they answer as the router mock above does.
+vi.mock('@shared/lib/proxy/agent-reviews', async (importOriginal) => {
+  const { reviewsAnsweredByRouterMock } = await import('@shared/lib/agent-actor/testing/router-shaped-mocks')
+  const { reviewManager } = await import('@shared/lib/proxy/review-manager')
+  return reviewsAnsweredByRouterMock(await importOriginal<typeof import('@shared/lib/proxy/agent-reviews')>(), reviewManager)
+})
 
 vi.mock('@shared/lib/services/agent-service', () => ({
   agentExists: vi.fn(),

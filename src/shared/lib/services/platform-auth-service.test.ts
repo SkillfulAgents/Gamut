@@ -32,8 +32,15 @@ vi.mock('@shared/lib/agent-actor/agent-catalog', async () => {
 const mockMarkAgentsStale = vi.fn()
 vi.mock('@shared/lib/container/container-host', async () => {
   const { hostFromManagerMock } = await import('@shared/lib/agent-actor/testing/host-from-manager-mock')
-  return { containerHost: hostFromManagerMock({ markAgentsStale: mockMarkAgentsStale }) }
+  return { containerHost: hostFromManagerMock({}) }
 })
+vi.mock('@shared/lib/agent-actor/all-agents', async (importOriginal) => {
+  const { allAgentsFromManagerMock } = await import('@shared/lib/agent-actor/testing/host-from-manager-mock')
+  return allAgentsFromManagerMock({
+    markAgentsStale: (...args: unknown[]) => mockMarkAgentsStale(...args),
+  }, await importOriginal())
+})
+
 
 const mockEnsureManagedPlatformConnection = vi.fn(async () => {})
 vi.mock('@shared/lib/llm-provider/connection-settings', () => ({

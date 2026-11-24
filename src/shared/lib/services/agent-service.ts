@@ -526,7 +526,7 @@ export async function deleteAgent(slug: string): Promise<boolean> {
  * For a factory reset: stop every running agent through its actor, then
  * remove every agent's workspace through the workspace removal. Agents whose
  * containers this process does not hold are reached too. A failed stop is
- * logged and the reset goes on, as `containerHost.stopAll` does; a failed
+ * logged and the reset goes on, as `stopAllAgents` does; a failed
  * removal fails the reset. The caller clears the tables after.
  */
 export async function stopAgentsAndRemoveWorkspaces(): Promise<void> {

@@ -26,9 +26,7 @@ import {
  * Everything downstream derives from the store: the session "awaiting input"
  * status (`isSessionAwaiting` — the live session's bit is an edge-detection
  * cache of that projection), the unified wire events, the snapshot endpoint,
- * OS notifications, and the decision routes' already-settled gate. The
- * process-wide `userInputRequestManager` is the router in front of every
- * agent's store: it indexes ids to owners and fans transitions out.
+ * OS notifications, and the decision routes' already-settled gate.
  */
 
 /**

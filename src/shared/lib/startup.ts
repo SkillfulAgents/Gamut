@@ -1,5 +1,5 @@
 import type { ServerType } from '@hono/node-server'
-import { agentRegistry, containerHost } from './agent-actor'
+import { agentRegistry, containerHost, stopAllAgents, wakeAgents } from './agent-actor'
 import { shutdownActiveRunner } from './container/client-factory'
 import { taskScheduler } from './scheduler/task-scheduler'
 import { triggerManager } from './scheduler/trigger-manager'
@@ -65,7 +65,7 @@ class ContainerHostService implements Service {
   readonly critical = true
 
   async start(): Promise<void> {
-    await containerHost.initializeAgents(discoveredAgentSlugs)
+    await wakeAgents(discoveredAgentSlugs)
     // Watched once the agents are known, so containers still running from
     // before this launch get their baseline too; from then on it marks
     // agents stale whenever the relay's availability moves.
@@ -110,7 +110,10 @@ function backgroundServices(): Service[] {
     // After the containers, whose runtimes the host still needed: every agent
     // lets go of what it holds, its parked reviews and re-auth waits included.
     new ReleasedAtShutdown('agent-registry', () => agentRegistry.evictAll()),
-    new ReleasedAtShutdown('containers', () => containerHost.stopAll()),
+    new ReleasedAtShutdown('containers', async () => {
+      await stopAllAgents()
+      containerHost.clearRuntimes()
+    }),
 
     // The host's one connection to the platform webhook queue, shared by every
     // feature that receives webhooks. Cheap to start: it claims nothing until a

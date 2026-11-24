@@ -71,6 +71,12 @@ vi.mock('@shared/lib/proxy/review-manager', () => ({
     takeDecisionDetail: vi.fn(async () => ({})),
   },
 }))
+// The actor's review ops read the agent's own reviews: they answer as the router mock above does.
+vi.mock('@shared/lib/proxy/agent-reviews', async (importOriginal) => {
+  const { reviewsAnsweredByRouterMock } = await import('@shared/lib/agent-actor/testing/router-shaped-mocks')
+  const { reviewManager } = await import('@shared/lib/proxy/review-manager')
+  return reviewsAnsweredByRouterMock(await importOriginal<typeof import('@shared/lib/proxy/agent-reviews')>(), reviewManager)
+})
 
 // The agent's MCP re-auth waits, as its router answers the actor's ops: a
 // request resolves to how the wait ended.
@@ -80,6 +86,12 @@ vi.mock('@shared/lib/proxy/mcp-reauth-manager', () => ({
     withdraw: vi.fn(),
   },
 }))
+// The actor's re-auth ops read the agent's own waits: they answer as the router mock above does.
+vi.mock('@shared/lib/proxy/reauth-waits', async (importOriginal) => {
+  const { reauthWaitsAnsweredByRouterMocks } = await import('@shared/lib/agent-actor/testing/router-shaped-mocks')
+  const { mcpReauthManager } = await import('@shared/lib/proxy/mcp-reauth-manager')
+  return reauthWaitsAnsweredByRouterMocks(await importOriginal<typeof import('@shared/lib/proxy/reauth-waits')>(), { mcp: mcpReauthManager })
+})
 // A refreshed token resumes the MCP's parked calls in every agent it is assigned to.
 const mockResumeMcpReauthWaits = vi.hoisted(() => vi.fn(async (_mcpId: string) => {}))
 vi.mock('@shared/lib/services/connection-sync-service', async (importOriginal) => ({

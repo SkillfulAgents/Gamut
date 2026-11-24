@@ -34,7 +34,6 @@ import type { RuntimeSessions } from './agent-sessions-access'
 import type { RuntimeFatalKind } from './runtime-death'
 import { globalFeed } from '@shared/lib/notifications/global-feed'
 import { endComputerUseSessions } from '@shared/lib/computer-use/executor'
-import { computerUsePermissionManager } from '@shared/lib/computer-use/permission-manager'
 import { captureException, captureMessage } from '@shared/lib/error-reporting'
 import { background } from '@shared/lib/background'
 import { resolveTimezoneForAgent } from '@shared/lib/services/timezone-resolver'
@@ -80,6 +79,8 @@ export interface RuntimeHost {
    * readiness so the VM restarts.
    */
   afterForceStop(slug: string): void
+  /** The runtime was dropped: the host forgets it. */
+  disposed(runtime: ContainerRuntime): void
 }
 
 /** What a runtime needs from its agent, which the agent's actor holds. */
@@ -95,6 +96,10 @@ export interface RuntimeAgent {
   readonly containerWatch: ContainerWatch
   /** The agent's instructions document (`AGENTS.md`), for the display name a start gives the container; null when it has none. */
   instructions(): Promise<string | null>
+  /** The container stopped: the agent's computer-use sessions end with it, so no app stays held. */
+  clearComputerUseApp(): void
+  /** Forget this runtime: the agent's actor makes a new one on its next use. */
+  forgetRuntime(): void
 }
 
 const healthVolumesSchema = z.object({ status: z.literal('ok'), volumes: z.array(z.string()) })
@@ -500,7 +505,7 @@ export class ContainerRuntime {
         this.sessions().markAllInactive({ settleRecovering: true })
 
         // The agent's computer-use sessions end with it, and their cursors with them.
-        computerUsePermissionManager.clearActiveApp(slug)
+        this.agent.clearComputerUseApp()
         background(endComputerUseSessions({ agentSlug: slug }).catch(() => {}), { name: 'container-runtime.end-computer-use' })  // Best-effort, non-blocking
 
         // Broadcast status change so UI updates
@@ -938,10 +943,19 @@ export class ContainerRuntime {
   }
 
   /**
+   * Have the agent forget this runtime, which disposes it: the agent's actor
+   * makes a new one on its next use. Does not stop the container.
+   */
+  drop(): void {
+    this.agent.forgetRuntime()
+  }
+
+  /**
    * Forget the client and every cached fact about the container. Does not
    * stop the container.
    */
   dispose(): void {
+    this.host.disposed(this)
     this.volumesPresent = undefined
     this.disposed = true
     this.lifecycle++

@@ -102,15 +102,13 @@ vi.mock('@shared/lib/services/timezone-resolver', () => ({ resolveTimezoneForAge
 vi.mock('@shared/lib/services/mount-service', () => ({ listVolumes: async () => ({ volumes: [], notMounted: [] }), remounted: async () => {} }))
 
 import { containerHost } from './container-host'
-import { createAgentRegistry } from '@shared/lib/agent-actor/registry'
+import { _resetAgentRegistryForTest, agentRegistry as registry } from '@shared/lib/agent-actor/registry'
 import { LiveSessions } from '@shared/lib/agent-actor/live/live-sessions'
-import { LocalAgentActor, type LocalActorDeps } from '@shared/lib/agent-actor/local-agent-actor'
+import { LocalAgentActor } from '@shared/lib/agent-actor/local-agent-actor'
+import { createRecordingHostPort } from '@shared/lib/agent-actor/testing/recording-host-port'
 
-// The agents' actors own their idle alarms; the registry hands the runtimes the way to them.
-// The routers over the actors' stores take no part here.
-const routers = { userInputRequestManager: {}, reviewManager: {}, accountReauthManager: {}, mcpReauthManager: {}, computerUsePermissionManager: {} }
-const deps = { containerHost, ...routers } as unknown as LocalActorDeps
-const registry = createAgentRegistry(deps)
+// The actors desktop runs, over this file's container host: each owns its idle alarm and its runtime.
+_resetAgentRegistryForTest((slug) => new LocalAgentActor(slug, { containers: containerHost, host: createRecordingHostPort().port }))
 // Each agent's actor holds its runtime.
 const actorOf = (slug: string) => registry.get(slug) as LocalAgentActor
 const agents = { runtime: (slug: string) => actorOf(slug).state.runtime(), drop: (slug: string) => actorOf(slug).state.dropRuntime() }
@@ -445,38 +443,6 @@ describe('ContainerRuntime idle alarm', () => {
     await actorOf(SLUG).checkIdle()
     expect(mockStop).toHaveBeenCalledTimes(1)
     expect(alarmOf(SLUG).isArmed()).toBe(false)
-  })
-
-  it('an actor that overrides its wake-up waits with that: no timer of this process sleeps its container, and its checkIdle() does', async () => {
-    const wakeUps: number[] = []
-    const cancelled = vi.fn()
-    // As an actor that outlives its process would: its wake-up is set somewhere that does too.
-    class OwnWakeUpActor extends LocalAgentActor {
-      protected override wakeToCheckIdleAt(at: number): void {
-        wakeUps.push(at)
-      }
-      protected override cancelIdleWake(): void {
-        cancelled()
-      }
-    }
-    const actor = new OwnWakeUpActor('agent-own-wake-up', deps)
-    try {
-      await actor.state.runtime().ensureRunning()
-      await settle()
-      expect(wakeUps).toEqual([T0 + TIMEOUT])
-
-      await vi.advanceTimersByTimeAsync(2 * TIMEOUT)
-      expect(mockStop).not.toHaveBeenCalled()
-      expect(wakeUps).toEqual([T0 + TIMEOUT])
-
-      // Its wake-up goes off.
-      await actor.checkIdle()
-      expect(mockStop).toHaveBeenCalledTimes(1)
-      expect(cancelled).toHaveBeenCalled()
-      expect(actor.state.idleAlarm.isArmed()).toBe(false)
-    } finally {
-      actor.dispose()
-    }
   })
 
   it('dropping the runtime disarms the alarm, and so does evicting the actor', async () => {

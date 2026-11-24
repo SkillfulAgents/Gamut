@@ -60,15 +60,21 @@ vi.mock('./agent-actor/agent-catalog', () => ({
 vi.mock('./services/agent-service', () => ({
   listAgents: () => listAgents(),
 }))
+// Waking every agent at startup and stopping them all at shutdown are asked of the agents' actors.
+vi.mock('./agent-actor/all-agents', async (importOriginal) => {
+  const { allAgentsFromManagerMock } = await import('@shared/lib/agent-actor/testing/host-from-manager-mock')
+  return allAgentsFromManagerMock({
+    initializeAgents: (...args: unknown[]) => initializeAgents(...args),
+    stopAll: async () => { released.push('containers') },
+  }, await importOriginal())
+})
 vi.mock('./container/container-host', async () => {
   const { hostFromManagerMock } = await import('@shared/lib/agent-actor/testing/host-from-manager-mock')
   return {
     containerHost: hostFromManagerMock({
-      initializeAgents: (...args: unknown[]) => initializeAgents(...args),
       watchWebhookRelay: (relay: { snapshot(): { available: boolean } }) => watchWebhookRelay(relay),
       ensureImageReady: () => ensureImageReady(),
       onBeforeContainerStop: null,
-      stopAll: async () => { released.push('containers') },
       clearClients: vi.fn(),
     }),
   }

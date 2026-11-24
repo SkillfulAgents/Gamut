@@ -1,4 +1,4 @@
-import { AttachedStores, type AgentStoreDirectory } from '@shared/lib/agent-actor/store-directory'
+import { AgentStores, type AgentStoreDirectory } from '@shared/lib/agent-actor/store-directory'
 import type { AccountReauthDetails, AccountReauthWaits, ReauthOutcome } from './reauth-waits'
 import { awaitReauth } from './reauth-request'
 
@@ -11,16 +11,17 @@ export {
 } from './reauth-waits'
 
 /**
- * The router in front of every agent's account re-auth waits. The waits live
- * in each agent's actor (`AgentReauthWaits`, see `reauth-waits`); this
- * singleton dispatches the calls that arrive with a slug.
+ * The router in front of every agent's account re-auth waits, for tests: the
+ * app reaches them through the agent's actor (`inputs.accountReauth`). The
+ * waits live in each agent's actor (`AgentReauthWaits`, see `reauth-waits`);
+ * this singleton dispatches the calls that arrive with a slug.
  */
 export class AccountReauthManager {
-  private readonly agents = new AttachedStores<AccountReauthWaits>('account re-auth waits')
+  private readonly agents = new AgentStores<AccountReauthWaits>('account re-auth waits', (state) => state.accountReauth)
 
-  /** Called once by the agent registry with the way to each agent's waits. */
+  /** Tests only: read the agents' waits from `directory` in place of the registry's actors. */
   attachAgents(directory: AgentStoreDirectory<AccountReauthWaits> | null): void {
-    this.agents.attach(directory)
+    this.agents.replaceWith(directory)
   }
 
   /** Park a request of the agent on its re-auth card and wait for how it ends (see `awaitReauth`). */
@@ -55,13 +56,5 @@ export class AccountReauthManager {
   }
 }
 
-const globalForAccountReauthManager = globalThis as unknown as {
-  accountReauthManager: AccountReauthManager | undefined
-}
-
-export const accountReauthManager =
-  globalForAccountReauthManager.accountReauthManager ?? new AccountReauthManager()
-
-if (process.env.NODE_ENV !== 'production') {
-  globalForAccountReauthManager.accountReauthManager = accountReauthManager
-}
+// One per evaluation of this module: it holds nothing (see `reviewManager`).
+export const accountReauthManager = new AccountReauthManager()

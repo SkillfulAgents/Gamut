@@ -5,6 +5,9 @@ import { mountWebBuild } from './web-build'
 import { mountCompression } from './compression'
 import { openDatabase } from '@shared/lib/db'
 import { initializeLocalAppState } from '@shared/lib/app-state'
+import { containerHost as containers, initializeAgentRegistry } from '@shared/lib/agent-actor'
+import { LocalAgentActor } from '@shared/lib/agent-actor/local-agent-actor'
+import { localHostPort as host } from '@shared/lib/host/local-host-port'
 import { installServerKeyManager } from '@shared/lib/keys/install-server-key-manager'
 import { attachErrorReportingIdentity, flushErrorReporting, initErrorReporting } from '@shared/lib/error-reporting'
 import { createServerProvider } from '@shared/lib/error-reporting/sentry-provider'
@@ -85,6 +88,8 @@ async function start() {
   await attachErrorReportingIdentity()
   // Then the state the API's processes share; this one process keeps it in memory.
   await initializeLocalAppState()
+  // Then the agents: each one's actor runs in this process.
+  initializeAgentRegistry((slug) => new LocalAgentActor(slug, { containers, host }))
   // Then key custody: the vault seals and opens through it, and it checks a
   // key against the sealed data, so after the database and before any request.
   await installServerKeyManager()

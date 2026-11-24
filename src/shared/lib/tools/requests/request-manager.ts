@@ -1,5 +1,5 @@
 import type { AgentSlug } from '@shared/lib/agent-actor/types'
-import { AttachedStores, type AgentStoreDirectory } from '@shared/lib/agent-actor/store-directory'
+import { AgentStores, type AgentStoreDirectory } from '@shared/lib/agent-actor/store-directory'
 import type { AgentInputRequests, SettledUserInputRequest } from './agent-input-requests'
 import type {
   PendingUserInputRequest,
@@ -11,7 +11,8 @@ import type {
 export type { SettledUserInputRequest, UserInputRequestTransition } from './agent-input-requests'
 
 /**
- * The router in front of every agent's pending user-input requests.
+ * The router in front of every agent's pending user-input requests, for
+ * tests: the app reaches them through the agent's actor (`inputs`).
  *
  * The requests themselves live in each agent's `AgentInputRequests`, owned by
  * its actor, and the agent's own live sessions put their transitions on the
@@ -27,11 +28,11 @@ export type { SettledUserInputRequest, UserInputRequestTransition } from './agen
  * handle finds nothing — no request can exist for it.
  */
 export class UserInputRequestManager {
-  private readonly agents = new AttachedStores<AgentInputRequests>('user-input requests')
+  private readonly agents = new AgentStores<AgentInputRequests>('user-input requests', (state) => state.inputRequests)
 
-  /** Called by the agent registry with the way to each agent's store. */
+  /** Tests only: read the agents' stores from `directory` in place of the registry's actors. */
   attachAgents(directory: AgentStoreDirectory<AgentInputRequests> | null): void {
-    this.agents.attach(directory)
+    this.agents.replaceWith(directory)
   }
 
   /**
@@ -194,17 +195,7 @@ export class UserInputRequestManager {
   }
 }
 
-// Use globalThis to persist across dev-server hot reloads, matching the agents'
-// state and reviewManager — the agents' stores report their transitions to this
-// router, and they survive reloads, so the router must too or a reload would
-// strand their open requests in a stale instance.
-const globalForUserInputRequestManager = globalThis as unknown as {
-  userInputRequestManager: UserInputRequestManager | undefined
-}
-
-export const userInputRequestManager =
-  globalForUserInputRequestManager.userInputRequestManager ?? new UserInputRequestManager()
-
-if (process.env.NODE_ENV !== 'production') {
-  globalForUserInputRequestManager.userInputRequestManager = userInputRequestManager
-}
+// One per evaluation of this module: it holds nothing, and reads the registry
+// of the same evaluation. The requests themselves survive a dev-server reload
+// with the agents' state.
+export const userInputRequestManager = new UserInputRequestManager()

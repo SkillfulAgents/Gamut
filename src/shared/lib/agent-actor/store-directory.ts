@@ -1,57 +1,74 @@
 /**
- * How a process-wide router reaches the stores the actors own.
+ * How a slug-keyed router reaches the stores the actors own. For tests: the
+ * app calls no router.
  *
  * Per-agent in-memory state (open user-input requests, parked reviews and
- * re-auth waits, computer-use grants) is a field of the agent's actor. The
- * singletons that used to hold it keyed by slug are routers now: they answer
- * a call that names the agent but holds no actor handle, and they run
- * the process-wide sweeps (reject everything at shutdown, complete every wait
- * on an account). For both they need the actors' stores, and the registry —
- * the one owner of the handles — hands them a directory when it is created.
+ * re-auth waits, computer-use grants) is a field of the agent's actor, and
+ * the app reaches it through the actor's ops. The routers (`reviewManager`
+ * and friends) let a test read or drive that state by slug. They hold nothing
+ * and nothing is attached to them: they find the agent's actor in the
+ * registry and read its store.
  *
- * A directory never holds state of its own: `get` creates the handle the way
- * `agentRegistry.get` does, `peek` answers only for a handle that exists, and
- * `all` is the handles that exist now. Nothing can be stored for an agent
- * that has no handle, so a sweep over `all()` is complete.
+ * `get` makes the actor the way `agentRegistry.get` does, `peek` answers only
+ * for an actor that exists, and `all` is the actors that exist now. Nothing
+ * can be stored for an agent that has no actor, so a sweep over `all()` is
+ * complete. Only an actor that runs in this process has stores here: one that
+ * forwards to its agent elsewhere keeps them where the agent runs.
  */
-import type { AgentSlug } from './types'
+import type { AgentState } from './agent-state'
+import { agentRegistry, isAgentRegistryInitialized } from './registry'
+import type { AgentActor, AgentSlug } from './types'
 
 export interface AgentStoreDirectory<T> {
-  /** The store of one agent, creating the actor handle on first use. Never does I/O. */
+  /** The store of one agent, making its actor on first use. Never does I/O. */
   get(slug: AgentSlug): T
-  /** The store if the agent has a handle; a read for an agent nothing has touched finds nothing. */
+  /** The store if the agent has an actor; a read for an agent nothing has touched finds nothing. */
   peek(slug: AgentSlug): T | undefined
-  /** Every store that exists now: one per live handle. */
+  /** Every store that exists now: one per actor. */
   all(): T[]
 }
 
-/**
- * The directory a router holds: detached until the registry attaches one.
- * Before that, a read finds nothing and a sweep has nothing to do — the
- * state cannot exist without the handles — while a write for an agent has
- * nowhere to go and says so.
- */
-export class AttachedStores<T> implements AgentStoreDirectory<T> {
-  private directory: AgentStoreDirectory<T> | null = null
+/** The in-memory state of an actor that runs in this process; none for one that does not. */
+function stateOf(actor: AgentActor): AgentState | undefined {
+  return (actor as { state?: AgentState }).state
+}
 
-  constructor(private readonly what: string) {}
+/** One kind of store (`pick`), read from the registry's actors. */
+export class AgentStores<T> implements AgentStoreDirectory<T> {
+  private replaced: AgentStoreDirectory<T> | null = null
 
-  attach(directory: AgentStoreDirectory<T> | null): void {
-    this.directory = directory
+  constructor(
+    private readonly what: string,
+    private readonly pick: (state: AgentState) => T,
+  ) {}
+
+  /** Tests only: read the stores from `directory` in place of the registry's actors. Null goes back to them. */
+  replaceWith(directory: AgentStoreDirectory<T> | null): void {
+    this.replaced = directory
   }
 
   get(slug: AgentSlug): T {
-    if (!this.directory) {
-      throw new Error(`No ${this.what} for agent ${slug}: the agent registry has not attached the agents' stores`)
-    }
-    return this.directory.get(slug)
+    if (this.replaced) return this.replaced.get(slug)
+    const state = stateOf(agentRegistry.get(slug))
+    if (!state) throw new Error(`No ${this.what} for agent ${slug}: its actor does not run in this process`)
+    return this.pick(state)
   }
 
   peek(slug: AgentSlug): T | undefined {
-    return this.directory?.peek(slug)
+    if (this.replaced) return this.replaced.peek(slug)
+    // Before any agent was used there is nothing to find.
+    if (!isAgentRegistryInitialized()) return undefined
+    const actor = agentRegistry.held().find((held) => held.slug === slug)
+    const state = actor && stateOf(actor)
+    return state ? this.pick(state) : undefined
   }
 
   all(): T[] {
-    return this.directory?.all() ?? []
+    if (this.replaced) return this.replaced.all()
+    if (!isAgentRegistryInitialized()) return []
+    return agentRegistry.held().flatMap((actor) => {
+      const state = stateOf(actor)
+      return state ? [this.pick(state)] : []
+    })
   }
 }

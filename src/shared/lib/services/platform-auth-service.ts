@@ -618,8 +618,8 @@ export async function savePlatformAuth(_userId: string, input: SavePlatformAuthI
     // Dynamic import breaks the module cycle (container-runtime → here).
     // A same-token re-save (refreshStoredPlatformAccount) must not arm.
     try {
-      const { containerHost } = await import('@shared/lib/agent-actor')
-      containerHost.markAgentsStale()
+      const { markRunningAgentsStale } = await import('@shared/lib/agent-actor')
+      await markRunningAgentsStale()
     } catch (error) {
       captureException(error, { tags: { area: 'platform-auth', op: 'mark-agents-stale' } })
     }

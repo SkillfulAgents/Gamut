@@ -1,23 +1,24 @@
 /**
- * The router in front of every agent's computer-use permissions.
+ * The router in front of every agent's computer-use permissions, for tests:
+ * the app reaches them through the agent's actor (`inputs.computerUse`).
  *
  * The grants and the active app live in each agent's actor
- * (`AgentComputerUse`); this singleton dispatches the calls that arrive with
- * a slug — the runtime's cleanup when a container stops — to that agent's
- * store. The agent's own live sessions call its store directly. A read for
- * an agent that has no handle finds nothing in memory; a check reads the
- * agent's persisted grants from settings through its store.
+ * (`AgentComputerUse`); this singleton dispatches a call that arrives with a
+ * slug to the store of that agent's actor, which it finds in the registry.
+ * The agent's own live sessions and its container runtime call its store
+ * directly. A read for an agent that has no actor finds nothing in memory; a
+ * check reads the agent's persisted grants from settings through its store.
  */
-import { AttachedStores, type AgentStoreDirectory } from '@shared/lib/agent-actor/store-directory'
+import { AgentStores, type AgentStoreDirectory } from '@shared/lib/agent-actor/store-directory'
 import { AgentComputerUse } from './agent-permissions'
 import type { ComputerUsePermissionLevel, PermissionGrant, PermissionGrantType } from './types'
 
 export class ComputerUsePermissionManager {
-  private readonly agents = new AttachedStores<AgentComputerUse>('computer-use permissions')
+  private readonly agents = new AgentStores<AgentComputerUse>('computer-use permissions', (state) => state.computerUse)
 
-  /** Called once by the agent registry with the way to each agent's store. */
+  /** Tests only: read the agents' stores from `directory` in place of the registry's actors. */
   attachAgents(directory: AgentStoreDirectory<AgentComputerUse> | null): void {
-    this.agents.attach(directory)
+    this.agents.replaceWith(directory)
   }
 
   /** `AgentComputerUse.check` */

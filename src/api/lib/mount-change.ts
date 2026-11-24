@@ -1,4 +1,4 @@
-import { containerHost } from '@shared/lib/agent-actor'
+import { agentsHoldingDrives } from '@shared/lib/agent-actor'
 import { agentRegistry } from '@shared/lib/agent-actor/registry'
 import { agentsWithVolume, getMounts } from '@shared/lib/services/mount-service'
 import { globalFeed } from '@shared/lib/notifications/global-feed'
@@ -27,7 +27,7 @@ async function markStale(slugs: string[]): Promise<void> {
 export async function afterVolumeChange(volumeId: string): Promise<void> {
   globalFeed.publish({ type: 'volume_attention_changed' })
   try {
-    const holding = new Set(containerHost.getAgentIdsHoldingDrives())
+    const holding = new Set(await agentsHoldingDrives())
     await markStale((await agentsWithVolume(volumeId)).filter(slug => holding.has(slug)))
   } catch (error) {
     console.error('[volumes] Could not find the agents a drive change reached:', error)
@@ -36,7 +36,7 @@ export async function afterVolumeChange(volumeId: string): Promise<void> {
 
 /** Each agent's drives, or null for one that could not be read, which is then left out rather than the rest. */
 async function heldMounts(options?: { orStarting?: boolean }): Promise<Map<string, string | null>> {
-  const slugs = containerHost.getAgentIdsHoldingDrives(options)
+  const slugs = await agentsHoldingDrives(options)
   const reads = await Promise.allSettled(slugs.map(async slug => JSON.stringify(await getMounts(slug))))
   return new Map(reads.map((read, i) => {
     if (read.status === 'fulfilled') return [slugs[i], read.value]

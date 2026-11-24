@@ -9,9 +9,8 @@
  *
  * Created with the agent's actor and released with it, so `agentRegistry.evict`
  * is the one operation that ends everything an agent held in this process.
- * The stores know nothing of other agents; the process-wide routers
- * (`userInputRequestManager` and friends) reach them through the directory
- * the registry attaches.
+ * The stores know nothing of other agents, and the app reaches them only
+ * through the agent's actor.
  */
 import { AgentInputRequests } from '@shared/lib/tools/requests/agent-input-requests'
 import { AgentReviews } from '@shared/lib/proxy/agent-reviews'
@@ -134,13 +133,22 @@ export function createAgentState(slug: AgentSlug, hooks: AgentStateHooks): Agent
     callerSessionId && live.has(callerSessionId) ? callerSessionId : undefined
   const idleAlarm = new IdleAlarm({ ...hooks.idle, isBusy: () => live.hasActive() || live.hasAwaitingInput() })
   const containerWatch = new ContainerWatch(hooks.watch)
+  let runtime: ContainerRuntime | undefined
+  const dropRuntime = () => {
+    // Forgotten before it is disposed: a runtime that asks to be dropped from
+    // inside its own dispose finds nothing more to do.
+    const dropped = runtime
+    runtime = undefined
+    dropped?.dispose()
+  }
   const agent: RuntimeAgent = {
     sessions: live,
     idleAlarm,
     containerWatch,
     instructions: () => hooks.sessions.store.config.get('instructions'),
+    clearComputerUseApp: () => computerUse.clearActiveApp(),
+    forgetRuntime: dropRuntime,
   }
-  let runtime: ContainerRuntime | undefined
   return {
     store: hooks.sessions.store,
     sessions: live,
@@ -159,10 +167,7 @@ export function createAgentState(slug: AgentSlug, hooks: AgentStateHooks): Agent
     containerWatch,
     runtime: () => (runtime ??= hooks.runtime(agent)),
     peekRuntime: () => runtime,
-    dropRuntime: () => {
-      runtime?.dispose()
-      runtime = undefined
-    },
+    dropRuntime,
   }
 }
 

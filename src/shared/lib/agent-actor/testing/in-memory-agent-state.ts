@@ -1,12 +1,11 @@
 /**
  * Test helper: the actors' stores without the actors.
  *
- * In the app the agent registry creates each agent's `AgentState` with its
- * handle and attaches a directory over the handles to the process-wide
- * routers (`userInputRequestManager`, `reviewManager`, ...). A test that
- * drives a router or a route without the real registry has no handles, so
- * nothing would attach: this builds the same states in a map and attaches
- * them to the singletons, the way the registry would.
+ * In the app each agent's actor makes its `AgentState`, and the slug-keyed
+ * routers (`userInputRequestManager`, `reviewManager`, ...) read the stores
+ * of the registry's actors. A test that drives a router or a route without
+ * actors has none to read: this builds the same states in a map and has the
+ * routers read those in their place.
  *
  *   const agents = attachInMemoryAgentState()
  *   userInputRequestManager.register({ scope: { agentSlug: 'a', ... }, ... })
@@ -62,7 +61,7 @@ export const NO_CONTAINER_RUNTIME: SessionsRuntime = {
 export interface InMemoryAgentStateDirectory extends AgentStoreDirectory<AgentState> {
   /** The states built so far, by slug. */
   readonly states: Map<AgentSlug, AgentState>
-  /** A directory over one store of every state, as the registry attaches to a router. */
+  /** A directory over one store of every state, for a router to read in place of the registry's actors. */
   pick<T>(select: (state: AgentState) => T): AgentStoreDirectory<T>
   /** Release every state (rejecting what is parked) and forget it. */
   reset(): void

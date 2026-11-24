@@ -1,23 +1,17 @@
 import pLimit from 'p-limit'
 import { readSessionToolHistory } from '@shared/lib/services/session-tool-history'
-import type { containerHost } from '@shared/lib/container/container-host'
+import type { ContainerHost } from '@shared/lib/container/container-host'
 import { autoSleepTimeoutMsFrom } from '@shared/lib/container/idle-alarm'
 import { processTimer } from '@shared/lib/container/process-timer'
 import { getSettings } from '@shared/lib/config/settings'
 import type { ContainerRuntime } from '@shared/lib/container/container-runtime'
-import type { userInputRequestManager } from '@shared/lib/tools/requests/request-manager'
-import type { reviewManager } from '@shared/lib/proxy/review-manager'
-import type { accountReauthManager } from '@shared/lib/proxy/account-reauth-manager'
-import type { computerUsePermissionManager } from '@shared/lib/computer-use/permission-manager'
 import { ANY_APPLICATION_LEVEL } from '@shared/lib/computer-use/types'
-import type { mcpReauthManager } from '@shared/lib/proxy/mcp-reauth-manager'
-import type * as sessionService from '@shared/lib/services/session-service'
-import type { appendAssistantEntry, appendInformationalEntry } from '@shared/lib/services/session-transcript-append'
-import type { recordSessionActivity } from '@shared/lib/services/session-activity'
-import type * as transcriptOps from './local-transcript-ops'
-import type { getAgentWorkspaceDir } from '@shared/lib/utils/file-storage'
-import type { syncAgentConnectionEnvironment } from '@shared/lib/container/connection-runtime-sync'
-import type { loadDailyUsageData, loadSessionUsageTotals } from '@shared/lib/services/usage-service'
+import * as sessionService from '@shared/lib/services/session-service'
+import { appendAssistantEntry } from '@shared/lib/services/session-transcript-append'
+import { recordSessionActivity } from '@shared/lib/services/session-activity'
+import * as transcripts from './local-transcript-ops'
+import { syncAgentConnectionEnvironment } from '@shared/lib/container/connection-runtime-sync'
+import { loadDailyUsageData, loadSessionUsageTotals } from '@shared/lib/services/usage-service'
 import { scanArtifactsIn } from '@shared/lib/services/artifact-scan'
 import type { HostPort } from './host-port'
 import { runComputerUse, runScript } from './host-runs'
@@ -61,33 +55,13 @@ import type {
 } from './types'
 
 /**
- * What a local actor delegates to. Injected so the registry can be built
- * against fakes in tests.
- *
- * Every op reads its dependency from `deps` at call time, never at
- * construction, so a dependency is only touched by the call that uses it.
- * The container host makes this agent's `ContainerRuntime`, which holds the
- * client and every cached fact about the container; the agent's state keeps it.
- *
- * The user-input, review, re-auth and computer-use managers are routers over
- * state the actors own: the registry hands them the way to every actor's stores.
+ * What a local actor is given: the two things outside the agent that it
+ * cannot make for itself. Everything else it uses is its own code, which it
+ * imports.
  */
-export interface LocalActorDeps {
-  readonly containerHost: typeof containerHost
-  readonly userInputRequestManager: typeof userInputRequestManager
-  readonly reviewManager: typeof reviewManager
-  readonly accountReauthManager: typeof accountReauthManager
-  readonly computerUsePermissionManager: typeof computerUsePermissionManager
-  readonly mcpReauthManager: typeof mcpReauthManager
-  readonly sessionService: typeof sessionService
-  readonly transcripts: typeof transcriptOps
-  readonly appendInformationalEntry: typeof appendInformationalEntry
-  readonly appendAssistantEntry: typeof appendAssistantEntry
-  readonly recordSessionActivity: typeof recordSessionActivity
-  readonly getAgentWorkspaceDir: typeof getAgentWorkspaceDir
-  readonly syncAgentConnectionEnvironment: typeof syncAgentConnectionEnvironment
-  readonly loadDailyUsageData: typeof loadDailyUsageData
-  readonly loadSessionUsageTotals: typeof loadSessionUsageTotals
+export interface LocalActorParts {
+  /** This machine's container layer. The actor asks it for its own container runtime, which the actor then holds. */
+  readonly containers: Pick<ContainerHost, 'createRuntime'>
   /** The host this agent asks for host tools, machine work and side effects. */
   readonly host: HostPort
 }
@@ -116,6 +90,7 @@ const listingLimit = pLimit(5)
 export class LocalAgentActor implements AgentActor {
   readonly live: () => Promise<AgentLiveSummary>
   readonly listing: () => Promise<AgentListing>
+  readonly ready: () => Promise<void>
   readonly container: ContainerOps
   readonly sessions: SessionOps
   readonly messages: MessageOps
@@ -133,37 +108,46 @@ export class LocalAgentActor implements AgentActor {
   /**
    * What this agent holds in memory: its live sessions, its pending
    * user-input requests, the reviews and re-auth waits parked on them, its
-   * computer-use grants. Created with the handle and released by `dispose`.
+   * computer-use grants. Created with the actor and released by `dispose`.
    */
   readonly state: AgentState
   /**
    * The actor's first read of its container, begun when the actor is made:
-   * until it lands, the actor does not know whether its container runs. A
-   * handle that adopts state an earlier one made has nothing to read.
+   * until it lands, the actor does not know whether its container runs. An
+   * actor that takes up state an earlier one made has nothing to read.
    */
   readonly firstRead: Promise<void>
-  /** What wakes this actor to check whether its container is idle: a timer of this process (see `wakeToCheckIdleAt`). */
+  /** What wakes this actor to check whether its container is idle: a timer of this process. */
   private readonly idleWake = processTimer()
 
   /**
-   * `state` is given when the handle is wrapping state that outlived an
-   * earlier handle for the slug (the registry rebuilding after a dev-server
-   * reload); otherwise the handle starts with none.
+   * `survivingStates` is for a process whose backend modules are re-evaluated
+   * while it runs (the dev server, on an edit): the actor keeps its state in
+   * the map, and an actor made later for the slug takes that state up rather
+   * than start with none. What the agent holds (live sessions, parked reviews
+   * and waits, open requests, grants) then outlives the code that made it.
+   * Desktop and the Node server pass none.
    */
-  constructor(readonly slug: AgentSlug, deps: LocalActorDeps, state?: AgentState) {
+  constructor(
+    readonly slug: AgentSlug,
+    parts: LocalActorParts,
+    private readonly survivingStates?: Map<AgentSlug, AgentState>,
+  ) {
+    const { containers, host } = parts
     // Every write to a session goes through the store, so this is where the
     // container's idle clock learns of session activity — the live sessions'
     // stream frames, the transcript appends and `sessions.recordActivity`
     // all record through it.
     const runtime = () => this.state.runtime()
+    const survived = survivingStates?.get(slug)
     this.state =
-      state ??
+      survived ??
       createAgentState(slug, {
         sessions: {
-          store: createLocalSessionStore(slug, deps, {
+          store: createLocalSessionStore(slug, {}, {
             onActivity: (at) => runtime().noteSessionActivity(at),
           }),
-          host: deps.host,
+          host,
           runtime: createSessionsRuntime(slug, runtime),
           capture: subagentCapture,
         },
@@ -176,20 +160,28 @@ export class LocalAgentActor implements AgentActor {
           cancelWake: () => this.cancelIdleWake(),
         },
         watch: createContainerWatchHooks(slug, () => this.state),
-        runtime: (agent) => deps.containerHost.createRuntime(slug, agent),
+        runtime: (agent) => containers.createRuntime(slug, agent),
       })
-    this.firstRead = state ? Promise.resolve() : this.state.containerWatch.readNow()
+    survivingStates?.set(slug, this.state)
+    this.firstRead = survived ? Promise.resolve() : this.state.containerWatch.readNow()
+    this.ready = () => this.firstRead
     this.store = this.state.store
     this.files = this.store.files
     this.memories = createMemoryOps(this.store.files)
     this.config = this.store.config
-    this.live = async () => liveSummary(slug, this.state, deps)
-    this.container = createContainerOps(slug, runtime, deps)
-    const delivery = createSessionDelivery(slug, this.store, this.state.sessions, runtime, deps)
-    this.sessions = createSessionOps(slug, this.store, this.state, delivery, deps)
-    this.messages = createMessageOps(slug, this.store, this.state, delivery, deps)
-    this.inputs = createInputOps(slug, this.state, deps)
-    this.usage = createUsageOps(this.store, deps)
+    this.live = async () => liveSummary(slug, this.state)
+    this.container = createContainerOps(slug, runtime)
+    const delivery = createSessionDelivery(slug, this.store, this.state.sessions, runtime, {
+      sessionService,
+      // Read at call time, as the session service's functions are.
+      recordSessionActivity: (...args) => recordSessionActivity(...args),
+      denyReviews: (sessionId) => this.state.reviews.denyAll(sessionId),
+      host,
+    })
+    this.sessions = createSessionOps(slug, this.store, this.state, delivery, host)
+    this.messages = createMessageOps(slug, this.store, this.state, delivery)
+    this.inputs = createInputOps(slug, this.state, host)
+    this.usage = createUsageOps(this.store)
     this.locks = createLockOps(this.state)
     this.widgets = createWidgetOps(this.state)
     this.mcpSessions = createMcpSessionOps(this.state)
@@ -218,23 +210,30 @@ export class LocalAgentActor implements AgentActor {
 
   /**
    * Has `checkIdle()` run at `at` (epoch ms), in place of any wake-up set
-   * before. Here that is a timer of this process, which is all an actor that
-   * lives and dies with its process needs. An actor that outlives its process
-   * overrides this and `cancelIdleWake` with a wake-up that does too (a
-   * Durable Object, with its own alarm), and runs `checkIdle()` when it goes off.
+   * before: a timer of this process, which is all an actor that lives and
+   * dies with its process needs.
    */
-  protected wakeToCheckIdleAt(at: number): void {
+  private wakeToCheckIdleAt(at: number): void {
     this.idleWake.set(at - Date.now(), () => background(this.checkIdle(), { name: 'agent-actor.check-idle' }))
   }
 
   /** Drops the wake-up `wakeToCheckIdleAt` set, if any. */
-  protected cancelIdleWake(): void {
+  private cancelIdleWake(): void {
     this.idleWake.clear()
   }
 
-  /** The registry is dropping this handle: release everything it owns. */
-  dispose(): void {
+  /** The registry is dropping this actor: release everything it holds (see `AgentActor.dispose`). */
+  async dispose(reason?: 'shutdown'): Promise<void> {
+    // Released before the first await: a caller that drops many actors relies
+    // on each having let go by the time it has called them all.
     releaseAgentState(this.state)
+    if (this.survivingStates?.get(this.slug) === this.state) this.survivingStates.delete(this.slug)
+    if (reason !== 'shutdown') return
+    // Activity the index recorded and has not stored yet: its wake-up does
+    // not come once dispatch has stopped, and nothing reads the index again.
+    await this.store.index.storeRecordedActivity().catch((error: unknown) => {
+      console.warn(`[LocalAgentActor] Could not store the recorded session activity of ${this.slug}:`, error)
+    })
   }
 }
 
@@ -278,7 +277,7 @@ function createContainerWatchHooks(slug: AgentSlug, self: () => AgentState): Age
   }
 }
 
-function liveSummary(slug: AgentSlug, state: AgentState, deps: LocalActorDeps): AgentLiveSummary {
+function liveSummary(slug: AgentSlug, state: AgentState): AgentLiveSummary {
   const runtime = state.runtime()
   return {
     container: {
@@ -292,11 +291,11 @@ function liveSummary(slug: AgentSlug, state: AgentState, deps: LocalActorDeps): 
     openRequests: state.inputRequests.getOpenRequests().map(({ id, kind, blocking, autoApproved, scope }) => ({
       id, kind, blocking, autoApproved, ...(scope.sessionId !== undefined ? { sessionId: scope.sessionId } : {}),
     })),
-    pendingReviews: deps.reviewManager.getPendingReviewsForAgent(slug).map(({ id, displayText }) => ({ id, displayText })),
+    pendingReviews: state.reviews.pending().map(({ id, displayText }) => ({ id, displayText })),
   }
 }
 
-function createContainerOps(slug: AgentSlug, runtime: () => ContainerRuntime, deps: LocalActorDeps): ContainerOps {
+function createContainerOps(slug: AgentSlug, runtime: () => ContainerRuntime): ContainerOps {
   const client = () => runtime().getClient()
   return {
     start: async () => {
@@ -315,8 +314,9 @@ function createContainerOps(slug: AgentSlug, runtime: () => ContainerRuntime, de
       await runtime().restartContainer()
       return 'restarted'
     },
+    holdsDrives: async (options) => runtime().holdsDrives() || (!!options?.orStarting && runtime().isStarting()),
     info: async () => (await client()).getInfo(),
-    syncConnectionEnvironment: (kind, options) => deps.syncAgentConnectionEnvironment(slug, kind, runtime(), options),
+    syncConnectionEnvironment: (kind, options) => syncAgentConnectionEnvironment(slug, kind, runtime(), options),
     fetch: async (...args) => (await client()).fetch(...args),
     webSocketTarget: async (path, init) => {
       const info = runtime().getCachedInfo()
@@ -338,7 +338,7 @@ function createSessionOps(
   store: SessionStore,
   state: AgentState,
   delivery: SessionDelivery,
-  deps: LocalActorDeps,
+  host: HostPort,
 ): SessionOps {
   const client = async () => state.runtime().getClient()
   const live = state.sessions
@@ -371,22 +371,22 @@ function createSessionOps(
     })
   }
   return {
-    list: (...args) => deps.sessionService.listSessions(store, ...args),
-    listByIds: (...args) => deps.sessionService.listSessionsByIds(store, ...args),
-    get: (...args) => deps.sessionService.getSession(store, ...args),
-    summary: () => deps.sessionService.getSessionSummary(store),
-    exists: (sessionId) => deps.sessionService.sessionExists(store, sessionId),
-    isKnown: (sessionId) => deps.sessionService.sessionIsKnown(store, sessionId),
-    isRegistered: (sessionId) => deps.sessionService.isSessionRegistered(store, sessionId),
-    register: (...args) => deps.sessionService.registerSession(store, ...args),
+    list: (...args) => sessionService.listSessions(store, ...args),
+    listByIds: (...args) => sessionService.listSessionsByIds(store, ...args),
+    get: (...args) => sessionService.getSession(store, ...args),
+    summary: () => sessionService.getSessionSummary(store),
+    exists: (sessionId) => sessionService.sessionExists(store, sessionId),
+    isKnown: (sessionId) => sessionService.sessionIsKnown(store, sessionId),
+    isRegistered: (sessionId) => sessionService.isSessionRegistered(store, sessionId),
+    register: (...args) => sessionService.registerSession(store, ...args),
     rename: async (sessionId, name) => {
-      await deps.sessionService.updateSessionName(store, sessionId, name)
+      await sessionService.updateSessionName(store, sessionId, name)
       live.emit(sessionId, { type: 'session_updated' })
-      deps.host.send('global', { type: 'session_updated', sessionId, agentSlug: slug })
+      host.send('global', { type: 'session_updated', sessionId, agentSlug: slug })
     },
     delete: (sessionId) => live.inDeliveryTurn(sessionId, async () => {
       if (!(await release(sessionId))) throw new Error(`Container did not drop session ${sessionId}`)
-      const deleted = await deps.sessionService.deleteSession(store, sessionId)
+      const deleted = await sessionService.deleteSession(store, sessionId)
       await forget(sessionId)
       return deleted
     }),
@@ -399,7 +399,7 @@ function createSessionOps(
         // later container request is still pending.
         await live.inDeliveryTurn(sessionId, async () => {
           if (live.isActive(sessionId) || !(await release(sessionId))) return
-          const removed = await deps.sessionService.deleteSessionsBatch(store, [sessionId])
+          const removed = await sessionService.deleteSessionsBatch(store, [sessionId])
           if (removed.length === 0) return
           deleted.push(...removed)
           await forget(sessionId)
@@ -407,8 +407,8 @@ function createSessionOps(
       }
       return deleted
     },
-    metadata: (sessionId) => deps.sessionService.getSessionMetadata(store, sessionId),
-    readMetadata: () => deps.sessionService.readSessionMetadata(store),
+    metadata: (sessionId) => sessionService.getSessionMetadata(store, sessionId),
+    readMetadata: () => sessionService.readSessionMetadata(store),
     exportMetadata: () => exportSessionMetadata(store),
     ingestMetadataFile: () => ingestSessionMetadataFile(store),
     recordInvocation: (sessionId, invocation) => store.index.update(sessionId, current => {
@@ -419,23 +419,23 @@ function createSessionOps(
         invocation,
       ] }
     }),
-    updateMetadata: (sessionId, updates) => deps.sessionService.updateSessionMetadata(store, sessionId, updates),
-    fileRealPathWithinAgent: (sessionId) => deps.sessionService.sessionFileRealPathWithinAgent(store, sessionId),
+    updateMetadata: (sessionId, updates) => sessionService.updateSessionMetadata(store, sessionId, updates),
+    fileRealPathWithinAgent: (sessionId) => sessionService.sessionFileRealPathWithinAgent(store, sessionId),
     usage: (sessionId) =>
-      deps.loadSessionUsageTotals({ files: store.files, transcript: transcriptPath(store, sessionId) }),
-    byScheduledTask: (taskId) => deps.sessionService.getSessionsByScheduledTask(store, taskId),
-    byWebhookTrigger: (triggerId) => deps.sessionService.getSessionsByWebhookTrigger(store, triggerId),
+      loadSessionUsageTotals({ files: store.files, transcript: transcriptPath(store, sessionId) }),
+    byScheduledTask: (taskId) => sessionService.getSessionsByScheduledTask(store, taskId),
+    byWebhookTrigger: (triggerId) => sessionService.getSessionsByWebhookTrigger(store, triggerId),
     forScheduledExecution: (taskId, executionAt) =>
-      deps.sessionService.getSessionForScheduledExecution(store, taskId, executionAt),
-    recordActivity: async (...args) => deps.recordSessionActivity(store, ...args),
+      sessionService.getSessionForScheduledExecution(store, taskId, executionAt),
+    recordActivity: async (...args) => recordSessionActivity(store, ...args),
     recordRuntime: async (sessionId, runtime) => live.recordRuntime(sessionId, runtime),
 
-    subagents: (sessionId, options) => deps.transcripts.listSubagents(store, sessionId, options),
-    subagentTranscript: (sessionId, subagentId) => deps.transcripts.readSubagentTranscript(store, sessionId, subagentId),
-    workflowTree: (sessionId, runId) => deps.transcripts.readWorkflowTree(store, sessionId, runId),
+    subagents: (sessionId, options) => transcripts.listSubagents(store, sessionId, options),
+    subagentTranscript: (sessionId, subagentId) => transcripts.readSubagentTranscript(store, sessionId, subagentId),
+    workflowTree: (sessionId, runId) => transcripts.readWorkflowTree(store, sessionId, runId),
     workflowAgentTranscript: (sessionId, runId, workflowAgentId) =>
-      deps.transcripts.readWorkflowAgentTranscript(store, sessionId, runId, workflowAgentId),
-    copyDerivedFiles: (sourceId, targetId) => deps.transcripts.copyDerivedSessionFiles(store, sourceId, targetId),
+      transcripts.readWorkflowAgentTranscript(store, sessionId, runId, workflowAgentId),
+    copyDerivedFiles: (sourceId, targetId) => transcripts.copyDerivedSessionFiles(store, sourceId, targetId),
 
     // Creating a session delivers its first message: a refusal reads as a delivery's does.
     create: async (options) =>
@@ -486,7 +486,6 @@ function createMessageOps(
   store: SessionStore,
   state: AgentState,
   delivery: SessionDelivery,
-  deps: LocalActorDeps,
 ): MessageOps {
   const client = async () => state.runtime().getClient()
   const live = state.sessions
@@ -500,23 +499,23 @@ function createMessageOps(
       return result
     },
 
-    withCompact: (sessionId) => deps.sessionService.getSessionMessagesWithCompact(store, sessionId),
+    withCompact: (sessionId) => sessionService.getSessionMessagesWithCompact(store, sessionId),
     toolHistory: (sessionId, names) =>
-      readSessionToolHistory(deps.sessionService.streamSessionMessagesWithCompact(store, sessionId), names),
+      readSessionToolHistory(sessionService.streamSessionMessagesWithCompact(store, sessionId), names),
     transcriptView: (sessionId, opts) =>
-      readTranscriptView(deps.sessionService.streamSessionMessagesWithCompact(store, sessionId), opts),
+      readTranscriptView(sessionService.streamSessionMessagesWithCompact(store, sessionId), opts),
     findDeliveredFile: (sessionId, deliveryId) =>
-      findDeliveredFile(deps.sessionService.streamSessionMessagesWithCompact(store, sessionId), deliveryId),
-    page: (sessionId, opts) => deps.sessionService.getSessionMessagesPage(store, sessionId, opts),
-    delta: (sessionId, opts) => deps.sessionService.getSessionMessagesDelta(store, sessionId, opts),
+      findDeliveredFile(sessionService.streamSessionMessagesWithCompact(store, sessionId), deliveryId),
+    page: (sessionId, opts) => sessionService.getSessionMessagesPage(store, sessionId, opts),
+    delta: (sessionId, opts) => sessionService.getSessionMessagesDelta(store, sessionId, opts),
     findLastEntry: (sessionId, query, options) =>
-      deps.sessionService.findLastSessionEntry(store, sessionId, matchesTranscriptQuery(query), options),
-    remove: (sessionId, messageUuid) => deps.sessionService.removeMessage(store, sessionId, messageUuid),
-    removeToolCall: (sessionId, toolCallId) => deps.sessionService.removeToolCall(store, sessionId, toolCallId),
-    appendAssistant: (sessionId, text) => deps.appendAssistantEntry(store, sessionId, text),
-    forkedUserUuids: (sessionId) => deps.transcripts.forkedUserUuids(store, sessionId),
-    rawLog: (sessionId) => deps.transcripts.openRawLog(store, sessionId),
-    media: (...args) => deps.transcripts.openMedia(store, ...args),
+      sessionService.findLastSessionEntry(store, sessionId, matchesTranscriptQuery(query), options),
+    remove: (sessionId, messageUuid) => sessionService.removeMessage(store, sessionId, messageUuid),
+    removeToolCall: (sessionId, toolCallId) => sessionService.removeToolCall(store, sessionId, toolCallId),
+    appendAssistant: (sessionId, text) => appendAssistantEntry(store, sessionId, text),
+    forkedUserUuids: (sessionId) => transcripts.forkedUserUuids(store, sessionId),
+    rawLog: (sessionId) => transcripts.openRawLog(store, sessionId),
+    media: (...args) => transcripts.openMedia(store, ...args),
 
     subscribe: async (sessionId) => sessionEvents(live, sessionId),
     follow: (sessionId, { after }) => sessionFrames(live, sessionId, after),
@@ -524,7 +523,7 @@ function createMessageOps(
   }
 }
 
-function createInputOps(slug: AgentSlug, state: AgentState, deps: LocalActorDeps): InputOps {
+function createInputOps(slug: AgentSlug, state: AgentState, host: HostPort): InputOps {
   const requests = state.inputRequests
   // A settled request may have been what a session waited on.
   const resolve = (id: string, outcome: UserInputRequestOutcome) => {
@@ -538,7 +537,7 @@ function createInputOps(slug: AgentSlug, state: AgentState, deps: LocalActorDeps
     get: async (id) => requests.getOpenRequest(id),
     claim: async (id, options) => requests.claimRequest(id, options?.leaseMs),
     releaseClaim: async (id, token) => requests.releaseClaim(id, token),
-    answer: (id, value) => answerRequest(slug, state, deps, id, value),
+    answer: (id, value) => answerRequest(state, id, value),
     resolve: async (id, outcome) => resolve(id, outcome),
     recentResolution: async (id) => requests.getRecentResolution(id),
     snapshot: async (sessionId) => requests.getSnapshotForScope(sessionId),
@@ -549,21 +548,15 @@ function createInputOps(slug: AgentSlug, state: AgentState, deps: LocalActorDeps
       state.sessions.completeCapabilityReview(sessionId, toolUseId, outcome),
     cancelAwaiting: (sessionId) => state.sessions.cancelAwaitingInput(sessionId),
 
-    reviews: createReviewOps(slug, deps),
-    computerUse: createComputerUseOps(state, deps),
-    mcpReauth: createMcpReauthOps(slug, deps, resolve),
-    accountReauth: createAccountReauthOps(slug, deps, resolve),
+    reviews: createReviewOps(state),
+    computerUse: createComputerUseOps(state, host),
+    mcpReauth: createMcpReauthOps(state, resolve),
+    accountReauth: createAccountReauthOps(state, resolve),
   }
 }
 
 /** `inputs.answer`: one decision's whole run, holding the request's claim (see `InputOps.answer`). */
-async function answerRequest(
-  slug: AgentSlug,
-  state: AgentState,
-  deps: LocalActorDeps,
-  id: string,
-  value: unknown,
-): ReturnType<InputOps['answer']> {
+async function answerRequest(state: AgentState, id: string, value: unknown): ReturnType<InputOps['answer']> {
   const requests = state.inputRequests
   if (!requests.getOpenRequest(id)) return 'not-open'
   const claim = requests.claimRequest(id)
@@ -592,32 +585,27 @@ async function answerRequest(
   }
 }
 
-// The review and re-auth ops go through their routers rather than the store
-// the actor holds. The router is the process-wide API for these (the proxy
-// routes, the mock container client and startup call it with a slug), and it
-// dispatches straight back to this actor's store; the actor's ops are the
-// agent-scoped face of the same API. The store is still the actor's: it is
-// created with the handle and released with it.
+// The review and re-auth ops read and write the stores the actor holds: they
+// are created with the actor and released with it.
 
-function createReviewOps(slug: AgentSlug, deps: LocalActorDeps): ReviewOps {
+function createReviewOps(state: AgentState): ReviewOps {
+  const reviews = state.reviews
   return {
-    get: async (id) => deps.reviewManager.getPendingReviewsForAgent(slug).find((review) => review.id === id) ?? null,
-    submit: async (id, decision, detail) => deps.reviewManager.submitDecision(slug, id, decision, detail),
-    resolveMatching: async (scope, decision) => deps.reviewManager.resolveMatchingPending(slug, scope, decision),
-    resolveMatchingByLabel: async (label, decision) =>
-      deps.reviewManager.resolveMatchingPendingByLabel(slug, label, decision),
-    resolveMatchingXAgent: async (operation, decision) =>
-      deps.reviewManager.resolveMatchingXAgentByOperation(slug, operation, decision),
-    request: (details, options) => deps.reviewManager.request(slug, details, options),
-    requestXAgent: (request, options) => deps.reviewManager.requestXAgent(slug, request, options),
-    withdraw: async (id) => deps.reviewManager.withdraw(slug, id),
-    resume: (id) => deps.reviewManager.resume(slug, id),
-    settle: (id, decision) => deps.reviewManager.settle(slug, id, decision),
-    takeDecisionDetail: (id) => deps.reviewManager.takeDecisionDetail(slug, id),
+    get: async (id) => reviews.pending().find((review) => review.id === id) ?? null,
+    submit: async (id, decision, detail) => reviews.submit(id, decision, detail),
+    resolveMatching: async (scope, decision) => reviews.resolveMatching(scope, decision),
+    resolveMatchingByLabel: async (label, decision) => reviews.resolveMatchingByLabel(label, decision),
+    resolveMatchingXAgent: async (operation, decision) => reviews.resolveMatchingXAgent(operation, decision),
+    request: (details, options) => reviews.request(details, options),
+    requestXAgent: (request, options) => reviews.requestXAgent(request, options),
+    withdraw: async (id) => reviews.withdraw(id),
+    resume: (id) => reviews.resume(id),
+    settle: (id, decision) => reviews.settle(id, decision),
+    takeDecisionDetail: (id) => reviews.takeDecisionDetail(id),
   }
 }
 
-function createComputerUseOps(state: AgentState, deps: LocalActorDeps): ComputerUseOps {
+function createComputerUseOps(state: AgentState, host: HostPort): ComputerUseOps {
   const computerUse = state.computerUse
   return {
     releaseApp: async (sessionId) => {
@@ -637,8 +625,8 @@ function createComputerUseOps(state: AgentState, deps: LocalActorDeps): Computer
     consumeOnce: async (...args) => computerUse.consumeOnce(...args),
     revokeAll: async () => computerUse.revokeAll(),
     clearPending: async (...args) => state.sessions.clearComputerUseRequest(...args),
-    run: (run) => runComputerUse(state.hostRuns, deps.host, run),
-    runScript: (run) => runScript(state.hostRuns, deps.host, run),
+    run: (run) => runComputerUse(state.hostRuns, host, run),
+    runScript: (run) => runScript(state.hostRuns, host, run),
   }
 }
 
@@ -703,38 +691,40 @@ function createVolumeUploadOps(state: AgentState): VolumeUploadOps {
   }
 }
 
-function createUsageOps(store: SessionStore, deps: LocalActorDeps): UsageOps {
+function createUsageOps(store: SessionStore): UsageOps {
   return {
-    daily: (options) => deps.loadDailyUsageData({ files: store.files, dir: store.transcriptsDir, ...options }),
+    daily: (options) => loadDailyUsageData({ files: store.files, dir: store.transcriptsDir, ...options }),
   }
 }
 
 type ResolveRequest = (id: string, outcome: UserInputRequestOutcome) => unknown
 
-function createMcpReauthOps(slug: AgentSlug, deps: LocalActorDeps, resolve: ResolveRequest): McpReauthOps {
+function createMcpReauthOps(state: AgentState, resolve: ResolveRequest): McpReauthOps {
+  const waits = state.mcpReauth
   return {
-    request: (details, options) => deps.mcpReauthManager.request(slug, details, options),
-    withdraw: async (waitId) => deps.mcpReauthManager.withdraw(slug, waitId),
-    dismiss: async (entryId, ...rest) => deps.mcpReauthManager.dismiss(entryId, slug, ...rest),
+    request: (details, options) => waits.request(details, options),
+    withdraw: async (waitId) => waits.withdraw(waitId),
+    dismiss: async (entryId, ...rest) => waits.dismiss(entryId, ...rest),
     settleReplaced: async (entryId, replacementMcpId) => {
-      if (deps.mcpReauthManager.replaceMcp(entryId, slug, replacementMcpId)) return 'released'
+      if (waits.replace(entryId, replacementMcpId)) return 'released'
       resolve(entryId, 'answered')
       return 'resolved'
     },
-    completeConnection: async (mcpId) => deps.mcpReauthManager.completeMcp(slug, mcpId),
+    completeConnection: async (mcpId) => waits.complete(mcpId),
   }
 }
 
-function createAccountReauthOps(slug: AgentSlug, deps: LocalActorDeps, resolve: ResolveRequest): AccountReauthOps {
+function createAccountReauthOps(state: AgentState, resolve: ResolveRequest): AccountReauthOps {
+  const waits = state.accountReauth
   return {
-    request: (details, options) => deps.accountReauthManager.request(slug, details, options),
-    withdraw: async (waitId) => deps.accountReauthManager.withdraw(slug, waitId),
-    dismiss: async (entryId, ...rest) => deps.accountReauthManager.dismiss(entryId, slug, ...rest),
+    request: (details, options) => waits.request(details, options),
+    withdraw: async (waitId) => waits.withdraw(waitId),
+    dismiss: async (entryId, ...rest) => waits.dismiss(entryId, ...rest),
     settleReplaced: async (entryId, replacementAccountId) => {
-      if (deps.accountReauthManager.replaceAccount(entryId, slug, replacementAccountId)) return 'released'
+      if (waits.replace(entryId, replacementAccountId)) return 'released'
       resolve(entryId, 'answered')
       return 'resolved'
     },
-    completeAccount: async (accountId) => deps.accountReauthManager.completeAccount(slug, accountId),
+    completeAccount: async (accountId) => waits.complete(accountId),
   }
 }

@@ -1,16 +1,19 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { PendingUserInputRequest, UserInputRequestOutcome } from '@shared/lib/tools/requests/request-schema'
 import { userInputRequestManager } from '@shared/lib/tools/requests/request-manager'
-import { ReviewManager } from '@shared/lib/proxy/review-manager'
-import { AccountReauthManager } from '@shared/lib/proxy/account-reauth-manager'
-import { McpReauthManager } from '@shared/lib/proxy/mcp-reauth-manager'
-import { ComputerUsePermissionManager } from '@shared/lib/computer-use/permission-manager'
-import type { AgentRuntimes } from '@shared/lib/container/container-host'
+import { reviewManager } from '@shared/lib/proxy/review-manager'
 import type { RuntimeAgent } from '@shared/lib/container/container-runtime'
-import { createAgentRegistry } from './registry'
+import { syncAgentConnectionEnvironment } from '@shared/lib/container/connection-runtime-sync'
+import { appendAssistantEntry } from '@shared/lib/services/session-transcript-append'
+import { recordSessionActivity } from '@shared/lib/services/session-activity'
+import * as usageService from '@shared/lib/services/usage-service'
+import * as sessionService from '@shared/lib/services/session-service'
+import { getAgentWorkspaceDir } from '@shared/lib/utils/file-storage'
+import * as transcriptOps from './local-transcript-ops'
+import { _resetAgentRegistryForTest, agentRegistry, createAgentRegistry as createRegistryOver } from './registry'
 import { LiveSessions } from './live/live-sessions'
 import type { AgentState } from './agent-state'
-import type { LocalActorDeps, LocalAgentActor } from './local-agent-actor'
+import { LocalAgentActor, type LocalActorParts } from './local-agent-actor'
 import type { SessionStore } from './session-store'
 import type { SessionIndexStorage } from './session-index'
 import { backgroundSettled } from '@shared/lib/background'
@@ -18,16 +21,29 @@ import { taskManager } from '@shared/lib/background-work'
 import { createInMemorySessionIndexStorage } from './testing/in-memory-session-index-storage'
 import { createRecordingHostPort } from './testing/recording-host-port'
 
-// The singleton registry wires the real container host. These tests build
-// their own registry from fakes, so that module is stubbed to keep the
-// import side-effect free. The per-agent stores (input requests, reviews,
-// re-auth waits, computer-use grants) and the routers over them are real:
-// they are the actor's own and are what the tests below exercise.
-vi.mock('@shared/lib/container/container-host', () => ({ containerHost: { attachAgentRuntimes: () => {} } }))
+// The registry's default for tests makes actors over the real container
+// host. These tests make theirs over a fake one, so that module is stubbed to
+// keep the import side-effect free. The actor's own code is replaced where a
+// test stands in for it (the session service, the transcript reads, usage),
+// module by module, since the actor imports it. The per-agent stores (input
+// requests, reviews, re-auth waits, computer-use grants) and the routers over
+// them are real: they are the actor's own and are what the tests below exercise.
+vi.mock('@shared/lib/container/container-host', () => ({ containerHost: {} }))
+// Where an agent's index entries are stored: the app database, unless a test says otherwise.
+const indexStorage = vi.hoisted(() => ({ use: null as null | ((slug: string) => unknown) }))
+vi.mock('./db-session-index-storage', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./db-session-index-storage')>()
+  return {
+    ...actual,
+    createDbSessionIndexStorage: (slug: string) => (indexStorage.use ?? actual.createDbSessionIndexStorage)(slug),
+  }
+})
 vi.mock('@shared/lib/config/settings', () => ({ getSettings: () => ({}), mutateSettings: vi.fn() }))
 vi.mock('@shared/lib/services/session-service', () => ({
   getSessionMetadata: vi.fn(async () => null),
   readAgentSlashCommands: vi.fn(async () => []),
+  deleteSession: vi.fn(),
+  deleteSessionsBatch: vi.fn(),
 }))
 vi.mock('@shared/lib/services/session-transcript-append', () => ({
   appendInformationalEntry: vi.fn(),
@@ -65,32 +81,13 @@ type FakeRequest = {
 }
 
 /**
- * The routers the registry attaches to, spied so a test can see what the
- * registry attached, and the transitions the stores reported to their
- * agents' live sessions, which is how the wire hears of them.
+ * The process's registry over this test's fakes: actors as desktop makes
+ * them, from the two parts an actor is given. The routers read the same
+ * registry, as they do in the app.
  */
-function routers() {
-  const inputManager = userInputRequestManager
-  vi.spyOn(inputManager, 'attachAgents')
-  const transitions = vi.spyOn(LiveSessions.prototype, 'requestTransition')
-  const reviewManager = new ReviewManager()
-  vi.spyOn(reviewManager, 'attachAgents')
-  const accountReauthManager = new AccountReauthManager()
-  vi.spyOn(accountReauthManager, 'attachAgents')
-  const mcpReauthManager = new McpReauthManager()
-  vi.spyOn(mcpReauthManager, 'attachAgents')
-  const computerUsePermissionManager = new ComputerUsePermissionManager()
-  vi.spyOn(computerUsePermissionManager, 'attachAgents')
-  return {
-    inputManager: inputManager as typeof inputManager & {
-      attachAgents: ReturnType<typeof vi.fn>
-    },
-    transitions,
-    reviewManager,
-    accountReauthManager,
-    mcpReauthManager,
-    computerUsePermissionManager,
-  }
+function createAgentRegistry(parts: LocalActorParts, survivingStates?: Map<string, AgentState>) {
+  _resetAgentRegistryForTest((slug) => new LocalAgentActor(slug, parts, survivingStates))
+  return agentRegistry
 }
 
 function fakeDeps() {
@@ -139,62 +136,53 @@ function fakeDeps() {
       return runtime
     }),
     createRuntime: vi.fn((slug: string, _agent: RuntimeAgent) => containerHost.runtime(slug)),
-    getRunningAgentIds: vi.fn().mockReturnValue([]),
-    clearRuntimes: vi.fn(),
-    attachAgentRuntimes: vi.fn(),
   }
-  const { inputManager, transitions, reviewManager, accountReauthManager, mcpReauthManager, computerUsePermissionManager } =
-    routers()
-  const loadDailyUsageData = vi.fn().mockResolvedValue([])
-  const loadSessionUsageTotals = vi.fn().mockResolvedValue({ totalCost: 0, totalTokens: 0, priceMissing: false })
-  const syncAgentConnectionEnvironment = vi.fn().mockResolvedValue(true)
+  // The transitions the stores reported to their agents' live sessions, which is how the wire hears of them.
+  const transitions = vi.spyOn(LiveSessions.prototype, 'requestTransition')
+  // The actor's own code, replaced module by module (see the mocks above): each starts every test with these answers.
+  const answering = <T extends (...args: never[]) => unknown>(fn: T, answer?: ReturnType<T>) => {
+    const mocked = vi.mocked(fn)
+    mocked.mockReset()
+    if (answer !== undefined) mocked.mockReturnValue(answer as never)
+    return mocked
+  }
+  const loadDailyUsageData = answering(usageService.loadDailyUsageData, Promise.resolve([]) as never)
+  const loadSessionUsageTotals = answering(usageService.loadSessionUsageTotals, Promise.resolve({ totalCost: 0, totalTokens: 0, priceMissing: false }) as never)
+  const syncConnectionEnvironment = answering(syncAgentConnectionEnvironment, Promise.resolve(true))
   const transcripts = {
-    listSubagents: vi.fn().mockResolvedValue([{ id: 'sub-1', toolUseId: 'tu-1' }]),
-    readSubagentTranscript: vi.fn().mockResolvedValue([]),
-    readWorkflowTree: vi.fn().mockResolvedValue(null),
-    readWorkflowAgentTranscript: vi.fn().mockResolvedValue([]),
-    copyDerivedSessionFiles: vi.fn().mockResolvedValue(undefined),
-    streamRawEntries: vi.fn(),
-    openRawLog: vi.fn().mockResolvedValue(null),
-    openMedia: vi.fn().mockResolvedValue(undefined),
+    listSubagents: answering(transcriptOps.listSubagents, Promise.resolve([{ id: 'sub-1', toolUseId: 'tu-1' }]) as never),
+    readSubagentTranscript: answering(transcriptOps.readSubagentTranscript, Promise.resolve([]) as never),
+    readWorkflowTree: answering(transcriptOps.readWorkflowTree, Promise.resolve(null) as never),
+    readWorkflowAgentTranscript: answering(transcriptOps.readWorkflowAgentTranscript, Promise.resolve([]) as never),
+    copyDerivedSessionFiles: answering(transcriptOps.copyDerivedSessionFiles, Promise.resolve(undefined) as never),
+    openRawLog: answering(transcriptOps.openRawLog, Promise.resolve(null) as never),
+    openMedia: answering(transcriptOps.openMedia, Promise.resolve(undefined) as never),
   }
-  const appendAssistantEntry = vi.fn()
-  const recordSessionActivity = vi.fn()
+  const appendAssistant = answering(appendAssistantEntry)
+  const recordActivity = answering(recordSessionActivity)
+  answering(sessionService.deleteSession)
+  answering(sessionService.deleteSessionsBatch)
+  vi.mocked(getAgentWorkspaceDir).mockReset().mockImplementation((slug: string) => `/workspaces/${slug}`)
+  indexStorage.use = null
   // What the agents' live sessions send the host (request events, notifications).
   const host = createRecordingHostPort()
-  const deps = {
-    containerHost,
-    host: host.port,
-    userInputRequestManager: inputManager,
-    reviewManager,
-    accountReauthManager,
-    computerUsePermissionManager,
-    mcpReauthManager,
-    sessionService: {},
-    transcripts,
-    appendInformationalEntry: vi.fn(),
-    appendAssistantEntry,
-    recordSessionActivity,
-    getAgentWorkspaceDir: vi.fn((slug: string) => `/workspaces/${slug}`),
-    syncAgentConnectionEnvironment,
-    loadDailyUsageData,
-    loadSessionUsageTotals,
-  }
+  // The two parts an actor is given.
+  const deps: LocalActorParts = { containers: containerHost as unknown as LocalActorParts['containers'], host: host.port }
   return {
-    deps: deps as unknown as LocalActorDeps,
+    deps,
     containerHost,
     runtimes,
     client,
     host,
     reviewManager,
-    inputManager,
+    inputManager: userInputRequestManager,
     transitions,
     loadDailyUsageData,
     loadSessionUsageTotals,
-    syncAgentConnectionEnvironment,
+    syncAgentConnectionEnvironment: syncConnectionEnvironment,
     transcripts,
-    appendAssistantEntry,
-    recordSessionActivity,
+    appendAssistantEntry: appendAssistant,
+    recordSessionActivity: recordActivity,
   }
 }
 
@@ -254,35 +242,40 @@ describe('createAgentRegistry', () => {
     expect(getDoc).toHaveBeenCalledWith('instructions')
   })
 
-  describe('the container host reaches the actors\' runtimes', () => {
-    const attached = () => {
-      expect(fake.containerHost.attachAgentRuntimes).toHaveBeenCalledTimes(1)
-      return fake.containerHost.attachAgentRuntimes.mock.calls[0][0] as AgentRuntimes
-    }
-
-    it('lists the runtimes the held actors made, and never makes a handle to list them', async () => {
+  describe('what is asked of every agent goes through the registry\'s actors', () => {
+    it('lists the actors made so far, and never makes one to list them', async () => {
       const registry = createAgentRegistry(fake.deps)
-      expect(attached().held()).toEqual([])
-      const a = registry.get('a') as LocalAgentActor
-      await a.firstRead
-      expect(attached().held()).toEqual([a.state.runtime()])
+      expect(registry.held()).toEqual([])
+      const a = registry.get('a')
+      expect(registry.held()).toEqual([a])
       await registry.evict('a')
-      expect(attached().held()).toEqual([])
+      expect(registry.held()).toEqual([])
     })
 
-    it('wakes an agent by making its actor, and settles once the actor has read its container', async () => {
-      createAgentRegistry(fake.deps)
-      await attached().wake('a')
+    it('an actor is ready once it has read its container', async () => {
+      const registry = createAgentRegistry(fake.deps)
+      await registry.get('a').ready()
       expect(fake.runtimes.get('a')?.syncAgentStatus).toHaveBeenCalledTimes(1)
     })
 
-    it('drops a held runtime: the actor makes a new one on its next use', () => {
+    it('a runtime that asks its agent to forget it is dropped: the actor makes a new one on its next use', () => {
       const registry = createAgentRegistry(fake.deps)
       const a = registry.get('a') as LocalAgentActor
       const first = a.state.runtime()
-      attached().drop('a')
+      const [, agent] = fake.containerHost.createRuntime.mock.calls[0]
+      agent.forgetRuntime()
       expect(first.dispose).toHaveBeenCalledTimes(1)
       expect(a.state.runtime()).not.toBe(first)
+    })
+
+    it('the container that stops takes the agent\'s computer-use app with it', async () => {
+      const registry = createAgentRegistry(fake.deps)
+      const a = registry.get('a') as LocalAgentActor
+      a.state.runtime()
+      a.state.computerUse.setActiveApp('s1', 'Safari')
+      const [, agent] = fake.containerHost.createRuntime.mock.calls[0]
+      agent.clearComputerUseApp()
+      expect(a.state.computerUse.activeApp('s1')).toBeUndefined()
     })
   })
 
@@ -401,12 +394,12 @@ describe('createAgentRegistry', () => {
 
   it('evictAll stores the session activity its agents recorded and had not stored yet', async () => {
     const touched: Array<[string, Map<string, number>]> = []
-    const sessionIndexStorage = (slug: string): SessionIndexStorage => {
+    indexStorage.use = (slug: string): SessionIndexStorage => {
       const storage = createInMemorySessionIndexStorage()
       return { ...storage, touch: async (activity) => { touched.push([slug, new Map(activity)]); return storage.touch(activity) } }
     }
-    const registry = createAgentRegistry({ ...fake.deps, sessionIndexStorage } as LocalActorDeps)
-    fake.recordSessionActivity.mockImplementation((store: SessionStore, sessionId: string, at: number) => store.index.recordActivity(sessionId, at))
+    const registry = createAgentRegistry(fake.deps)
+    fake.recordSessionActivity.mockImplementation((store: SessionStore, sessionId: string, at?: number | Date) => store.index.recordActivity(sessionId, at as number))
     // The session's first write is stored as it is recorded; the next waits for the index's wakeup.
     await registry.get('a').sessions.recordActivity('s1', 1234)
     await backgroundSettled()
@@ -424,7 +417,7 @@ describe('createAgentRegistry', () => {
 
   it('evictAll releases every agent even when one\'s recorded activity cannot be stored', async () => {
     let closed = false
-    const sessionIndexStorage = (): SessionIndexStorage => {
+    indexStorage.use = (): SessionIndexStorage => {
       const storage = createInMemorySessionIndexStorage()
       return {
         ...storage,
@@ -435,8 +428,8 @@ describe('createAgentRegistry', () => {
       }
     }
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
-    const registry = createAgentRegistry({ ...fake.deps, sessionIndexStorage } as LocalActorDeps)
-    fake.recordSessionActivity.mockImplementation((store: SessionStore, sessionId: string, at: number) => store.index.recordActivity(sessionId, at))
+    const registry = createAgentRegistry(fake.deps)
+    fake.recordSessionActivity.mockImplementation((store: SessionStore, sessionId: string, at?: number | Date) => store.index.recordActivity(sessionId, at as number))
     const a = registry.get('a')
     // The first write is stored as it is recorded; the second is what the release finds.
     await a.sessions.recordActivity('s1', 1234)
@@ -680,56 +673,54 @@ describe('createAgentRegistry', () => {
     })
   })
 
-  describe('the registry attaches the routers to the handles\' stores', () => {
-    it('gives every router a directory that reads through the handles and creates none of its own', async () => {
+  describe('the routers read the actors\' stores through the registry', () => {
+    it('a read makes no actor, a write makes the agent\'s like any first use, and an evicted agent is gone from them', async () => {
       const registry = createAgentRegistry(fake.deps)
-      for (const router of [
-        fake.inputManager,
-        fake.reviewManager,
-        fake.deps.accountReauthManager,
-        fake.deps.mcpReauthManager,
-        fake.deps.computerUsePermissionManager,
-      ]) {
-        expect(router.attachAgents).toHaveBeenCalledTimes(1)
-      }
-      const directory = fake.inputManager.attachAgents.mock.calls[0]![0] as {
-        get: (slug: string) => unknown
-        peek: (slug: string) => unknown
-        all: () => unknown[]
-      }
-      expect(directory.all()).toEqual([])
-      expect(directory.peek('a')).toBeUndefined()
-      // A router's `get` is a first use like any other: it creates the handle.
-      const store = directory.get('a')
-      expect(store).toBe((registry.get('a') as LocalAgentActor).state.inputRequests)
-      expect(directory.peek('a')).toBe(store)
-      expect(directory.all()).toEqual([store])
+      // Nothing is held: a read finds nothing and makes nothing.
+      expect(userInputRequestManager.getOpenRequestsForAgent('a')).toEqual([])
+      expect(userInputRequestManager.stats.open).toBe(0)
+      expect(registry.held()).toEqual([])
+
+      // A router's write is a first use like any other: it makes the actor.
+      userInputRequestManager.register({ id: 'q1', kind: 'question', scope: { agentSlug: 'a', sessionId: 's' }, blocking: true, payload: {} } as never)
+      const actor = registry.get('a') as LocalAgentActor
+      expect(registry.held()).toEqual([actor])
+      expect(actor.state.inputRequests.getOpenRequest('q1')?.id).toBe('q1')
+      expect(userInputRequestManager.getOpenRequest('a', 'q1')?.id).toBe('q1')
+      expect(userInputRequestManager.stats.open).toBe(1)
+
       await registry.evict('a')
-      expect(directory.all()).toEqual([])
+      expect(userInputRequestManager.stats.open).toBe(0)
+      expect(userInputRequestManager.getOpenRequest('a', 'q1')).toBeNull()
     })
   })
 
-  describe('a registry built over an earlier registry\'s state (a dev-server reload)', () => {
-    it('wraps every surviving state in a fresh handle, visible to the routers at once', async () => {
+  describe('an actor made over the state an earlier one left (a dev-server reload)', () => {
+    it('takes that state up, and the routers see it through the new registry', async () => {
       const states = new Map<string, AgentState>()
-      const before = createAgentRegistry(fake.deps, { states })
+      // The registry of the code before the reload: no longer the process's.
+      const before = createRegistryOver((slug) => new LocalAgentActor(slug, fake.deps, states))
       const actor = before.get('a') as LocalAgentActor
       await actor.inputs.register({ id: 'q1', kind: 'question', scope: { sessionId: 's' }, blocking: true, payload: {} } as never)
       expect(states.get('a')).toBe(actor.state)
 
-      const after = createAgentRegistry(fake.deps, { states })
+      const after = createAgentRegistry(fake.deps, states)
       const rebuilt = after.get('a') as LocalAgentActor
       expect(rebuilt).not.toBe(actor)
       expect(rebuilt.state).toBe(actor.state)
       expect((await rebuilt.inputs.get('q1'))?.id).toBe('q1')
-      // The new registry's directory sees the rebuilt handle without a `get`:
-      // the last attach is the new registry's.
-      const directory = fake.inputManager.attachAgents.mock.calls.at(-1)![0] as { all: () => unknown[] }
-      expect(directory.all()).toEqual([rebuilt.state.inputRequests])
+      expect(userInputRequestManager.getOpenRequestsForAgent('a').map((request) => request.id)).toEqual(['q1'])
 
       await after.evict('a')
       expect(states.has('a')).toBe(false)
       expect(await after.get('a').inputs.get('q1')).toBeNull()
+    })
+
+    it('an actor given no such map starts with none, and leaves none behind', async () => {
+      const registry = createAgentRegistry(fake.deps)
+      const first = registry.get('a') as LocalAgentActor
+      await registry.evict('a')
+      expect((registry.get('a') as LocalAgentActor).state).not.toBe(first.state)
     })
   })
 
@@ -987,10 +978,9 @@ describe('createAgentRegistry', () => {
     })
 
     it('deleting sessions lets go of the container and the stream before the files; a batch keeps a session running now', async () => {
-      const sessionService = fake.deps.sessionService as unknown as Record<string, unknown>
       const order: string[] = []
-      sessionService.deleteSession = vi.fn(async () => { order.push('delete'); return true })
-      sessionService.deleteSessionsBatch = vi.fn(async (_store: unknown, ids: string[]) => { order.push(`delete-batch ${ids.join(',')}`); return ids })
+      vi.mocked(sessionService.deleteSession).mockImplementation(async () => { order.push('delete'); return true })
+      vi.mocked(sessionService.deleteSessionsBatch).mockImplementation(async (_store: unknown, ids: string[]) => { order.push(`delete-batch ${ids.join(',')}`); return ids })
       fake.client.releaseSession.mockImplementation(async (sessionId) => { order.push(`release ${sessionId}`); return true })
       fake.client.deleteSession.mockImplementation(async (sessionId) => { order.push(`forget ${sessionId}`); return true })
       const actor = createAgentRegistry(fake.deps).get('a') as LocalAgentActor
@@ -1009,8 +999,7 @@ describe('createAgentRegistry', () => {
     })
 
     it('deleting a session mid-turn tells its viewers and the feed the turn ended, then ends their wires', async () => {
-      const sessionService = fake.deps.sessionService as unknown as Record<string, unknown>
-      sessionService.deleteSession = vi.fn(async () => true)
+      vi.mocked(sessionService.deleteSession).mockResolvedValue(true)
       const actor = createAgentRegistry(fake.deps).get('a') as LocalAgentActor
       actor.state.sessions.markActive('s1')
       const wire = (await actor.messages.follow('s1', {})).getReader()

@@ -23,7 +23,8 @@ import type {
 import type { ObserveUnexpectedDeathInput, RuntimeFatalKind, UnexpectedDeathPlan } from './runtime-death'
 import { resolveContainerModel } from './resolve-model'
 import { getAgentWorkspaceDir, getSessionJsonlPath, readJsonlFile } from '../utils/file-storage'
-import { reviewManager } from '../proxy/review-manager'
+import { awaitReview } from '../proxy/review-request'
+import { agentRegistry } from '../agent-actor/registry'
 import { matchScopes } from '../proxy/scope-matcher'
 import { withUserReason } from '../proxy/user-reason'
 import { db } from '../db'
@@ -1655,8 +1656,8 @@ export class ProxyReviewScenario implements MockScenario {
     setTimeout(() => background(async () => {
       await seedMockConnectedAccount(accountId)
       // Fire-and-forget — the promise resolves when the user decides
-      background(reviewManager.requestReview({
-        agentSlug,
+      const reviews = agentRegistry.get(agentSlug).inputs.reviews
+      background(awaitReview(reviews, (raise) => reviews.request({
         accountId,
         callerSessionId,
         reviewType: 'api',
@@ -1666,7 +1667,7 @@ export class ProxyReviewScenario implements MockScenario {
         matchedScopes: this.matchedScopes,
         scopeDescriptions: this.scopeDescriptions,
         endpointDescription: matchScopes(this.toolkit, this.method, '/' + this.targetPath).endpointDescription,
-      }).then((review) => {
+      }, raise)).then((review) => {
         // Write JSONL and complete the session after the user decides
         client.writeJsonlEntry(sessionId, {
           type: 'user',
@@ -1735,8 +1736,8 @@ export class MixedPendingRequestsScenario implements MockScenario {
     // specs wait for all three cards independently.
     setTimeout(() => background(async () => {
       await seedMockConnectedAccount(accountId)
-      background(reviewManager.requestReview({
-        agentSlug,
+      const reviews = agentRegistry.get(agentSlug).inputs.reviews
+      background(awaitReview(reviews, (raise) => reviews.request({
         accountId,
         reviewType: 'api',
         toolkit: 'slack',
@@ -1744,7 +1745,7 @@ export class MixedPendingRequestsScenario implements MockScenario {
         targetPath: 'api/chat.postMessage',
         matchedScopes: ['chat:write'],
         scopeDescriptions: { 'chat:write': 'Send messages to channels' },
-      }).catch(() => {
+      }, raise)).catch(() => {
         // Denied or timed out — the turn lifecycle is owned by the input
         // machinery, so nothing to do here.
       }), { name: 'mock-mixed-pending-requests-scenario.request-review' })
@@ -1806,12 +1807,12 @@ export class XAgentReviewScenario implements MockScenario {
 
     const capturedDelay = delay
     setTimeout(() => {
-      background(reviewManager.requestXAgentReview(
-        agentSlug,
-        this.targetAgentSlug,
-        this.targetAgentName,
-        this.operation,
-      ).then(({ decision }) => {
+      const reviews = agentRegistry.get(agentSlug).inputs.reviews
+      background(awaitReview(reviews, (raise) => reviews.requestXAgent({
+        targetAgentSlug: this.targetAgentSlug,
+        targetAgentName: this.targetAgentName,
+        operation: this.operation,
+      }, raise)).then(({ decision }) => {
         client.writeJsonlEntry(sessionId, {
           type: 'user',
           message: { content: userMessage },
