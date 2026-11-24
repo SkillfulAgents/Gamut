@@ -4,6 +4,7 @@ import { autoSleepTimeoutMsFrom } from '@shared/lib/container/idle-alarm'
 import { processTimer } from '@shared/lib/container/process-timer'
 import { getSettings } from '@shared/lib/config/settings'
 import type { ContainerRuntime } from '@shared/lib/container/container-runtime'
+import type { ContainerClient } from '@shared/lib/container/types'
 import type { userInputRequestManager } from '@shared/lib/tools/requests/request-manager'
 import type { reviewManager } from '@shared/lib/proxy/review-manager'
 import type { accountReauthManager } from '@shared/lib/proxy/account-reauth-manager'
@@ -57,6 +58,11 @@ import type {
   VolumeUploadOps,
   WidgetOps,
 } from './types'
+
+/** What the actor hands the session store it makes: where activity is marked, and the agent's container client. */
+export interface SessionStoreHooks extends Pick<SessionStore, 'onActivity'> {
+  client(): Promise<ContainerClient>
+}
 
 /**
  * What a local actor delegates to. Injected so the registry can be built
@@ -154,7 +160,7 @@ export class LocalAgentActor implements AgentActor {
     readonly slug: AgentSlug,
     deps: LocalActorDeps,
     state?: AgentState,
-    createSessionStore: (hooks: Pick<SessionStore, 'onActivity'>) => SessionStore = (hooks) => createLocalSessionStore(slug, deps, hooks),
+    createSessionStore: (hooks: SessionStoreHooks) => SessionStore = (hooks) => createLocalSessionStore(slug, deps, hooks),
   ) {
     // Every write to a session goes through the store, so this is where the
     // container's idle clock learns of session activity — the live sessions'
@@ -167,6 +173,7 @@ export class LocalAgentActor implements AgentActor {
         sessions: {
           store: createSessionStore({
             onActivity: (at) => runtime().noteSessionActivity(at),
+            client: () => runtime().getClient(),
           }),
           host: deps.host,
           runtime: createSessionsRuntime(slug, runtime),
