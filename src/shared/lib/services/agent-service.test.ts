@@ -15,15 +15,15 @@ import {
 
 // Mock the container host before importing the service
 // Use vi.hoisted to ensure mock variables are available when vi.mock is hoisted
-const { mockGetCachedInfo, mockStopContainer, mockGetClient, mockGetPendingReviewsForAgent } = vi.hoisted(() => {
+const { mockGetCachedInfo, mockStopContainer, mockGetClient, mockPendingReviews } = vi.hoisted(() => {
   const mockGetCachedInfo = vi.fn((): { status: string; port: number | null } => ({ status: 'stopped', port: null }))
   const mockStopContainer = vi.fn(() => Promise.resolve())
   const mockGetInfo = vi.fn(() => Promise.resolve({ status: 'stopped', port: null }))
   const mockGetClient = vi.fn(() => ({
     getInfo: mockGetInfo,
   }))
-  const mockGetPendingReviewsForAgent = vi.fn((): unknown[] => [])
-  return { mockGetCachedInfo, mockStopContainer, mockGetClient, mockGetPendingReviewsForAgent }
+  const mockPendingReviews = vi.fn((_agentSlug: string): unknown[] => [])
+  return { mockGetCachedInfo, mockStopContainer, mockGetClient, mockPendingReviews }
 })
 
 vi.mock('@shared/lib/container/container-host', async () => {
@@ -40,16 +40,12 @@ vi.mock('@shared/lib/container/container-host', async () => {
   }
 })
 
-vi.mock('@shared/lib/proxy/review-manager', () => ({
-  reviewManager: {
-    getPendingReviewsForAgent: mockGetPendingReviewsForAgent,
-  },
-}))
-// The actor's review ops read the agent's own reviews: they answer as the router mock above does.
+// The agent's reviews: what is pending. The mock is told which agent's were asked.
 vi.mock('@shared/lib/proxy/agent-reviews', async (importOriginal) => {
-  const { reviewsAnsweredByRouterMock } = await import('@shared/lib/agent-actor/testing/router-shaped-mocks')
-  const { reviewManager } = await import('@shared/lib/proxy/review-manager')
-  return reviewsAnsweredByRouterMock(await importOriginal<typeof import('@shared/lib/proxy/agent-reviews')>(), reviewManager)
+  const { agentReviewsWith } = await import('@shared/lib/agent-actor/testing/agent-store-mocks')
+  return agentReviewsWith(await importOriginal<typeof import('@shared/lib/proxy/agent-reviews')>(), (agentSlug) => ({
+    pending: () => mockPendingReviews(agentSlug),
+  }))
 })
 
 // The catalog is the `agents` table: one in-memory database per test, so a
@@ -294,7 +290,7 @@ Instructions
 
     it('surfaces awaiting input when agent has pending proxy reviews and no active sessions', async () => {
       await createTestAgent('review-agent', SAMPLE_INSTRUCTIONS)
-      mockGetPendingReviewsForAgent.mockReturnValueOnce([
+      mockPendingReviews.mockReturnValueOnce([
         { id: 'review-1', agentSlug: 'review-agent', accountId: 'acc-1', toolkit: 'gmail', method: 'GET', targetPath: '/messages', matchedScopes: [], scopeDescriptions: {} },
       ])
 
