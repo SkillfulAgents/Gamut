@@ -4,7 +4,7 @@ import { readAgentRuntimeError } from '@shared/lib/agent-runtime-errors/agent-ru
 import { useCallback, useSyncExternalStore } from 'react'
 import { useQuery, useMutation, useQueryClient, hashKey, skipToken, type QueryClient, type QueryKey } from '@tanstack/react-query'
 import { z } from 'zod'
-import { RECENT_SESSIONS_LIMIT, recentSessionsKey, seedCreatedSessionInRecent, sessionTotalKey, writeFullListToRecent } from '@renderer/lib/agent-cache'
+import { RECENT_SESSIONS_LIMIT, recentSessionsKey, seedCreatedSession, sessionTotalKey, writeFullListToRecent } from '@renderer/lib/agent-cache'
 import { useNavigate } from '@tanstack/react-router'
 import { useAnalyticsTracking } from '@renderer/context/analytics-context'
 import { copyComposerDraft, sessionDraftKey, useDraftsStore } from '@renderer/context/drafts-context'
@@ -257,19 +257,7 @@ export function useCreateSession(options: {
           ...(inputMode ? { input_mode: inputMode === 'voice' ? 'voice_notice' : inputMode } : {}),
         })
       }
-      const resolvedSlug = resolveAgentSlugFromCache(queryClient, variables.agentSlug)
-      // Seed the caches from the response so the sidebar row and the session
-      // view render immediately instead of waiting a refetch round-trip. The
-      // new session is live, and the server sorts live sessions first, so
-      // prepending approximates its refetched position. (The extra
-      // initialMessageUuid field is a harmless superset of ApiSession.)
-      queryClient.setQueryData<ApiSession>(['session', created.id, resolvedSlug], created)
-      queryClient.setQueryData<ApiSession[]>(['sessions', resolvedSlug], (sessions) => (
-        sessions && !sessions.some((s) => s.id === created.id)
-          ? [created, ...sessions]
-          : sessions
-      ))
-      seedCreatedSessionInRecent(queryClient, resolvedSlug, created)
+      seedCreatedSession(queryClient, created)
       // The seeds are create-TIME snapshots and setQueryData marks them fresh —
       // on a fast turn (E2E mock; a quick real reply) the session can change
       // (schedule a wake, go idle) BEFORE this onSuccess runs, and the
@@ -279,7 +267,7 @@ export function useCreateSession(options: {
       // appears. Invalidate both so the seed renders instantly while the
       // refetch right behind it stays authoritative.
       queryClient.invalidateQueries({ queryKey: ['session', created.id] })
-      queryClient.invalidateQueries({ queryKey: ['sessions', resolvedSlug] })
+      queryClient.invalidateQueries({ queryKey: ['sessions', created.agentSlug] })
     },
   })
 }
@@ -436,11 +424,9 @@ export function useForkSession() {
     },
     onSuccess: (fork, variables, context) => {
       track('session_forked')
-      queryClient.setQueryData(['session', fork.id, fork.agentSlug], fork)
+      seedCreatedSession(queryClient, fork)
       copyComposerDraft(draftsStore, sessionDraftKey(fork.id), context.draft)
-      queryClient.invalidateQueries({
-        queryKey: ['sessions', resolveAgentSlugFromCache(queryClient, variables.agentSlug)],
-      })
+      queryClient.invalidateQueries({ queryKey: ['sessions', fork.agentSlug] })
       // Open the copy. Returned so the mutation resolves only once the route
       // transition is done and a caller that acts next does so from inside it.
       return navigate({
