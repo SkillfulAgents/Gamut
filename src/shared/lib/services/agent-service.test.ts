@@ -5,6 +5,7 @@ import * as os from 'os'
 import Database from 'better-sqlite3'
 import { drizzle } from 'drizzle-orm/better-sqlite3'
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator'
+import { eq } from 'drizzle-orm'
 import * as schema from '@shared/lib/db/schema'
 import { agentAvatarSchema } from '@shared/lib/types/agent-avatar'
 import {
@@ -865,6 +866,35 @@ Instructions`
       expect(await fresh.mcpSessions.get('mcp-1', proxySession)).toBeNull()
       expect(await fresh.volumeUploads.allowDelete('notes.txt')).toBe(true)
       expect(await fresh.sessions.takeDeferredNaming('session-1')).toBe(false)
+    })
+
+    it('removes what the agent stored with it: its directory and its session index', async () => {
+      await createTestAgent('test-agent', SAMPLE_INSTRUCTIONS)
+      const sessionsOf = (slug: string) => testDb.select().from(schema.agentSessions).where(eq(schema.agentSessions.agentSlug, slug)).all()
+      await testDb.insert(schema.agentSessions).values({ agentSlug: 'test-agent', sessionId: 's1', metadata: '{"name":"Its session"}' }).run()
+
+      await deleteAgent('test-agent')
+
+      expect(fs.existsSync(path.join(testDir, 'agents', 'test-agent'))).toBe(false)
+      expect(await sessionsOf('test-agent')).toEqual([])
+    })
+
+    it('keeps the agent listed when what it stored cannot be deleted, so the delete can be retried', async () => {
+      await createTestAgent('test-agent', SAMPLE_INSTRUCTIONS)
+      // A read-only parent refuses to unlink the agent directory itself.
+      const agentsDir = path.join(testDir, 'agents')
+      await fs.promises.chmod(agentsDir, 0o555)
+
+      try {
+        await expect(deleteAgent('test-agent')).rejects.toThrow()
+        expect(await agentExists('test-agent')).toBe(true)
+      } finally {
+        await fs.promises.chmod(agentsDir, 0o755)
+      }
+
+      expect(await deleteAgent('test-agent')).toBe(true)
+      expect(await agentExists('test-agent')).toBe(false)
+      expect(fs.existsSync(path.join(agentsDir, 'test-agent'))).toBe(false)
     })
   })
 

@@ -4,7 +4,10 @@
  */
 import { background } from '@shared/lib/background'
 import { processTimer } from '@shared/lib/container/process-timer'
+import { getAgentDir, getAgentsDir, removeDirectory } from '@shared/lib/utils/file-storage'
+import { assertPathWithinDir } from '@shared/lib/utils/path-safety'
 import { BaseAgentActor, type AgentActorParts } from './base-agent-actor'
+import { dropDbSessionIndex } from './db-session-index-storage'
 import { createLocalSessionStore } from './local-session-store'
 import type { SessionStore } from './session-store'
 
@@ -26,5 +29,14 @@ export class LocalAgentActor extends BaseAgentActor {
 
   protected cancelIdleWake(): void {
     this.idleWake.clear()
+  }
+
+  /** Its directory under the agents data directory, then its session index in the app database. */
+  async delete(): Promise<void> {
+    const dir = getAgentDir(this.slug)
+    assertPathWithinDir(getAgentsDir(), dir)
+    await removeDirectory(dir)
+    // A later agent that is given the slug must not inherit the sessions.
+    await dropDbSessionIndex(this.slug)
   }
 }

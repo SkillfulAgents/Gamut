@@ -80,7 +80,7 @@ const listingLimit = pLimit(5)
  * container and sessions this object holds. A subclass says where the agent
  * is kept: where its files are, what wakes it to check whether its container
  * is idle, and how what it stored is deleted (`LocalAgentActor`: a directory
- * on this machine and a timer of this process).
+ * on this machine, the app database, and a timer of this process).
  *
  * Runtime methods delegate with the agent's store or slug, or with the
  * actor's own stores where the state is the actor's. Storage capabilities
@@ -220,6 +220,9 @@ export abstract class BaseAgentActor implements AgentActor {
 
   /** Drops the wake-up `wakeToCheckIdleAt` set, if any. */
   protected abstract cancelIdleWake(): void
+
+  /** Removes everything this agent stored (see `AgentActor.delete`). */
+  abstract delete(): Promise<void>
 
   /** The registry is dropping this actor: release everything it holds (see `AgentActor.dispose`). */
   async dispose(reason?: 'shutdown'): Promise<void> {
