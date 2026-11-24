@@ -152,34 +152,56 @@ describe('stopAllAgents', () => {
     expect(await hasRunningAgents()).toBe(false)
   })
 
-  it('does not throw when one agent\'s stop fails, and still stops the others', async () => {
+  it.each(['status', 'stop'] as const)('still stops the other agents when one %s call fails', async (operation) => {
     vi.spyOn(console, 'error').mockImplementation(() => {})
     const a = fakeActor('agent-1', 'running')
     const b = fakeActor('agent-2', 'running')
-    a.container.stop.mockRejectedValueOnce(new Error('connection refused'))
+    a.container[operation].mockRejectedValueOnce(new Error('connection refused'))
     hold(a, b)
 
     await expect(stopAllAgents()).resolves.toBeUndefined()
     expect(b.container.stop).toHaveBeenCalledOnce()
   })
 
-  it('gives up on an agent whose stop hangs, without holding up the others', async () => {
+  it('stops healthy agents immediately and ignores a status reply after the deadline', async () => {
     vi.useFakeTimers()
     vi.spyOn(console, 'error').mockImplementation(() => {})
-    const fast = fakeActor('fast-agent', 'running')
     const slow = fakeActor('slow-agent', 'running')
+    const fast = fakeActor('fast-agent', 'running')
+    slow.container.status.mockImplementationOnce(() => new Promise(resolve => {
+      setTimeout(() => resolve({ status: 'running', port: 4000 }), 60_000)
+    }))
+    hold(slow, fast)
+
+    const done = vi.fn()
+    const stopping = stopAllAgents().then(done)
+    await vi.advanceTimersByTimeAsync(0)
+    expect(fast.container.stop).toHaveBeenCalledOnce()
+    await vi.advanceTimersByTimeAsync(50_000)
+    expect(done).toHaveBeenCalledOnce()
+    await stopping
+
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(slow.container.stop).not.toHaveBeenCalled()
+  })
+
+  it('shares one deadline between reading status and stopping the container', async () => {
+    vi.useFakeTimers()
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const slow = fakeActor('slow-agent', 'running')
+    slow.container.status.mockImplementationOnce(() => new Promise(resolve => {
+      setTimeout(() => resolve({ status: 'running', port: 4000 }), 10_000)
+    }))
     slow.container.stop.mockImplementation(() => new Promise<void>(() => {}))
-    hold(fast, slow)
+    hold(slow)
 
     const done = vi.fn()
     const stopping = stopAllAgents().then(done)
     await vi.advanceTimersByTimeAsync(49_000)
-    expect(done).not.toHaveBeenCalled()
-    // Preparation plus the runtime's own escalation chain.
-    await vi.advanceTimersByTimeAsync(2_000)
-    await stopping
-
-    expect(fast.container.stop).toHaveBeenCalledOnce()
     expect(slow.container.stop).toHaveBeenCalledOnce()
+    expect(done).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(1_000)
+    expect(done).toHaveBeenCalledOnce()
+    await stopping
   })
 })
