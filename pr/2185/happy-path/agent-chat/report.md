@@ -1,8 +1,8 @@
 [TEST_PASS]
-[REASON] Sent "Hello! What is 2+2?" to agent QA-20261124-084535-ewhf in the Gamut UI and confirmed the reply contains "4".
-[STEP] 1. Navigated to http://localhost:47891 — the Gamut home page loaded with the sidebar listing both QA-20261124-084536-rddq and QA-20261124-084535-ewhf.
-[STEP] 2. Clicked "QA-20261124-084535-ewhf" in the sidebar — the agent page opened at /agents/qa-20261124-084535-ewhf-eatvs0cz9d, with the agent name in the header.
-[STEP] 3. Checked the agent status — the header status indicator reads "idle", so the status check passed.
-[STEP] 4. Typed "Hello! What is 2+2?" into the message box and clicked Send — the app navigated to a new session ("Basic Arithmetic Question Check") and showed the user message with a "Working..." indicator.
-[STEP] 5. Waited up to 3 minutes for a response — the reply "2 + 2 = 4." appeared and the status returned to "idle" before the wait finished.
-[STEP] 6. Verified the response mentions "4" — "2 + 2 = 4." is shown in the chat. Screenshot taken (step6-response-verified.png).
+[REASON] Opened the QA-20261124-215429-uktr agent, sent "Hello! What is 2+2?", and confirmed the reply contains "4".
+[STEP] 1. Navigated to http://localhost:47891 — the Gamut app loaded and the sidebar listed QA-20261124-215429-uktr.
+[STEP] 2. Clicked QA-20261124-215429-uktr in the sidebar — its agent page opened at /agents/qa-20261124-215429-uktr-yr0byxc1ml.
+[STEP] 3. Verified status — the header status indicator read "idle" (screenshot step3-agent-status.png taken). Pass.
+[STEP] 4. Typed "Hello! What is 2+2?" into the composer and clicked Send — a new session "Basic Arithmetic Question Check" was created and the message appeared in the chat with the activity indicator showing "Working...".
+[STEP] 5. Waited for the response — the reply "2 + 2 = 4." appeared and the status returned to "idle" well within the 3-minute limit.
+[STEP] 6. Verified the response mentions "4" — it reads "2 + 2 = 4." Screenshot taken (step6-response.png). Pass.

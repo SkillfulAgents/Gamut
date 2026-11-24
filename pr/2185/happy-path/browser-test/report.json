@@ -1,23 +1,23 @@
 {
   "storyId": "browser-test",
   "passed": true,
-  "reason": "Ran the 5-step agent chat check: open the QA agent, send the example.com page-title prompt, wait for a reply, and confirm \"Example Domain\" appears.",
+  "reason": "Sent the prompt to agent QA-20261124-215429-5and and confirmed the reply contains \"Example Domain\" within the 3-minute window.",
   "steps": [
-    "Step 1: Navigated to http://localhost:47891 — the Gamut app loaded (page title \"Gamut\") and the sidebar listed \"QA-20261124-084536-rddq\" under Your Agents.",
-    "Step 2: Clicked \"QA-20261124-084536-rddq\" in the sidebar — the agent page opened at /agents/qa-20261124-084536-rddq-hxveidnuqw, showing an empty chat input with \"Opus 5.5 · Medium\" selected.",
-    "Step 3: Typed \"Open a browser and go to https://example.com. Tell me the page title.\" and sent it with Meta+Enter — the message was sent and the session \"Check Example.com Page Title\" was created in the sidebar.",
-    "Step 4: Waited up to 3 minutes for a reply — the reply appeared within about 5 seconds of work (\"Worked for 5s · 3 tool calls · 163,998 tokens\").",
-    "Step 5: Verified the response — it reads \"The page title at https://example.com is \"Example Domain\". I closed the browser afterwards.\" A viewport screenshot was taken showing the user message and this reply."
+    "Step 1: Navigated to http://localhost:47891 — the Gamut home page loaded with the sidebar listing QA-20261124-215429-5and and QA-20261124-215429-uktr.",
+    "Step 2: Clicked QA-20261124-215429-5and in the sidebar — its agent page opened (/agents/qa-20261124-215429-5and-3b7c4xo19x) with status \"idle\" and an empty message input.",
+    "Step 3: Typed \"Open a browser and go to https://example.com. Tell me the page title.\" and clicked Send — the message appeared in the chat, a new session \"Browser Page Title Check\" was created, and the agent status changed to \"working\".",
+    "Step 4: Waited up to 3 minutes for \"Example Domain\" to appear — it appeared well inside the window. The completed turn shows \"Worked for 4s · 3 tool calls · 164,005 tokens\", and the agent returned to \"idle\".",
+    "Step 5: Verified the response: \"The page title is \"Example Domain\". The page loaded normally (HTTP 200), and I've closed the browser.\" Screenshot taken (step5-example-domain-response.png) showing this reply."
   ],
   "bugs": [],
-  "durationMs": 68631,
-  "sessionId": "829266b7-9535-4935-b43c-c09a27a2b54a",
+  "durationMs": 72729,
+  "sessionId": "c3434831-e326-4fe3-8609-674563af94fd",
   "cost": {
-    "inputTokens": 8240,
-    "outputTokens": 7300,
-    "cacheCreationTokens": 66862,
-    "cacheReadTokens": 762309,
+    "inputTokens": 8360,
+    "outputTokens": 5499,
+    "cacheCreationTokens": 66248,
+    "cacheReadTokens": 690567,
     "model": "claude-haiku-5-5",
-    "totalCostUsd": 0.204548
+    "totalCostUsd": 0.187722
   }
 }
