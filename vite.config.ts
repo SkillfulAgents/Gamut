@@ -101,14 +101,17 @@ export default defineConfig({
           if (!isAppStateInitialized()) {
             await initializeLocalAppState()
           }
-          // Then the agents, as the web server does. Checked like the database: an
-          // edit that re-evaluates the registry module leaves it with none. The
-          // agents' state outlives the edit, and each agent that had any gets its
-          // actor again at once, so what it holds is seen without waiting for a use.
-          const { agentRegistry, initializeAgentRegistry, isAgentRegistryInitialized } = await server.ssrLoadModule(registryModule)
-          if (!isAgentRegistryInitialized()) {
-            const { agentStatesSurvivingReloads, createLocalAgentActor } = await server.ssrLoadModule(localAgentsModule)
-            initializeAgentRegistry(createLocalAgentActor)
+          // Then the agents, as the web server does. Checked against the code that
+          // makes the actors, not only for a registry: an edit can re-evaluate the
+          // registry module, which leaves it with none, or only the actors' code,
+          // which would leave the registry making them from the old code. Either
+          // way the current code makes them from here on. The agents' state
+          // outlives the edit, and each agent that had any gets its actor again at
+          // once, so what it holds is seen without waiting for a use.
+          const { agentRegistry, isAgentRegistryInitialized, reinstallAgentRegistry } = await server.ssrLoadModule(registryModule)
+          const { agentStatesSurvivingReloads, createLocalAgentActor } = await server.ssrLoadModule(localAgentsModule)
+          if (!isAgentRegistryInitialized(createLocalAgentActor)) {
+            reinstallAgentRegistry(createLocalAgentActor)
             for (const slug of agentStatesSurvivingReloads.keys()) agentRegistry.get(slug)
           }
           // Then key custody, as the web server does: the vault seals through it.

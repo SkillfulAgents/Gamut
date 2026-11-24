@@ -48,10 +48,10 @@ const registries: Array<{ evictAll(): void }> = []
 
 /** The backend as one module evaluation sees it, booted as the dev server boots it (vite.config.ts). */
 async function load() {
-  const { agentRegistry, initializeAgentRegistry, isAgentRegistryInitialized } = await import('./registry')
-  if (!isAgentRegistryInitialized()) {
-    const { agentStatesSurvivingReloads, createLocalAgentActor } = await import('./local-agent-registry')
-    initializeAgentRegistry(createLocalAgentActor)
+  const { agentRegistry, isAgentRegistryInitialized, reinstallAgentRegistry } = await import('./registry')
+  const { agentStatesSurvivingReloads, createLocalAgentActor } = await import('./local-agent-registry')
+  if (!isAgentRegistryInitialized(createLocalAgentActor)) {
+    reinstallAgentRegistry(createLocalAgentActor)
     // Every agent that had state gets its actor again at once.
     for (const slug of agentStatesSurvivingReloads.keys()) agentRegistry.get(slug)
   }

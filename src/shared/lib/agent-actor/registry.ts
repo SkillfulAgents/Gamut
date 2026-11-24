@@ -56,17 +56,40 @@ const throughTestTransport =
 // In this module, not on globalThis: a dev-server edit that re-evaluates it
 // leaves the slot empty, and the dev server installs a registry of the new code.
 let installed: AgentRegistry | null = null
+/** What `installed` makes its actors with. */
+let installedWith: CreateAgentActor | null = null
+
+function install(createActor: CreateAgentActor): void {
+  installed = createAgentRegistry(throughTestTransport ? (slug) => serializingActor(createActor(slug)) : createActor)
+  installedWith = createActor
+}
 
 /**
  * Says how this process makes an agent's actor. Called once by the entry
  * point, before anything uses an agent; a repeat call does nothing.
  */
 export function initializeAgentRegistry(createActor: CreateAgentActor): void {
-  installed ??= createAgentRegistry(throughTestTransport ? (slug) => serializingActor(createActor(slug)) : createActor)
+  if (!installed) install(createActor)
 }
 
-export function isAgentRegistryInitialized(): boolean {
-  return installed !== null
+/**
+ * Whether a registry is installed. Given `createActor`, whether it is
+ * installed over that very function: the dev server asks, since an edit can
+ * re-evaluate the code that makes the actors and leave this module as it was.
+ */
+export function isAgentRegistryInitialized(createActor?: CreateAgentActor): boolean {
+  return installed !== null && (createActor === undefined || installedWith === createActor)
+}
+
+/**
+ * For a process whose backend modules are re-evaluated while it runs (the dev
+ * server, on an edit): makes the agents' actors with `createActor` from here
+ * on, in place of whatever was installed. The actors held so far are
+ * forgotten, not disposed: what they held outlives them, and the actors made
+ * next take it up (see local-agent-registry.ts).
+ */
+export function reinstallAgentRegistry(createActor: CreateAgentActor): void {
+  install(createActor)
 }
 
 /**
@@ -76,6 +99,7 @@ export function isAgentRegistryInitialized(): boolean {
  */
 export function _resetAgentRegistryForTest(createActor?: CreateAgentActor): void {
   installed = createActor ? createAgentRegistry(createActor) : null
+  installedWith = createActor ?? null
 }
 
 // Tests have no entry point. The local actor's module says here, when a test

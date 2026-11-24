@@ -86,6 +86,56 @@ describe('which agents run', () => {
   })
 })
 
+describe('an agent whose actor cannot be asked', () => {
+  let logged: ReturnType<typeof vi.spyOn>
+  beforeEach(() => {
+    logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+  })
+  afterEach(() => {
+    logged.mockRestore()
+  })
+
+  it('counts as not running, and the others still answer', async () => {
+    const unreachable = fakeActor('research-agent', 'running')
+    unreachable.container.status.mockRejectedValue(new Error('The agent could not be reached'))
+    hold(unreachable, fakeActor('writer-agent', 'running'), fakeActor('support-agent', 'stopped'))
+
+    expect(await hasRunningAgents()).toBe(true)
+    expect(await runningAgentSlugs()).toEqual(['writer-agent'])
+    expect(logged).toHaveBeenCalledWith(expect.stringContaining('research-agent'), expect.any(Error))
+  })
+
+  it('does not fail the question when it is the only agent', async () => {
+    const unreachable = fakeActor('research-agent', 'running')
+    unreachable.container.status.mockRejectedValue(new Error('The agent could not be reached'))
+    hold(unreachable)
+
+    expect(await hasRunningAgents()).toBe(false)
+    expect(await runningAgentSlugs()).toEqual([])
+  })
+
+  it('is left out of the agents holding drives, and the others are still named', async () => {
+    const unreachable = fakeActor('research-agent', 'running')
+    unreachable.container.holdsDrives.mockRejectedValue(new Error('The agent could not be reached'))
+    hold(unreachable, fakeActor('writer-agent', 'running'))
+
+    expect(await agentsHoldingDrives()).toEqual(['writer-agent'])
+    expect(logged).toHaveBeenCalledWith(expect.stringContaining('research-agent'), expect.any(Error))
+  })
+
+  it('does not keep the other running agents from being marked stale', async () => {
+    const unmarkable = fakeActor('research-agent', 'running')
+    unmarkable.container.invalidate.mockRejectedValue(new Error('The agent could not be reached'))
+    const writer = fakeActor('writer-agent', 'running')
+    hold(unmarkable, writer)
+
+    await expect(markRunningAgentsStale()).resolves.toBeUndefined()
+
+    expect(writer.container.invalidate).toHaveBeenCalledOnce()
+    expect(logged).toHaveBeenCalledWith(expect.stringContaining('research-agent'), expect.any(Error))
+  })
+})
+
 describe('agentsHoldingDrives', () => {
   it('names the agents whose actors say a drive change needs a restart, passing the option on', async () => {
     const running = fakeActor('a', 'running')
@@ -152,34 +202,56 @@ describe('stopAllAgents', () => {
     expect(await hasRunningAgents()).toBe(false)
   })
 
-  it('does not throw when one agent\'s stop fails, and still stops the others', async () => {
+  it.each(['status', 'stop'] as const)('still stops the other agents when one %s call fails', async (operation) => {
     vi.spyOn(console, 'error').mockImplementation(() => {})
     const a = fakeActor('agent-1', 'running')
     const b = fakeActor('agent-2', 'running')
-    a.container.stop.mockRejectedValueOnce(new Error('connection refused'))
+    a.container[operation].mockRejectedValueOnce(new Error('connection refused'))
     hold(a, b)
 
     await expect(stopAllAgents()).resolves.toBeUndefined()
     expect(b.container.stop).toHaveBeenCalledOnce()
   })
 
-  it('gives up on an agent whose stop hangs, without holding up the others', async () => {
+  it('stops healthy agents immediately and ignores a status reply after the deadline', async () => {
     vi.useFakeTimers()
     vi.spyOn(console, 'error').mockImplementation(() => {})
-    const fast = fakeActor('fast-agent', 'running')
     const slow = fakeActor('slow-agent', 'running')
+    const fast = fakeActor('fast-agent', 'running')
+    slow.container.status.mockImplementationOnce(() => new Promise(resolve => {
+      setTimeout(() => resolve({ status: 'running', port: 4000 }), 60_000)
+    }))
+    hold(slow, fast)
+
+    const done = vi.fn()
+    const stopping = stopAllAgents().then(done)
+    await vi.advanceTimersByTimeAsync(0)
+    expect(fast.container.stop).toHaveBeenCalledOnce()
+    await vi.advanceTimersByTimeAsync(50_000)
+    expect(done).toHaveBeenCalledOnce()
+    await stopping
+
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(slow.container.stop).not.toHaveBeenCalled()
+  })
+
+  it('shares one deadline between reading status and stopping the container', async () => {
+    vi.useFakeTimers()
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const slow = fakeActor('slow-agent', 'running')
+    slow.container.status.mockImplementationOnce(() => new Promise(resolve => {
+      setTimeout(() => resolve({ status: 'running', port: 4000 }), 10_000)
+    }))
     slow.container.stop.mockImplementation(() => new Promise<void>(() => {}))
-    hold(fast, slow)
+    hold(slow)
 
     const done = vi.fn()
     const stopping = stopAllAgents().then(done)
     await vi.advanceTimersByTimeAsync(49_000)
-    expect(done).not.toHaveBeenCalled()
-    // Preparation plus the runtime's own escalation chain.
-    await vi.advanceTimersByTimeAsync(2_000)
-    await stopping
-
-    expect(fast.container.stop).toHaveBeenCalledOnce()
     expect(slow.container.stop).toHaveBeenCalledOnce()
+    expect(done).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(1_000)
+    expect(done).toHaveBeenCalledOnce()
+    await stopping
   })
 })
