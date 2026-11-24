@@ -13,7 +13,7 @@ import { containerHost } from '@shared/lib/container/container-host'
 import { localHostPort } from '@shared/lib/host/local-host-port'
 import type { AgentState } from './agent-state'
 import { LocalAgentActor } from './local-agent-actor'
-import { _defaultAgentActorForTest } from './registry'
+import { setDefaultActorForTests } from './testing/default-actor'
 import type { AgentSlug } from './types'
 
 // On globalThis outside production, with the container host: a reload that
@@ -33,5 +33,6 @@ export function createLocalAgentActor(slug: AgentSlug): LocalAgentActor {
   return new LocalAgentActor(slug, { containers: containerHost, host: localHostPort }, agentStatesSurvivingReloads)
 }
 
-// A test that installs no registry gets these actors.
-if (process.env.VITEST) _defaultAgentActorForTest(createLocalAgentActor)
+// A test that installs no registry gets these actors. Said to a module of its
+// own, not to the registry: a test may have replaced the registry module.
+if (process.env.VITEST) setDefaultActorForTests(createLocalAgentActor)
