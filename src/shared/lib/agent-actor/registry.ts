@@ -14,6 +14,7 @@
  * This module imports no actor implementation: an implementation imports it.
  */
 import { serializingActor } from './serializing-actor'
+import { defaultActorForTests } from './testing/default-actor'
 import type { AgentActor, AgentRegistry, AgentSlug } from './types'
 
 /** Makes the actor of one agent. Never does I/O. */
@@ -102,23 +103,17 @@ export function _resetAgentRegistryForTest(createActor?: CreateAgentActor): void
   installedWith = createActor ?? null
 }
 
-// Tests have no entry point. The local actor's module says here, when a test
-// loads it, that a test which installs nothing gets the actors desktop and the
-// Node server run (see local-agent-registry.ts).
-let defaultForTests: CreateAgentActor | null = null
-
-/** Tests only: the actor a test gets when it installs none. */
-export function _defaultAgentActorForTest(createActor: CreateAgentActor): void {
-  defaultForTests = createActor
-}
-
 function current(): AgentRegistry {
   if (!installed) {
-    if (!defaultForTests) {
+    // Tests have no entry point: one that installs nothing gets the actors
+    // desktop and the Node server run (see testing/default-actor.ts). Nothing
+    // names a default outside tests.
+    const forTests = defaultActorForTests()
+    if (!forTests) {
       throw new Error('The agent registry is not initialized. The entry point must call initializeAgentRegistry() before anything uses an agent.')
     }
     // Made on first use, not when a module loads.
-    initializeAgentRegistry(defaultForTests)
+    initializeAgentRegistry(forTests)
   }
   return installed!
 }
