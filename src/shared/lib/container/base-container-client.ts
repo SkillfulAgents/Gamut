@@ -312,11 +312,15 @@ const DELETE_SESSION_TIMEOUT_MS = 10000
 // every agent, so a read that hangs must give its slot back.
 const RUNTIME_READ_TIMEOUT_MS = 30_000
 // A session stream can stall without closing (a runtime's port proxy stops
-// delivering, and neither end sees a FIN). The host pings it; a stream that
-// sends nothing, not even a pong, for the limit is ended so the close path
-// resubscribes. The guest's `ws` answers pings on its own.
+// delivering, and neither end sees a FIN). The host pings it, and the guest's
+// `ws` answers pings on its own. A stream is ended, so the close path
+// resubscribes, only on evidence that it alone is broken: it left this many
+// pings in a row unanswered, and the container answers a new request.
+// Counting pings, not time, keeps a host that slept from ending a good
+// stream; asking the container keeps a busy or frozen one from reading as a
+// dead stream.
 const SESSION_STREAM_PING_INTERVAL_MS = 15_000
-const SESSION_STREAM_SILENCE_LIMIT_MS = 45_000
+const SESSION_STREAM_UNANSWERED_PINGS_LIMIT = 3
 
 // Reads stderr only: an exec error's message repeats the command line, flags included.
 export function refusedVolumeFlags(error: { stderr?: unknown } | null | undefined, flags: string): boolean {
@@ -1920,34 +1924,41 @@ export abstract class BaseContainerClient extends EventEmitter implements Contai
       socket = ws
       this.wsReadyRejectors.set(ws, rejectReady)
 
-      let lastHeardAt = Date.now()
+      let unansweredPings = 0
+      let askingContainer = false
       let watchdog: ReturnType<typeof setInterval> | undefined
       const stopWatchdog = () => clearInterval(watchdog)
+      const endIfOnlyTheStreamIsSilent = async () => {
+        askingContainer = true
+        const containerAnswers = await this.isHealthy().catch(() => false)
+        askingContainer = false
+        // A pong or a frame that arrived meanwhile reset the count.
+        if (!containerAnswers || unansweredPings < SESSION_STREAM_UNANSWERED_PINGS_LIMIT || ws.readyState !== WebSocket.OPEN) return
+        console.warn(`WebSocket for session ${sessionId} left ${unansweredPings} pings unanswered while the container answers, closing it`)
+        stopWatchdog()
+        ws.terminate()
+      }
 
       ws.on('open', () => {
         console.log(`WebSocket connected for session ${sessionId}`)
-        lastHeardAt = Date.now()
         watchdog = setInterval(() => {
           // A deliberate close drops this socket's listeners, 'close' included.
           if (ws.readyState !== WebSocket.OPEN) return stopWatchdog()
-          const silentMs = Date.now() - lastHeardAt
-          if (silentMs >= SESSION_STREAM_SILENCE_LIMIT_MS) {
-            console.warn(`WebSocket for session ${sessionId} silent for ${silentMs}ms, closing it`)
-            stopWatchdog()
-            ws.terminate()
-            return
+          if (unansweredPings >= SESSION_STREAM_UNANSWERED_PINGS_LIMIT && !askingContainer) {
+            background(endIfOnlyTheStreamIsSilent(), { name: 'container-client.check-silent-session-stream' })
           }
+          unansweredPings++
           ws.ping()
         }, SESSION_STREAM_PING_INTERVAL_MS)
         watchdog.unref?.()
       })
 
       ws.on('pong', () => {
-        lastHeardAt = Date.now()
+        unansweredPings = 0
       })
 
       ws.on('message', (data) => {
-        lastHeardAt = Date.now()
+        unansweredPings = 0
         try {
           const message = JSON.parse(data.toString())
           const streamMessage: StreamMessage = {
