@@ -258,7 +258,7 @@ export class BrowserScenario implements MockScenario {
     //     browser-stream-proxy reads the cached status to know where to connect.
     //     The agent's actor holds the runtime. Dynamic imports: the actor package imports this one.
     const { agentRegistry } = await import('@shared/lib/agent-actor/registry')
-    const { LocalAgentActor } = await import('@shared/lib/agent-actor/local-agent-actor')
+    const { LocalAgentActor } = await import('@shared/lib/agent-actor/base-agent-actor')
     const agentId = client.getAgentId()
     const actor = agentRegistry.get(agentId)
     if (actor instanceof LocalAgentActor) actor.state.runtime().updateCachedStatus('running', mockPort)

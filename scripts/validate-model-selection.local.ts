@@ -19,7 +19,7 @@ import * as path from 'path'
 import * as os from 'os'
 
 import { agentRegistry } from '../src/shared/lib/agent-actor/registry'
-import { LocalAgentActor } from '../src/shared/lib/agent-actor/local-agent-actor'
+import { LocalAgentActor } from '../src/shared/lib/agent-actor/base-agent-actor'
 import { createAgent, agentExists } from '../src/shared/lib/services/agent-service'
 import { getSessionJsonlPath } from '../src/shared/lib/utils/file-storage'
 import { openDatabase } from '../src/shared/lib/db'

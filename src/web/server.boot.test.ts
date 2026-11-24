@@ -53,7 +53,7 @@ vi.mock('@shared/lib/error-reporting', () => ({ initErrorReporting, flushErrorRe
 vi.mock('@shared/lib/error-reporting/sentry-provider', () => ({ createServerProvider: () => null }))
 vi.mock('@shared/lib/app-state', () => ({ initializeLocalAppState }))
 vi.mock('@shared/lib/agent-actor', () => ({ containerHost, initializeAgentRegistry }))
-vi.mock('@shared/lib/agent-actor/local-agent-actor', () => ({ LocalAgentActor }))
+vi.mock('@shared/lib/agent-actor/base-agent-actor', () => ({ LocalAgentActor }))
 vi.mock('@shared/lib/host/local-host-port', () => ({ localHostPort }))
 vi.mock('@shared/lib/background-work', () => ({ initializeBackgroundWork }))
 vi.mock('@shared/lib/server-bind', () => ({ bindServerWithRetry }))

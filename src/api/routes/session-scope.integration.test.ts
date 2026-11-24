@@ -199,7 +199,7 @@ vi.mock('@anthropic-ai/sdk', () => ({ default: vi.fn() }))
 // Import after every mock is registered.
 import agents from './agents'
 import { agentRegistry } from '@shared/lib/agent-actor'
-import type { LocalAgentActor } from '@shared/lib/agent-actor/local-agent-actor'
+import type { LocalAgentActor } from '@shared/lib/agent-actor/base-agent-actor'
 import { drain, drained } from '@shared/lib/agent-actor/testing/drain'
 import { createLocalSessionStore } from '@shared/lib/agent-actor/local-session-store'
 import { registerSession, sessionExists } from '@shared/lib/services/session-service'

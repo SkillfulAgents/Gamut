@@ -9,7 +9,7 @@
  * one held.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { LocalAgentActor } from './local-agent-actor'
+import type { LocalAgentActor } from './base-agent-actor'
 import { drain, drained } from './testing/drain'
 
 vi.mock('@shared/lib/container/container-host', () => ({
