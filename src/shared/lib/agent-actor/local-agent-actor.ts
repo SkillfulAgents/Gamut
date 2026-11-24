@@ -5,6 +5,7 @@ import { autoSleepTimeoutMsFrom } from '@shared/lib/container/idle-alarm'
 import { processTimer } from '@shared/lib/container/process-timer'
 import { getSettings } from '@shared/lib/config/settings'
 import type { ContainerRuntime } from '@shared/lib/container/container-runtime'
+import type { ContainerClient } from '@shared/lib/container/types'
 import type { userInputRequestManager } from '@shared/lib/tools/requests/request-manager'
 import type { reviewManager } from '@shared/lib/proxy/review-manager'
 import type { accountReauthManager } from '@shared/lib/proxy/account-reauth-manager'
@@ -59,6 +60,11 @@ import type {
   VolumeUploadOps,
   WidgetOps,
 } from './types'
+
+/** What the actor hands the session store it makes: where activity is marked, and the agent's container client. */
+export interface SessionStoreHooks extends Pick<SessionStore, 'onActivity'> {
+  client(): Promise<ContainerClient>
+}
 
 /**
  * What a local actor delegates to. Injected so the registry can be built
@@ -148,9 +154,16 @@ export class LocalAgentActor implements AgentActor {
   /**
    * `state` is given when the handle is wrapping state that outlived an
    * earlier handle for the slug (the registry rebuilding after a dev-server
-   * reload); otherwise the handle starts with none.
+   * reload); otherwise the handle starts with none. `createSessionStore` is
+   * where the agent's files, config documents and transcripts are: a directory
+   * on this machine unless an actor that keeps them elsewhere passes its own.
    */
-  constructor(readonly slug: AgentSlug, deps: LocalActorDeps, state?: AgentState) {
+  constructor(
+    readonly slug: AgentSlug,
+    deps: LocalActorDeps,
+    state?: AgentState,
+    createSessionStore: (hooks: SessionStoreHooks) => SessionStore = (hooks) => createLocalSessionStore(slug, deps, hooks),
+  ) {
     // Every write to a session goes through the store, so this is where the
     // container's idle clock learns of session activity — the live sessions'
     // stream frames, the transcript appends and `sessions.recordActivity`
@@ -160,8 +173,9 @@ export class LocalAgentActor implements AgentActor {
       state ??
       createAgentState(slug, {
         sessions: {
-          store: createLocalSessionStore(slug, deps, {
+          store: createSessionStore({
             onActivity: (at) => runtime().noteSessionActivity(at),
+            client: () => runtime().getClient(),
           }),
           host: deps.host,
           runtime: createSessionsRuntime(slug, runtime),
