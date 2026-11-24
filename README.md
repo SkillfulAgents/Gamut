@@ -12,7 +12,7 @@ Documentation: **[gamut.so/docs](https://gamut.so/docs)**
 | | What it is | Get started |
 |---|---|---|
 | **Cloud** | Gamut hosts everything. Nothing to install. | [Sign up](https://platform.gamutagents.com/auth/login?mode=signup) at [gamut.so](https://gamut.so) |
-| **Desktop** | The app runs every agent locally on your computer, and can also connect to your Cloud workspace. macOS 13 or later on Apple Silicon, and Windows (x64 and arm64). | [Download for Mac](https://updates.gamutagents.com/download/mac) · [Download for Windows](https://updates.gamutagents.com/download/win) · [Docs](https://gamut.so/docs/self-hosting/deployment-options/electron-desktop-app) |
+| **Desktop** | The app runs every agent locally on your computer, and can also connect to your Cloud workspace. macOS 13 or later on Apple Silicon, and Windows (x64 and arm64). | [Download for Mac](https://updates.gamut.so/download/mac) · [Download for Windows](https://updates.gamut.so/download/win) · [Docs](https://gamut.so/docs/self-hosting/deployment-options/electron-desktop-app) |
 | **Self-hosted** | You run the server on your own hardware with Docker, or on Kubernetes. | [Quick start](#self-hosting-with-docker) below |
 
 ## Features
