@@ -1,22 +1,22 @@
 {
-  "startedAt": "2026-11-24T01:00:57.553Z",
-  "finishedAt": "2026-11-24T01:02:11.637Z",
-  "totalDurationSec": 74.08,
+  "startedAt": "2026-11-24T02:19:49.870Z",
+  "finishedAt": "2026-11-24T02:21:09.217Z",
+  "totalDurationSec": 79.35,
   "totalStories": 2,
   "passedStories": 2,
   "failedStories": 0,
   "totalFeatures": 2,
   "passedFeatures": 2,
   "failedFeatures": 0,
-  "totalCostUsd": 0.48,
+  "totalCostUsd": 0.58,
   "results": [
     {
       "storyId": "agent-chat",
       "storyName": "Create agent, send message, verify response",
       "mode": "happy-path",
       "passed": true,
-      "durationSec": 46.76,
-      "costUsd": 0.33,
+      "durationSec": 78.24,
+      "costUsd": 0.39,
       "reportPath": "happy-path/agent-chat/report.json"
     },
     {
@@ -24,8 +24,8 @@
       "storyName": "Agent opens browser and visits a page",
       "mode": "happy-path",
       "passed": true,
-      "durationSec": 72.13,
-      "costUsd": 0.16,
+      "durationSec": 74.05,
+      "costUsd": 0.19,
       "reportPath": "happy-path/browser-test/report.json"
     }
   ]
