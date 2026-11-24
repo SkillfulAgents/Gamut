@@ -12,7 +12,7 @@
 import { containerHost } from '@shared/lib/container/container-host'
 import { localHostPort } from '@shared/lib/host/local-host-port'
 import type { AgentState } from './agent-state'
-import { LocalAgentActor } from './base-agent-actor'
+import { LocalAgentActor } from './local-agent-actor'
 import { _defaultAgentActorForTest } from './registry'
 import type { AgentSlug } from './types'
 

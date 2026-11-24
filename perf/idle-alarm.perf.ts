@@ -15,7 +15,7 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { bootPerfApp, expectWithinBudget, measure, type PerfApp } from './harness'
 import { BASE_TIME } from './fixtures'
-import type { LocalAgentActor } from '@shared/lib/agent-actor/base-agent-actor'
+import type { LocalAgentActor } from '@shared/lib/agent-actor/local-agent-actor'
 
 const AUTO_SLEEP_TIMEOUT_MS = 30 * 60 * 1000
 

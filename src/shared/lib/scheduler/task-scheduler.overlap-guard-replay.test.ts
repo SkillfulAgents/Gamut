@@ -126,7 +126,7 @@ vi.mock('@shared/lib/utils/file-storage', () => ({
 }))
 
 import { agentRegistry } from '@shared/lib/agent-actor'
-import type { LocalAgentActor } from '@shared/lib/agent-actor/base-agent-actor'
+import type { LocalAgentActor } from '@shared/lib/agent-actor/local-agent-actor'
 import { drain } from '@shared/lib/agent-actor/testing/drain'
 import { taskScheduler } from './task-scheduler'
 

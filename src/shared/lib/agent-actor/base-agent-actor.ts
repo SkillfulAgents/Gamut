@@ -2,7 +2,6 @@ import pLimit from 'p-limit'
 import { readSessionToolHistory } from '@shared/lib/services/session-tool-history'
 import type { ContainerHost } from '@shared/lib/container/container-host'
 import { autoSleepTimeoutMsFrom } from '@shared/lib/container/idle-alarm'
-import { processTimer } from '@shared/lib/container/process-timer'
 import { getSettings } from '@shared/lib/config/settings'
 import type { ContainerRuntime } from '@shared/lib/container/container-runtime'
 import { ANY_APPLICATION_LEVEL } from '@shared/lib/computer-use/types'
@@ -25,7 +24,6 @@ import { findDeliveredFile, readTranscriptView } from '@shared/lib/services/x-ag
 import { createSessionDelivery, notAcceptedError, type SessionDelivery } from './delivery'
 import { MessageNotAcceptedError } from '@shared/lib/container/message-dispatch-error'
 import { createAgentState, releaseAgentState, releaseSessionState, settleStoppedSession, type AgentState, type AgentStateHooks } from './agent-state'
-import { createLocalSessionStore } from './local-session-store'
 import { exportSessionMetadata, ingestSessionMetadataFile } from '@shared/lib/services/session-metadata-file'
 import { transcriptPath, type SessionStore } from './session-store'
 import { readSessionContext } from './session-context'
@@ -55,12 +53,11 @@ import type {
 } from './types'
 
 /**
- * What a local actor is given: the two things outside the agent that it
- * cannot make for itself. Everything else it uses is its own code, which it
- * imports.
+ * What an actor is given: the two things outside the agent that it cannot
+ * make for itself. Everything else it uses is its own code, which it imports.
  */
-export interface LocalActorParts {
-  /** This machine's container layer. The actor asks it for its own container runtime, which the actor then holds. */
+export interface AgentActorParts {
+  /** The container layer. The actor asks it for its own container runtime, which the actor then holds. */
   readonly containers: Pick<ContainerHost, 'createRuntime'>
   /** The host this agent asks for host tools, machine work and side effects. */
   readonly host: HostPort
@@ -79,7 +76,11 @@ const subagentCapture = SubagentCapture.fromEnv()
 const listingLimit = pLimit(5)
 
 /**
- * An agent whose container and files are managed by this process.
+ * An agent's actor: everything `AgentActor` does, for an agent whose
+ * container and sessions this object holds. A subclass says where the agent
+ * is kept: where its files are, what wakes it to check whether its container
+ * is idle, and how what it stored is deleted (`LocalAgentActor`: a directory
+ * on this machine and a timer of this process).
  *
  * Runtime methods delegate with the agent's store or slug, or with the
  * actor's own stores where the state is the actor's. Storage capabilities
@@ -87,7 +88,7 @@ const listingLimit = pLimit(5)
  * closures rather than class methods so a caller may destructure them
  * (`const { send } = actor.messages`).
  */
-export class LocalAgentActor implements AgentActor {
+export abstract class BaseAgentActor implements AgentActor {
   readonly live: () => Promise<AgentLiveSummary>
   readonly listing: () => Promise<AgentListing>
   readonly ready: () => Promise<void>
@@ -117,8 +118,6 @@ export class LocalAgentActor implements AgentActor {
    * actor that takes up state an earlier one made has nothing to read.
    */
   readonly firstRead: Promise<void>
-  /** What wakes this actor to check whether its container is idle: a timer of this process. */
-  private readonly idleWake = processTimer()
 
   /**
    * `survivingStates` is for a process whose backend modules are re-evaluated
@@ -130,7 +129,8 @@ export class LocalAgentActor implements AgentActor {
    */
   constructor(
     readonly slug: AgentSlug,
-    parts: LocalActorParts,
+    /** Kept for a subclass: `createSessionStore` runs while the actor is being made, before the subclass has set anything of its own. */
+    protected readonly parts: AgentActorParts,
     private readonly survivingStates?: Map<AgentSlug, AgentState>,
   ) {
     const { containers, host } = parts
@@ -144,7 +144,7 @@ export class LocalAgentActor implements AgentActor {
       survived ??
       createAgentState(slug, {
         sessions: {
-          store: createLocalSessionStore(slug, {}, {
+          store: this.createSessionStore({
             onActivity: (at) => runtime().noteSessionActivity(at),
           }),
           host,
@@ -209,18 +209,17 @@ export class LocalAgentActor implements AgentActor {
   }
 
   /**
-   * Has `checkIdle()` run at `at` (epoch ms), in place of any wake-up set
-   * before: a timer of this process, which is all an actor that lives and
-   * dies with its process needs.
+   * Where this agent's files, config documents and transcripts are. Called
+   * once, while the actor is being made: it may use `slug` and `parts`, and
+   * nothing a subclass sets in its own constructor.
    */
-  private wakeToCheckIdleAt(at: number): void {
-    this.idleWake.set(at - Date.now(), () => background(this.checkIdle(), { name: 'agent-actor.check-idle' }))
-  }
+  protected abstract createSessionStore(hooks: Pick<SessionStore, 'onActivity'>): SessionStore
+
+  /** Has `checkIdle()` run at `at` (epoch ms), in place of any wake-up set before. */
+  protected abstract wakeToCheckIdleAt(at: number): void
 
   /** Drops the wake-up `wakeToCheckIdleAt` set, if any. */
-  private cancelIdleWake(): void {
-    this.idleWake.clear()
-  }
+  protected abstract cancelIdleWake(): void
 
   /** The registry is dropping this actor: release everything it holds (see `AgentActor.dispose`). */
   async dispose(reason?: 'shutdown'): Promise<void> {
@@ -232,7 +231,7 @@ export class LocalAgentActor implements AgentActor {
     // Activity the index recorded and has not stored yet: its wake-up does
     // not come once dispatch has stopped, and nothing reads the index again.
     await this.store.index.storeRecordedActivity().catch((error: unknown) => {
-      console.warn(`[LocalAgentActor] Could not store the recorded session activity of ${this.slug}:`, error)
+      console.warn(`[AgentActor] Could not store the recorded session activity of ${this.slug}:`, error)
     })
   }
 }
@@ -574,7 +573,7 @@ async function answerRequest(state: AgentState, id: string, value: unknown): Ret
       body: JSON.stringify({ value }),
     })
     if (!response.ok) {
-      console.error(`[LocalAgentActor] The container would not take the answer to ${id}: ${response.status} ${await response.text().catch(() => '')}`)
+      console.error(`[AgentActor] The container would not take the answer to ${id}: ${response.status} ${await response.text().catch(() => '')}`)
       return 'undeliverable'
     }
     state.sessions.completeRequest(undefined, id, 'answered')
@@ -637,12 +636,12 @@ function createSessionsRuntime(slug: AgentSlug, runtime: () => ContainerRuntime)
     fatalResult: (client, kind) => runtime().fatalResult(client, kind),
     unexpectedDeath: (sessionId) => runtime().handleUnexpectedDeath(sessionId ? [sessionId] : undefined),
     stopAfterFatalError: () => {
-      console.log(`[LocalAgentActor] Stopping container for ${slug} after a fatal error`)
+      console.log(`[AgentActor] Stopping container for ${slug} after a fatal error`)
       background(
         runtime()
           .stopContainer({ afterFatalError: true })
-          .catch((err) => console.error(`[LocalAgentActor] Failed to stop container for ${slug}:`, err)),
-        { name: 'local-agent-actor.stop-after-fatal-error' },
+          .catch((err) => console.error(`[AgentActor] Failed to stop container for ${slug}:`, err)),
+        { name: 'agent-actor.stop-after-fatal-error' },
       )
     },
   }

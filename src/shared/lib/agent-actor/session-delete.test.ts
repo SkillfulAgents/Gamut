@@ -26,7 +26,7 @@ vi.mock('@shared/lib/utils/file-storage', async (importOriginal) => ({
 
 import * as sessionService from '@shared/lib/services/session-service'
 import * as errorReporting from '@shared/lib/error-reporting'
-import { LocalAgentActor, type LocalActorParts } from './base-agent-actor'
+import { LocalAgentActor, type LocalActorParts } from './local-agent-actor'
 import { CLI_TRANSCRIPTS_DIR, sessionDirPath } from './session-store'
 import { createRecordingHostPort } from './testing/recording-host-port'
 

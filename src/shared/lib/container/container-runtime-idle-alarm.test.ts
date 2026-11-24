@@ -104,7 +104,7 @@ vi.mock('@shared/lib/services/mount-service', () => ({ listVolumes: async () => 
 import { containerHost } from './container-host'
 import { _resetAgentRegistryForTest, agentRegistry as registry } from '@shared/lib/agent-actor/registry'
 import { LiveSessions } from '@shared/lib/agent-actor/live/live-sessions'
-import { LocalAgentActor } from '@shared/lib/agent-actor/base-agent-actor'
+import { LocalAgentActor } from '@shared/lib/agent-actor/local-agent-actor'
 import { createRecordingHostPort } from '@shared/lib/agent-actor/testing/recording-host-port'
 
 // The actors desktop runs, over this file's container host: each owns its idle alarm and its runtime.
