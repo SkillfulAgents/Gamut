@@ -193,16 +193,22 @@ export function registerBackgroundWork(options: BackgroundWorkOptions = {}): voi
 export interface BackgroundWorkOptions {
   /**
    * False when this process is not on the machine where the containers run, so it has no
-   * containers to find at startup and no image to check: the container-host and
-   * container-image services are not registered, and runtime readiness comes from the
-   * runners' setup (`ContainerHost.deriveReadiness`). Each agent's actor still watches its
-   * own container, where that agent runs.
+   * containers to find at startup, no image to check and none to stop when it shuts down:
+   * the container-host, container-image and containers services are not registered, and
+   * runtime readiness comes from the runners' setup (`ContainerHost.deriveReadiness`). Each
+   * agent's actor still watches its own container, where that agent runs, and that container
+   * outlives this process.
    */
   localContainers?: boolean
 }
 
-/** The services about this machine's containers: the startup read of which ones still run, and the image check. */
-const LOCAL_CONTAINER_SERVICES = new Set(['container-host', 'container-image'])
+/**
+ * The services about this machine's containers: the startup read of which ones still run, the
+ * image check, and the stop of every one at shutdown. A process whose agents run elsewhere
+ * must not do the last: its shutdown is not theirs, and asking would reach each agent where
+ * it runs and stop it.
+ */
+const LOCAL_CONTAINER_SERVICES = new Set(['container-host', 'container-image', 'containers'])
 
 /** Idempotent. Called via afterBindInitialize, or by a process that only runs the services. */
 export function initializeServices(): Promise<void> {
