@@ -1,10 +1,29 @@
 import * as React from "react"
 import * as SelectPrimitive from "@radix-ui/react-select"
-import { Check, ChevronDown, ChevronUp } from "lucide-react"
+import { Check, ChevronDown, ChevronRight, ChevronUp } from "lucide-react"
 
 import { cn } from "@shared/lib/utils"
+import { ROW_TRIGGER_CHEVRON_CLASS, ROW_TRIGGER_CLASS } from "./row-trigger"
 
-const Select = SelectPrimitive.Root
+/**
+ * 'outline' (the default): a framed field, for stacked forms and toolbar filters.
+ * 'row': the value + soft right chevron of a settings row's right-hand picker
+ * (see row-trigger.ts); its list opens aligned to the trigger's right edge.
+ */
+type SelectVariant = "outline" | "row"
+
+const SelectVariantContext = React.createContext<SelectVariant>("outline")
+
+function Select({
+  variant = "outline",
+  ...props
+}: React.ComponentProps<typeof SelectPrimitive.Root> & { variant?: SelectVariant }) {
+  return (
+    <SelectVariantContext.Provider value={variant}>
+      <SelectPrimitive.Root {...props} />
+    </SelectVariantContext.Provider>
+  )
+}
 
 const SelectGroup = SelectPrimitive.Group
 
@@ -13,21 +32,28 @@ const SelectValue = SelectPrimitive.Value
 const SelectTrigger = React.forwardRef<
   React.ElementRef<typeof SelectPrimitive.Trigger>,
   React.ComponentPropsWithoutRef<typeof SelectPrimitive.Trigger>
->(({ className, children, ...props }, ref) => (
-  <SelectPrimitive.Trigger
-    ref={ref}
-    className={cn(
-      "flex h-9 w-full items-center justify-between whitespace-nowrap rounded-control border border-input bg-transparent px-3 py-2 text-xs shadow-sm ring-offset-background data-[placeholder]:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50 [&>span]:line-clamp-1",
-      className
-    )}
-    {...props}
-  >
-    {children}
-    <SelectPrimitive.Icon asChild>
-      <ChevronDown className="h-4 w-4 opacity-50" />
-    </SelectPrimitive.Icon>
-  </SelectPrimitive.Trigger>
-))
+>(({ className, children, ...props }, ref) => {
+  const variant = React.useContext(SelectVariantContext)
+  return (
+    <SelectPrimitive.Trigger
+      ref={ref}
+      className={cn(
+        variant === "row"
+          ? cn("flex shrink-0 items-center whitespace-nowrap rounded-control ring-offset-background focus:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 [&>span]:line-clamp-1", ROW_TRIGGER_CLASS)
+          : "flex h-9 w-full items-center justify-between whitespace-nowrap rounded-control border border-input bg-transparent px-3 py-2 text-xs shadow-sm ring-offset-background data-[placeholder]:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50 [&>span]:line-clamp-1",
+        className
+      )}
+      {...props}
+    >
+      {children}
+      <SelectPrimitive.Icon asChild>
+        {variant === "row"
+          ? <ChevronRight className={ROW_TRIGGER_CHEVRON_CLASS} />
+          : <ChevronDown className="h-4 w-4 opacity-50" />}
+      </SelectPrimitive.Icon>
+    </SelectPrimitive.Trigger>
+  )
+})
 SelectTrigger.displayName = SelectPrimitive.Trigger.displayName
 
 const SelectScrollUpButton = React.forwardRef<
@@ -68,7 +94,9 @@ SelectScrollDownButton.displayName =
 const SelectContent = React.forwardRef<
   React.ElementRef<typeof SelectPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof SelectPrimitive.Content>
->(({ className, children, position = "popper", ...props }, ref) => (
+>(({ className, children, position = "popper", align, ...props }, ref) => {
+  const variant = React.useContext(SelectVariantContext)
+  return (
   <SelectPrimitive.Portal>
     <SelectPrimitive.Content
       ref={ref}
@@ -79,6 +107,7 @@ const SelectContent = React.forwardRef<
         className
       )}
       position={position}
+      align={align ?? (variant === "row" && position === "popper" ? "end" : undefined)}
       {...props}
     >
       <SelectScrollUpButton />
@@ -94,7 +123,8 @@ const SelectContent = React.forwardRef<
       <SelectScrollDownButton />
     </SelectPrimitive.Content>
   </SelectPrimitive.Portal>
-))
+  )
+})
 SelectContent.displayName = SelectPrimitive.Content.displayName
 
 const SelectLabel = React.forwardRef<

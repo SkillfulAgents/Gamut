@@ -6,6 +6,7 @@ import { cn } from '@shared/lib/utils'
 import { Button } from '@renderer/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@renderer/components/ui/popover'
 import { Separator } from '@renderer/components/ui/separator'
+import { ROW_TRIGGER_CHEVRON_CLASS, ROW_TRIGGER_CLASS } from '@renderer/components/ui/row-trigger'
 import { useModelSettings } from '@renderer/hooks/use-settings'
 import { DialogContext } from '@renderer/context/dialog-context'
 import { useUser } from '@renderer/context/user-context'
@@ -197,7 +198,7 @@ export function ModelPickerPopover({
             size="sm"
             disabled={disabled}
             className={variant === 'row'
-              ? '-mr-1 h-8 gap-1 px-1 text-[12px]/5 font-normal text-muted-foreground/70 hover:bg-transparent hover:text-muted-foreground/70'
+              ? ROW_TRIGGER_CLASS
               : 'h-[34px] gap-1.5 px-2 text-xs font-medium'}
             aria-label={`Model: ${triggerLabel ?? 'select'}.${lockedReason ? ` ${lockedReason}` : ''} Click to change.`}
             data-testid="settings-model-trigger"
@@ -213,7 +214,7 @@ export function ModelPickerPopover({
               )}
             </span>
             {variant === 'row'
-              ? <ChevronRight className="h-4 w-4 text-muted-foreground/50" />
+              ? <ChevronRight className={ROW_TRIGGER_CHEVRON_CLASS} />
               : <ChevronDown className="h-3.5 w-3.5" />}
           </Button>
         </PopoverTrigger>

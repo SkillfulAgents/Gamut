@@ -35,11 +35,12 @@ interface ApiLogAutoDeleteSelectProps {
 export function ApiLogAutoDeleteSelect({ value, onChange, disabled }: ApiLogAutoDeleteSelectProps) {
   return (
     <Select
+      variant="row"
       value={(value ?? DEFAULT_API_LOG_AUTO_DELETE_DAYS).toString()}
       onValueChange={(val) => onChange(parseInt(val, 10))}
       disabled={disabled}
     >
-      <SelectTrigger className="h-8 w-[140px]" aria-label="API log auto-delete">
+      <SelectTrigger aria-label="API log auto-delete">
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
