@@ -8053,6 +8053,8 @@ agents.get('/:id/artifacts/:artifactSlug/view', AgentRead(), async (c) => {
 // Shared handler for proxying artifact requests to the container
 const skipProxyRequestHeaders = new Set([
   'host', 'connection', 'transfer-encoding',
+  // The body is buffered and sent again, so fetch sets its length.
+  'content-length',
   // Node fetch transparently decodes upstream bodies. Ask every hop for the
   // identity representation so body bytes and response metadata cannot drift.
   'accept-encoding',
