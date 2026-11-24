@@ -237,6 +237,7 @@ export function BrowserTab() {
             subtitle="Model used for the web browser subagent"
             right={
               <SettingsModelSelect
+                variant="row"
                 model={settings?.models?.browserModel}
                 onModelChange={(value) => updateSettings.mutate({ models: { browserModel: value } })}
                 disabled={isLoading}
@@ -249,13 +250,14 @@ export function BrowserTab() {
             htmlFor="max-browser-tabs"
             right={
               <Select
+                variant="row"
                 value={String(maxTabs)}
                 onValueChange={(value) => {
                   updateSettings.mutate({ app: { maxBrowserTabs: parseInt(value, 10) } })
                 }}
                 disabled={isLoading}
               >
-                <SelectTrigger id="max-browser-tabs" className="h-8 w-24">
+                <SelectTrigger id="max-browser-tabs">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -597,6 +599,7 @@ function BrowserbaseSessionSettings({
           htmlFor="bb-stealth-os"
           right={
             <Select
+              variant="row"
               value={stealthOs ?? NO_OS_VALUE}
               onValueChange={(value) => {
                 onUpdate({
@@ -605,7 +608,7 @@ function BrowserbaseSessionSettings({
               }}
               disabled={disabled}
             >
-              <SelectTrigger id="bb-stealth-os" className="h-8 w-[160px]">
+              <SelectTrigger id="bb-stealth-os">
                 <SelectValue placeholder="Default (auto)" />
               </SelectTrigger>
               <SelectContent>

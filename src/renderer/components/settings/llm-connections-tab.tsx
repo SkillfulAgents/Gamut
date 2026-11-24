@@ -208,6 +208,7 @@ export function LlmConnectionsTab() {
                     <p className="text-[11px] text-muted-foreground mt-0.5">Used by every agent that doesn&apos;t set its own model.</p>
                   </div>
                   <SettingsModelSelect
+                    variant="row"
                     model={data.defaultSelection?.model}
                     llmProviderId={data.defaultSelection?.llmProviderId}
                     globalOnly
@@ -229,6 +230,7 @@ export function LlmConnectionsTab() {
                     )}
                   </div>
                   <SettingsModelSelect
+                    variant="row"
                     model={summarizerSelection?.model}
                     llmProviderId={summarizerSelection?.llmProviderId}
                     globalOnly

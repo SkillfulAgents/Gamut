@@ -1,7 +1,8 @@
 import * as React from 'react'
-import { Check, ChevronsUpDown, Search } from 'lucide-react'
+import { Check, ChevronRight, ChevronsUpDown, Search } from 'lucide-react'
 import { Button } from '@renderer/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@renderer/components/ui/popover'
+import { ROW_TRIGGER_CHEVRON_CLASS, ROW_TRIGGER_CLASS } from '@renderer/components/ui/row-trigger'
 import { cn } from '@shared/lib/utils'
 
 function getUtcOffset(tz: string): string {
@@ -41,9 +42,12 @@ interface TimezonePickerProps {
   onValueChange: (value: string) => void
   disabled?: boolean
   className?: string
+  /** 'outline' (default) for a stacked form field; 'row' for the right of a settings row (row-trigger.ts). */
+  variant?: 'outline' | 'row'
 }
 
-export function TimezonePicker({ value, onValueChange, disabled, className }: TimezonePickerProps) {
+export function TimezonePicker({ value, onValueChange, disabled, className, variant = 'outline' }: TimezonePickerProps) {
+  const row = variant === 'row'
   const [open, setOpen] = React.useState(false)
   const [search, setSearch] = React.useState('')
 
@@ -65,24 +69,29 @@ export function TimezonePicker({ value, onValueChange, disabled, className }: Ti
     <Popover open={open} onOpenChange={(o) => { setOpen(o); if (!o) setSearch('') }} modal>
       <PopoverTrigger asChild>
         <Button
-          variant="outline"
+          variant={row ? 'ghost' : 'outline'}
+          size={row ? 'sm' : 'default'}
           role="combobox"
           aria-label="Select timezone"
           aria-expanded={open}
           disabled={disabled}
-          className={cn('w-full justify-between font-normal', className)}
+          className={cn(row ? ROW_TRIGGER_CLASS : 'w-full justify-between font-normal', className)}
         >
           <span className="truncate">
             {selectedEntry
               ? `${selectedEntry.label} (${selectedEntry.offset})`
               : 'Select timezone...'}
           </span>
-          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+          {row
+            ? <ChevronRight className={ROW_TRIGGER_CHEVRON_CLASS} />
+            : <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />}
         </Button>
       </PopoverTrigger>
       <PopoverContent
-        className="w-[var(--radix-popover-trigger-width)] p-0 overflow-hidden"
-        align="start"
+        // The row trigger hugs its value, so the list takes a width of its own and opens from the trigger's right edge.
+        className={cn('p-0 overflow-hidden', row ? 'w-80' : 'w-[var(--radix-popover-trigger-width)]')}
+        align={row ? 'end' : 'start'}
+        collisionPadding={8}
         onWheel={(e) => e.stopPropagation()}
       >
         <div className="flex items-center border-b px-3 py-2">

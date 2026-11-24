@@ -98,11 +98,12 @@ export function SessionTimeoutSelect({ value, onCommit, disabled, id, descriptio
 
   const select = (
     <Select
+      variant={layout === 'inline' ? 'row' : 'outline'}
       value={current}
       disabled={disabled}
       onValueChange={(v) => onCommit(v === 'never' ? null : parseInt(v, 10))}
     >
-      <SelectTrigger id={id} className={layout === 'inline' ? 'h-7 w-24 shrink-0' : 'h-7'}>
+      <SelectTrigger id={id} className={layout === 'inline' ? undefined : 'h-7'}>
         <SelectValue />
       </SelectTrigger>
       <SelectContent>

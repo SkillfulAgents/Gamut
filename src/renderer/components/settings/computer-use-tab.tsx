@@ -131,11 +131,12 @@ export function ComputerUseTab() {
             htmlFor="computer-use-input-mode"
             right={
               <Select
+                variant="row"
                 value={inputMode}
                 onValueChange={(value) => updateSettings.mutate({ computerUse: { inputMode: value as ComputerUseInputMode } })}
                 disabled={updateSettings.isPending}
               >
-                <SelectTrigger id="computer-use-input-mode" className="h-8 w-[120px]">
+                <SelectTrigger id="computer-use-input-mode">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
