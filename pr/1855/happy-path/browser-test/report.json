@@ -1,25 +1,23 @@
 {
   "storyId": "browser-test",
-  "passed": false,
-  "reason": "Sent the \"Open a browser and go to https://example.com. Tell me the page title.\" prompt to agent QA-20261124-002411-d7k6 and checked that the reply mentions \"Example Domain\". The reply did, so the functional check passed. One minor UI inconsistency was found while sending.\n  Bugs found:\n    - Action: pressed Enter in the agent's landing message box (placeholder \"How can I help? Press cmd+enter to send\"). Expected: the placeholder's cmd+enter instruction, or Enter as the session footer says, should send the message. Actual: the text stayed in the input and did not send, and the send button only became enabled after that. The session view's footer shows \"↵ Send\", so the Enter-to-send hint is inconsistent between the two screens. I did not verify whether Enter was intended to send on this screen. I used the Send button to send the message.",
+  "passed": true,
+  "reason": "Sent a browser-task prompt to agent QA-20261124-023404-3ybf and confirmed the reply reports the page title \"Example Domain\".",
   "steps": [
-    "1. Navigated to http://localhost:47891 — the Gamut home page loaded with the sidebar listing \"QA-20261124-002411-d7k6\" under Your Agents.",
-    "2. Clicked the \"QA-20261124-002411-d7k6\" agent in the sidebar — its agent page opened (/agents/qa-20261124-002411-d7k6-zmgy9lz5um) with an empty message box, status \"idle\".",
-    "3. Typed \"Open a browser and go to https://example.com. Tell me the page title.\" and pressed Enter — the message was not sent (see BUG_FOUND). Clicked the Send button — the message was sent and a new session \"Browser Page Title Check\" was created. Screenshot taken (step3-message-sent.png).",
-    "4. Waited for a response — the assistant reply was already shown on screen, \"Worked for 3s · 3 tool calls · 163,946 tokens\", with no further wait needed.",
-    "5. Verified the response text — it reads \"The page title is \"Example Domain\". The page loaded normally, and I've closed the browser.\" The text \"Example Domain\" is present. Screenshot taken and showing this response."
+    "Step 1: Navigated to http://localhost:47891. The Gamut app loaded with the sidebar listing QA-20261124-023404-3ybf under \"Your Agents\".",
+    "Step 2: Clicked the QA-20261124-023404-3ybf entry in the sidebar. The agent page opened at /agents/qa-20261124-023404-3ybf-noqru4gcvd, showing status \"idle\" and an empty message composer.",
+    "Step 3: Typed \"Open a browser and go to https://example.com. Tell me the page title.\" into the composer and clicked Send. A new session \"Check Example.com Page Title\" opened, the status changed to \"working\", and the message appeared in the chat.",
+    "Step 4: Waited for the text \"Example Domain\" to appear. It appeared within seconds (the turn reported \"Worked for 4s · 3 tool calls\"), well inside the 3-minute limit. The agent status returned to \"idle\".",
+    "Step 5: Verified the agent's reply reads \"The page title is \"Example Domain\". I've closed the browser.\" The screenshot shows the reply in the chat view."
   ],
-  "bugs": [
-    "Action: pressed Enter in the agent's landing message box (placeholder \"How can I help? Press cmd+enter to send\"). Expected: the placeholder's cmd+enter instruction, or Enter as the session footer says, should send the message. Actual: the text stayed in the input and did not send, and the send button only became enabled after that. The session view's footer shows \"↵ Send\", so the Enter-to-send hint is inconsistent between the two screens. I did not verify whether Enter was intended to send on this screen. I used the Send button to send the message."
-  ],
-  "durationMs": 50958,
-  "sessionId": "5a2bf048-0f57-4e3a-be0c-e135861ca65d",
+  "bugs": [],
+  "durationMs": 47133,
+  "sessionId": "06cd049b-56dd-4c77-90c1-7d97b5e24abb",
   "cost": {
-    "inputTokens": 7392,
-    "outputTokens": 5734,
-    "cacheCreationTokens": 45206,
-    "cacheReadTokens": 408980,
+    "inputTokens": 8330,
+    "outputTokens": 5607,
+    "cacheCreationTokens": 107742,
+    "cacheReadTokens": 709116,
     "model": "claude-haiku-5-5",
-    "totalCostUsd": 0.133468
+    "totalCostUsd": 0.241954
   }
 }
