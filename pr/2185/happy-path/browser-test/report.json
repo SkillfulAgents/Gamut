@@ -1,0 +1,23 @@
+{
+  "storyId": "browser-test",
+  "passed": true,
+  "reason": "Ran the 5-step agent chat check: open the QA agent, send the example.com page-title prompt, wait for a reply, and confirm \"Example Domain\" appears.",
+  "steps": [
+    "Step 1: Navigated to http://localhost:47891 — the Gamut app loaded (page title \"Gamut\") and the sidebar listed \"QA-20261124-084536-rddq\" under Your Agents.",
+    "Step 2: Clicked \"QA-20261124-084536-rddq\" in the sidebar — the agent page opened at /agents/qa-20261124-084536-rddq-hxveidnuqw, showing an empty chat input with \"Opus 5.5 · Medium\" selected.",
+    "Step 3: Typed \"Open a browser and go to https://example.com. Tell me the page title.\" and sent it with Meta+Enter — the message was sent and the session \"Check Example.com Page Title\" was created in the sidebar.",
+    "Step 4: Waited up to 3 minutes for a reply — the reply appeared within about 5 seconds of work (\"Worked for 5s · 3 tool calls · 163,998 tokens\").",
+    "Step 5: Verified the response — it reads \"The page title at https://example.com is \"Example Domain\". I closed the browser afterwards.\" A viewport screenshot was taken showing the user message and this reply."
+  ],
+  "bugs": [],
+  "durationMs": 68631,
+  "sessionId": "829266b7-9535-4935-b43c-c09a27a2b54a",
+  "cost": {
+    "inputTokens": 8240,
+    "outputTokens": 7300,
+    "cacheCreationTokens": 66862,
+    "cacheReadTokens": 762309,
+    "model": "claude-haiku-5-5",
+    "totalCostUsd": 0.204548
+  }
+}
