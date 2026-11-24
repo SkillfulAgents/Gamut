@@ -99,6 +99,7 @@ function SessionThreadContent({
           overlayFooter ? 'relative flex' : 'grid grid-rows-[1fr_auto]',
         )}
         data-testid="session-thread-main"
+        data-transcript-host
       >
         {sessionId && (
           <MessageList

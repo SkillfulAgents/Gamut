@@ -393,27 +393,6 @@ html[data-keyboard-open] [data-composer-footer] {
   background-color: rgba(255, 255, 255, .3);
 }
 
-/* Reader surfaces (e.g. the chat-integration read-only thread): replace the pale
-   native overlay scrollbar on the inner message scroller with a subtle neutral
-   thumb that reads as intentional under the read-only veil. Add `reader-scrollbar`
-   to the wrapper of any read-only MessageList to opt in. */
-.reader-scrollbar [data-message-content-area]::-webkit-scrollbar {
-  -webkit-appearance: none;
-  width: 10px;
-}
-.reader-scrollbar [data-message-content-area]::-webkit-scrollbar-track {
-  background: transparent;
-}
-.reader-scrollbar [data-message-content-area]::-webkit-scrollbar-thumb {
-  border-radius: 5px;
-  border: 2px solid transparent;
-  background-clip: padding-box;
-  background-color: rgba(120, 120, 130, .35);
-}
-.reader-scrollbar [data-message-content-area]:hover::-webkit-scrollbar-thumb {
-  background-color: rgba(120, 120, 130, .55);
-}
-
 /* Height-capped panels inside a chat card (e.g. the web-fetch page body). Same problem
    as the reader surface above, one level in: the native overlay thumb is pale, full-height
    and sits hard against the card edge over the text, so it reads as a foreign element on a
@@ -434,6 +413,70 @@ html[data-keyboard-open] [data-composer-footer] {
 }
 .card-scrollbar:hover::-webkit-scrollbar-thumb {
   background-color: rgba(120, 120, 130, .55);
+}
+
+/* The session transcript's scrollbar is drawn by transcript-scrollbar.tsx; the
+   native one is hidden. Styled, it still could not leave the chat column (a
+   gutter away from the drawer's card), it ran behind the floating header and off
+   the bottom edge, and with scroll bars set to show it never went away. The rail
+   is inset from the header and the bottom; the thumb is a 4px pill 2px in from
+   the rail's right edge, in a 10px grab area, shown while the reader scrolls and
+   faded a second after. */
+.transcript-scroller {
+  scrollbar-width: none;
+}
+.transcript-scroller::-webkit-scrollbar {
+  display: none;
+}
+.transcript-scroll-rail {
+  position: absolute;
+  top: calc(var(--header-overlap, 0px) + 8px);
+  bottom: 8px;
+  right: 0;
+  width: 10px;
+  z-index: 10;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 300ms ease-out;
+}
+.transcript-scroll-rail[data-visible] {
+  opacity: 1;
+  transition-duration: 100ms;
+}
+.transcript-scroll-thumb {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  touch-action: none;
+}
+.transcript-scroll-rail[data-visible] .transcript-scroll-thumb {
+  pointer-events: auto;
+}
+.transcript-scroll-thumb::after {
+  content: '';
+  position: absolute;
+  inset-block: 0;
+  right: 2px;
+  width: 4px;
+  border-radius: 9999px;
+  background-color: hsl(var(--muted-foreground) / 0.3);
+  transition: background-color 150ms;
+}
+.transcript-scroll-thumb:hover::after,
+.transcript-scroll-rail[data-dragging] .transcript-scroll-thumb::after {
+  background-color: hsl(var(--muted-foreground) / 0.5);
+}
+/* Docked beside the session drawer, the drawer's card stands 8px in from the
+   drawer's own edge. The rail reaches into that gutter so the pill sits 2px off
+   the card, above the gutter's resize handle (z-30): only while the thumb shows,
+   and only where it is, does it take the handle's clicks. Below 768px the drawer
+   is a full-width overlay, so the rail stays home. */
+@container (min-width: 768px) {
+  .file-preview-container:has(> .tray-drawer-floating[data-docked]:not(.hidden)) > [data-transcript-host] > div > .transcript-scroll-rail {
+    right: -8px;
+    z-index: 31;
+  }
 }
 
 /* The file drawer's tab strip. It scrolls horizontally so a trackpad swipe, a

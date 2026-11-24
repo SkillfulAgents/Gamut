@@ -1130,6 +1130,19 @@ export function useMessageListScroll<T>(options: MessageListScrollOptions<T>) {
       cancelGlide()
     }
   }, [cancelGlide])
+  // The transcript draws its own overlay thumb (transcript-scrollbar.tsx)
+  // instead of the native scrollbar, and the thumb sits outside the scroller,
+  // so its press arrives here rather than through handlePointerDown. It is a
+  // scrollbar press like a native gutter press: the held pointer owns the
+  // viewport, and the window's pointerup settles it like any other.
+  const handleScrollbarPress = useCallback(() => {
+    pointerDownRef.current = true
+    pointerDragRef.current = false
+    pointerDownPosRef.current = null
+    pointerOnScrollbarRef.current = true
+    lastInputAtRef.current = performance.now()
+    cancelGlide()
+  }, [cancelGlide])
   useEffect(() => {
     const release = () => {
       const owned = pointerDragRef.current || pointerOnScrollbarRef.current
@@ -1212,6 +1225,7 @@ export function useMessageListScroll<T>(options: MessageListScrollOptions<T>) {
     handleScroll,
     handleWheelGesture,
     handlePointerDown,
+    handleScrollbarPress,
     handleScrollKey,
     handleTouchStart,
     handleTouchMove,
