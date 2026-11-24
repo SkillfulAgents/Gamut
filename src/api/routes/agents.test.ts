@@ -9123,6 +9123,29 @@ describe('artifact proxy — subPath uses the raw display-slug URL', () => {
     expect(init.headers).not.toHaveProperty('if-none-match')
   })
 
+  it('forwards a request body without the caller content-length', async () => {
+    mockContainerFetch.mockResolvedValue(
+      new Response('{"ok":true}', { headers: { 'content-type': 'application/json' } }),
+    )
+    const body = JSON.stringify({ action: 'reply', text: 'hello' })
+
+    const res = await app.request(
+      'http://localhost/api/agents/abc1234567/artifacts/dash/api/respond',
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'content-length': String(body.length) },
+        body,
+      },
+    )
+
+    expect(res.status).toBe(200)
+    const init = mockContainerFetch.mock.calls[0]?.[1] as RequestInit
+    expect(init.method).toBe('POST')
+    expect(init.headers).toHaveProperty('content-type', 'application/json')
+    expect(init.headers).not.toHaveProperty('content-length')
+    expect(new TextDecoder().decode(init.body as ArrayBuffer)).toBe(body)
+  })
+
   it('canonicalizes display-slug document navigations to match the dashboard router base', async () => {
     const res = await app.request(
       'http://localhost/api/agents/my-dash-abc1234567/artifacts/dash/s/deck?present=1',
