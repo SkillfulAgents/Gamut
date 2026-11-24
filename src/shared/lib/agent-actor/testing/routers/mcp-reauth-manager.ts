@@ -1,26 +1,19 @@
-import { AttachedStores, type AgentStoreDirectory } from '@shared/lib/agent-actor/store-directory'
-import type { McpReauthDetails, McpReauthWaits, ReauthOutcome } from './reauth-waits'
-import { awaitReauth } from './reauth-request'
-
-export {
-  MCP_REAUTH_TIMEOUT_MS,
-  createMcpReauthWaits,
-  type McpReauthDetails,
-  type McpReauthRequest,
-  type McpReauthWaits,
-} from './reauth-waits'
+import { AgentStores, type AgentStoreDirectory } from './store-directory'
+import type { McpReauthDetails, McpReauthWaits, ReauthOutcome } from '@shared/lib/proxy/reauth-waits'
+import { awaitReauth } from '@shared/lib/proxy/reauth-request'
 
 /**
- * The router in front of every agent's MCP re-auth waits. The waits live in
+ * The router in front of every agent's MCP re-auth waits, for tests: the
+ * app reaches them through the agent's actor (`inputs.mcpReauth`). The waits live in
  * each agent's actor (`AgentReauthWaits`, see `reauth-waits`); this singleton
  * dispatches the calls that arrive with a slug.
  */
 export class McpReauthManager {
-  private readonly agents = new AttachedStores<McpReauthWaits>('MCP re-auth waits')
+  private readonly agents = new AgentStores<McpReauthWaits>('MCP re-auth waits', (state) => state.mcpReauth)
 
-  /** Called once by the agent registry with the way to each agent's waits. */
+  /** Tests only: read the agents' waits from `directory` in place of the registry's actors. */
   attachAgents(directory: AgentStoreDirectory<McpReauthWaits> | null): void {
-    this.agents.attach(directory)
+    this.agents.replaceWith(directory)
   }
 
   /** Park a request of the agent on its re-auth card and wait for how it ends (see `awaitReauth`). */
@@ -55,13 +48,5 @@ export class McpReauthManager {
   }
 }
 
-const globalForMcpReauthManager = globalThis as unknown as {
-  mcpReauthManager: McpReauthManager | undefined
-}
-
-export const mcpReauthManager =
-  globalForMcpReauthManager.mcpReauthManager ?? new McpReauthManager()
-
-if (process.env.NODE_ENV !== 'production') {
-  globalForMcpReauthManager.mcpReauthManager = mcpReauthManager
-}
+// One per evaluation of this module: it holds nothing (see `reviewManager`).
+export const mcpReauthManager = new McpReauthManager()

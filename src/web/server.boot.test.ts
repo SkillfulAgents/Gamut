@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 // The web entry's boot order: error reporting first, then the database (and
-// the tenant identity that lives in it), then AppState, then task dispatch, then the bind. A failed open is the first thing
+// the tenant identity that lives in it), then AppState, then the agents, then task dispatch, then the bind. A failed open is the first thing
 // that can end the process, and its fatal report must have a provider to reach
 // and time to send.
 const calls: string[] = []
@@ -21,6 +21,15 @@ const attachErrorReportingIdentity = vi.fn(async () => {
 const initializeLocalAppState = vi.fn(async () => {
   calls.push('initializeLocalAppState')
 })
+// The entry says which actor its agents run as: the one whose container and files this process manages.
+const initializeAgentRegistry = vi.fn((_createActor: (slug: string) => object) => {
+  calls.push('initializeAgentRegistry')
+})
+class LocalAgentActor {
+  constructor(readonly slug: string, readonly parts: object) {}
+}
+const containerHost = {}
+const localHostPort = {}
 const initializeBackgroundWork = vi.fn(async (_manager: object) => {
   calls.push('initializeBackgroundWork')
 })
@@ -43,6 +52,9 @@ vi.mock('@shared/lib/db', () => ({ openDatabase }))
 vi.mock('@shared/lib/error-reporting', () => ({ initErrorReporting, flushErrorReporting, attachErrorReportingIdentity }))
 vi.mock('@shared/lib/error-reporting/sentry-provider', () => ({ createServerProvider: () => null }))
 vi.mock('@shared/lib/app-state', () => ({ initializeLocalAppState }))
+vi.mock('@shared/lib/agent-actor', () => ({ containerHost, initializeAgentRegistry }))
+vi.mock('@shared/lib/agent-actor/local-agent-actor', () => ({ LocalAgentActor }))
+vi.mock('@shared/lib/host/local-host-port', () => ({ localHostPort }))
 vi.mock('@shared/lib/background-work', () => ({ initializeBackgroundWork }))
 vi.mock('@shared/lib/server-bind', () => ({ bindServerWithRetry }))
 vi.mock('@shared/lib/startup', () => ({
@@ -82,7 +94,7 @@ afterEach(() => {
 })
 
 describe('web server boot order', () => {
-  it('initialises error reporting before opening the database, then AppState, then task dispatch, then binds', async () => {
+  it('initialises error reporting before opening the database, then AppState, then the agents, then task dispatch, then binds', async () => {
     process.env.NODE_ENV = 'production'
     await boot()
     expect(calls).toEqual([
@@ -90,11 +102,23 @@ describe('web server boot order', () => {
       'openDatabase',
       'attachErrorReportingIdentity',
       'initializeLocalAppState',
+      'initializeAgentRegistry',
       'initializeBackgroundWork',
       'registerBackgroundWork',
       'bind',
       'afterBindInitialize',
     ])
+  })
+
+  it('runs each agent as a local actor, given this machine\'s container layer and the local host port', async () => {
+    process.env.NODE_ENV = 'test'
+    await boot()
+    const actor = initializeAgentRegistry.mock.lastCall?.[0]('agent-1') as LocalAgentActor
+    expect(actor).toBeInstanceOf(LocalAgentActor)
+    expect(actor.slug).toBe('agent-1')
+    const parts = actor.parts as { containers: object; host: object }
+    expect(parts.containers).toBe(containerHost)
+    expect(parts.host).toBe(localHostPort)
   })
 
   it('picks the local task manager itself', async () => {
@@ -106,7 +130,7 @@ describe('web server boot order', () => {
   it('skips error reporting outside production, as afterBindInitialize does', async () => {
     process.env.NODE_ENV = 'test'
     await boot()
-    expect(calls).toEqual(['openDatabase', 'attachErrorReportingIdentity', 'initializeLocalAppState', 'initializeBackgroundWork', 'registerBackgroundWork', 'bind', 'afterBindInitialize'])
+    expect(calls).toEqual(['openDatabase', 'attachErrorReportingIdentity', 'initializeLocalAppState', 'initializeAgentRegistry', 'initializeBackgroundWork', 'registerBackgroundWork', 'bind', 'afterBindInitialize'])
   })
 
   it('flushes error reporting before exiting when the database fails to open', async () => {

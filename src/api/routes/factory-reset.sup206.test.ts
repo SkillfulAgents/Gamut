@@ -52,21 +52,26 @@ vi.mock('@shared/lib/config/settings', () => ({
   getCustomEnvVars: vi.fn(),
 }))
 
-const mockStopAll = vi.fn().mockResolvedValue(undefined)
+const mockStopAllAgents = vi.fn().mockResolvedValue(undefined)
 
 vi.mock('@shared/lib/container/container-host', async () => {
   const { hostFromManagerMock } = await import('@shared/lib/agent-actor/testing/host-from-manager-mock')
   return {
     containerHost: hostFromManagerMock({
-      hasRunningAgents: vi.fn().mockReturnValue(false),
-      getRunningAgentIds: vi.fn().mockResolvedValue([]),
       clearClients: vi.fn(),
       ensureImageReady: vi.fn().mockResolvedValue(undefined),
       getReadiness: vi.fn().mockReturnValue({ ready: true }),
-      stopAll: (...args: unknown[]) => mockStopAll(...args),
     }),
   }
 })
+// Whatever this process still holds is stopped through its agents' actors.
+vi.mock('@shared/lib/agent-actor/all-agents', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@shared/lib/agent-actor/all-agents')>()),
+  hasRunningAgents: vi.fn(async () => false),
+  runningAgentSlugs: vi.fn(async () => []),
+  stopAllAgents: async (...args: unknown[]) => mockStopAllAgents(...args),
+}))
+
 
 // The agent layer: the catalog lists the agents, and each actor reports and
 // stops its own container (none of them is held by this process's host).
@@ -212,7 +217,7 @@ describe('POST /api/settings/factory-reset — agent/app-owned table cleanup', (
     const res = await factoryReset()
     expect(res.status).toBe(200)
     expect(await res.json()).toEqual({ success: true })
-    expect(mockStopAll).toHaveBeenCalledOnce()
+    expect(mockStopAllAgents).toHaveBeenCalledOnce()
     expect(mockDeletedRecords.sort()).toEqual(['platform-client-instance-id', 'settings'])
   })
 

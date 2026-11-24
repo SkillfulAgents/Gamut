@@ -91,6 +91,8 @@ export default defineConfig({
         const backgroundWorkModule = path.resolve(__dirname, 'src/shared/lib/background-work/index.ts')
         const localTaskManagerModule = path.resolve(__dirname, 'src/shared/lib/background-work/local-task-manager.ts')
         const startupModule = path.resolve(__dirname, 'src/shared/lib/startup.ts')
+        const registryModule = path.resolve(__dirname, 'src/shared/lib/agent-actor/registry.ts')
+        const localAgentsModule = path.resolve(__dirname, 'src/shared/lib/agent-actor/local-agent-registry.ts')
         const ensureBooted = async () => {
           const { isDatabaseOpen, openDatabase } = await server.ssrLoadModule(dbModule)
           if (!isDatabaseOpen()) {
@@ -100,6 +102,19 @@ export default defineConfig({
           // Checked and installed in one step: a local AppState installs synchronously.
           if (!isAppStateInitialized()) {
             await initializeLocalAppState()
+          }
+          // Then the agents, as the web server does. Checked against the code that
+          // makes the actors, not only for a registry: an edit can re-evaluate the
+          // registry module, which leaves it with none, or only the actors' code,
+          // which would leave the registry making them from the old code. Either
+          // way the current code makes them from here on. The agents' state
+          // outlives the edit, and each agent that had any gets its actor again at
+          // once, so what it holds is seen without waiting for a use.
+          const { agentRegistry, isAgentRegistryInitialized, reinstallAgentRegistry } = await server.ssrLoadModule(registryModule)
+          const { agentStatesSurvivingReloads, createLocalAgentActor } = await server.ssrLoadModule(localAgentsModule)
+          if (!isAgentRegistryInitialized(createLocalAgentActor)) {
+            reinstallAgentRegistry(createLocalAgentActor)
+            for (const slug of agentStatesSurvivingReloads.keys()) agentRegistry.get(slug)
           }
           // Then key custody, as the web server does: the vault seals through it.
           // Concurrent requests share one install (ensureKeyManager).

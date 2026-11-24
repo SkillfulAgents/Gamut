@@ -110,12 +110,12 @@ vi.mock('@shared/lib/services/mount-service', () => ({
 }))
 
 import { containerHost } from './container-host'
-import { createAgentRegistry } from '@shared/lib/agent-actor/registry'
-import type { LocalActorDeps, LocalAgentActor } from '@shared/lib/agent-actor/local-agent-actor'
+import { _resetAgentRegistryForTest, agentRegistry as registry } from '@shared/lib/agent-actor/registry'
+import { LocalAgentActor } from '@shared/lib/agent-actor/local-agent-actor'
+import { createRecordingHostPort } from '@shared/lib/agent-actor/testing/recording-host-port'
 
-// The agents' actors own their idle alarms; the registry hands the runtimes the way to them.
-const routers = { userInputRequestManager: {}, reviewManager: {}, accountReauthManager: {}, mcpReauthManager: {}, computerUsePermissionManager: {} }
-const registry = createAgentRegistry({ containerHost, ...routers } as unknown as LocalActorDeps)
+// The actors desktop runs, over this file's container host: each owns its runtime.
+_resetAgentRegistryForTest((slug) => new LocalAgentActor(slug, { containers: containerHost, host: createRecordingHostPort().port }))
 // Each agent's actor holds its runtime.
 const actorOf = (slug: string) => registry.get(slug) as LocalAgentActor
 const agents = { runtime: (slug: string) => actorOf(slug).state.runtime(), drop: (slug: string) => actorOf(slug).state.dropRuntime() }

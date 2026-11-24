@@ -1,7 +1,8 @@
 import { test, expect } from '@playwright/test'
 import { AppPage } from '../pages/app.page'
 import { AgentPage } from '../pages/agent.page'
-import { LocalAgentActor, type LocalActorDeps } from '../../src/shared/lib/agent-actor/local-agent-actor'
+import { LocalFileOps } from '../../src/shared/lib/agent-actor/local-file-ops'
+import { createMemoryOps } from '../../src/shared/lib/agent-actor/memory-ops'
 import { getAgentWorkspaceDir } from '../../src/shared/lib/utils/file-storage'
 import { AGENT_MEMORY_DIR } from '../../src/shared/lib/agent-actor/memory-schema'
 import { openHomeAdvancedSettings } from '../helpers/agent-home'
@@ -16,9 +17,9 @@ test('memories can be discovered, edited, and reloaded; stale saves keep the dra
   // eslint-disable-next-line local-rules/no-unhandled-throwing-builtins -- Playwright supplies a valid absolute URL.
   const agentUrl = new URL(page.url()).pathname
   const agent = await (await request.get(`/api/agents/${agentUrl.split('/')[2]}`)).json()
-  // This fixture only exercises actor file operations; runtime dependencies stay unused.
-  const actor = new LocalAgentActor(agent.slug, { getAgentWorkspaceDir } as LocalActorDeps)
-  const files = actor.files
+  // This fixture only exercises the agent's file operations.
+  const files = new LocalFileOps(() => getAgentWorkspaceDir(agent.slug))
+  const memories = createMemoryOps(files)
 
   await openHomeAdvancedSettings(page)
   await page.getByTestId('home-memories-open-page').click()
@@ -38,12 +39,12 @@ test('memories can be discovered, edited, and reloaded; stale saves keep the dra
   await expect(page.getByText('Frontmatter "metadata.type" must be user, feedback, project, or reference.', { exact: true })).toBeVisible()
   await expect(editor).toHaveValue(invalid)
   await expect(page.getByRole('button', { name: 'Reload latest version', exact: true })).not.toBeVisible()
-  expect((await actor.memories.read('style.md')).content).toBe(original)
+  expect((await memories.read('style.md')).content).toBe(original)
   const edited = original.replace('short paragraphs', 'clear examples')
   await editor.fill(edited)
   await page.getByRole('button', { name: 'Save', exact: true }).click()
   await expect(page.getByText('Memory saved.', { exact: true })).toBeVisible()
-  expect((await actor.memories.read('style.md')).content).toBe(edited)
+  expect((await memories.read('style.md')).content).toBe(edited)
 
   await page.reload()
   await expect(page).toHaveURL(/\/memories$/)

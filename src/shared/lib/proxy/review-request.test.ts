@@ -5,7 +5,7 @@
  * memory, through the router the way the proxy reaches them.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { ReviewManager } from './review-manager'
+import { ReviewManager } from '@shared/lib/agent-actor/testing/routers/review-manager'
 import type { ReviewDetails } from './review-display'
 import { attachInMemoryAgentState, type InMemoryAgentStateDirectory } from '@shared/lib/agent-actor/testing/in-memory-agent-state'
 

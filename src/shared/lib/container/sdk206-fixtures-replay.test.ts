@@ -42,15 +42,6 @@ vi.mock('@shared/lib/config/settings', () => ({
   getAgentCapabilitySettings: () => ({ subagents: 'allow', workflows: 'allow' }),
   VALID_SCRIPT_TYPES: { darwin: ['applescript', 'shell'], linux: ['shell'], win32: ['powershell'] },
 }))
-vi.mock('@shared/lib/computer-use/permission-manager', () => ({
-  computerUsePermissionManager: {
-    checkPermission: vi.fn(() => 'prompt_needed'),
-    getActiveApp: vi.fn(() => undefined),
-    setActiveApp: vi.fn(),
-    clearActiveApp: vi.fn(),
-    consumeOnceGrant: vi.fn(),
-  },
-}))
 vi.mock('@shared/lib/computer-use/types', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@shared/lib/computer-use/types')>()),
   getRequiredPermissionLevel: vi.fn(() => 'use_application'),

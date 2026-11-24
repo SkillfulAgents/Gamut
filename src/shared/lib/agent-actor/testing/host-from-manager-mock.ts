@@ -9,6 +9,10 @@
  * so existing `toHaveBeenCalledWith('agent', …)` assertions keep holding, and
  * forwards the host-level methods as they are.
  *
+ * What the manager answered about every agent at once (is anything running,
+ * stop them all) is asked of the agents' actors now, in `all-agents.ts`: a
+ * test mocks that module by its own names.
+ *
  * Usage inside a `vi.mock` factory:
  *
  *   vi.mock('@shared/lib/container/container-host', async () => {
@@ -57,18 +61,12 @@ const RENAMED_PER_AGENT: Record<string, string> = {
 
 /** Host-level methods, unchanged in name and signature. */
 const HOST_METHODS = [
-  'getRunningAgentIds',
-  'markAgentsStale',
   'watchWebhookRelay',
-  'hasRunningAgents',
   'getReadiness',
   'resetReadiness',
   'markRuntimeUnavailable',
   'updateStartProgress',
   'ensureImageReady',
-  'initializeAgents',
-  'stopAll',
-  'stopAllSync',
   'workspaceHostPath',
   'agentHostPath',
 ] as const
@@ -138,9 +136,6 @@ export function hostFromManagerMock(manager: ManagerShapedMock): Record<string, 
     const fn = manager[managerName]
     if (typeof fn === 'function') host[hostName] = (...args: unknown[]) => (fn as AnyFn).call(manager, ...args)
   }
-  // The registry attaches the actors' runtimes when it is created; a mock
-  // host asks nothing of them, so it only has to accept them.
-  if (typeof host.attachAgentRuntimes !== 'function') host.attachAgentRuntimes = () => {}
   // `onBeforeContainerStop` is a property the app assigns; share it with the mock.
   Object.defineProperty(host, 'onBeforeContainerStop', {
     get: () => manager.onBeforeContainerStop,

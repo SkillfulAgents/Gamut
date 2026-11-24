@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vitest'
-import type { AgentStoreDirectory } from '@shared/lib/agent-actor/store-directory'
+import type { AgentStoreDirectory } from '@shared/lib/agent-actor/testing/routers/store-directory'
 import { AgentInputRequests, CLAIM_LEASE_MS, type UserInputRequestTransition } from './agent-input-requests'
-import { UserInputRequestManager } from './request-manager'
+import { UserInputRequestManager } from '@shared/lib/agent-actor/testing/routers/request-manager'
 import type { PendingUserInputRequestInput } from './request-schema'
 
 /**

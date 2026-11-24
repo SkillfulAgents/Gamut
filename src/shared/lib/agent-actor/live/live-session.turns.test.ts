@@ -56,7 +56,7 @@ vi.mock('@shared/lib/llm-provider', async (importOriginal) => {
 import { attachLiveSessionsHarness, createStreamClient, type StreamClient } from '../testing/live-sessions-harness'
 import type { SessionNotification } from '../host-port'
 import { getSessionMetadata, recordErrorProvider } from '@shared/lib/services/session-service'
-import { userInputRequestManager } from '@shared/lib/tools/requests/request-manager'
+import { userInputRequestManager } from '@shared/lib/agent-actor/testing/routers/request-manager'
 
 const SESSION_ID = 'test-session-1'
 const AGENT_SLUG = 'test-agent'

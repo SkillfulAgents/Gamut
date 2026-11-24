@@ -16,8 +16,10 @@ import { sessionMetadataHolds } from '@shared/lib/services/session-metadata-hold
 import type { SessionMetadata } from '@shared/lib/types/agent'
 import { DeliveryError, StartError, type DeliveryErrorCode } from './delivery-errors'
 import type { LiveSessions } from './live/live-sessions'
-import type { LocalActorDeps } from './local-agent-actor'
+import type { HostPort } from './host-port'
 import type { SessionStore } from './session-store'
+import type * as sessionService from '@shared/lib/services/session-service'
+import type { recordSessionActivity } from '@shared/lib/services/session-activity'
 import type {
   AgentSlug,
   DeliverRequest,
@@ -38,12 +40,21 @@ export interface SessionDelivery {
   stop(sessionId: string, options: StopSessionOptions): Promise<StopSessionResult>
 }
 
+/** What the multi-step session ops call outside the live sessions, handed in so their test can stand in for each. */
+export interface SessionDeliveryDeps {
+  sessionService: typeof sessionService
+  recordSessionActivity: typeof recordSessionActivity
+  /** Deny the agent's pending reviews raised from the session. */
+  denyReviews(sessionId: string): void
+  host: HostPort
+}
+
 export function createSessionDelivery(
   slug: AgentSlug,
   store: SessionStore,
   live: LiveSessions,
   runtime: () => ContainerRuntime,
-  deps: Pick<LocalActorDeps, 'sessionService' | 'recordSessionActivity' | 'reviewManager' | 'host'>,
+  deps: SessionDeliveryDeps,
 ): SessionDelivery {
   // The client running the container, or, while it is not running, the one
   // for the runner configured now (getClient reads it then).
@@ -336,7 +347,7 @@ export function createSessionDelivery(
     const escalated = options.scope === 'turn' && !!options.escalateUntracked && live.hasOnlyUntrackedBackgroundWork(sessionId)
     const scope = escalated ? 'all' : options.scope
     const finish = (result: StopSessionResult) => {
-      if (options.denyReviews) deps.reviewManager.denyAllForAgent(slug, sessionId)
+      if (options.denyReviews) deps.denyReviews(sessionId)
       return result
     }
     if (runtime().getCachedInfo().status !== 'running') {

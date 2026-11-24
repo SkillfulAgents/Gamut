@@ -1,11 +1,12 @@
 /**
  * In development the backend modules are re-evaluated on edit (the Vite
- * adapter reloads the SSR entry in the same process). The host and the routers
- * survive that on `globalThis`; the state the actors own (their live sessions
- * among it) must survive with them, or every parked approval and reconnect
- * wait is stranded until it times out. These drive a real module reload with
- * `vi.resetModules` and check that the reloaded registry still finds and
- * settles what the previous one held.
+ * adapter reloads the SSR entry in the same process). The container host
+ * survives that on `globalThis`; the state the actors own (their live sessions
+ * among it) must survive too, or every parked approval and reconnect wait is
+ * stranded until it times out. These drive a real module reload with
+ * `vi.resetModules`, boot the backend again the way the dev server does, and
+ * check that the reloaded registry still finds and settles what the previous
+ * one held.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { LocalAgentActor } from './local-agent-actor'
@@ -13,7 +14,6 @@ import { drain, drained } from './testing/drain'
 
 vi.mock('@shared/lib/container/container-host', () => ({
   containerHost: {
-    attachAgentRuntimes: vi.fn(),
     clearRuntimes: vi.fn(),
     // A runtime that reads its container as running and does nothing else.
     createRuntime: vi.fn(() => ({
@@ -46,17 +46,23 @@ vi.mock('@shared/lib/services/usage-service', () => ({}))
 
 const registries: Array<{ evictAll(): void }> = []
 
-/** The backend as one module evaluation sees it. */
+/** The backend as one module evaluation sees it, booted as the dev server boots it (vite.config.ts). */
 async function load() {
-  const { agentRegistry } = await import('./registry')
-  const { userInputRequestManager } = await import('@shared/lib/tools/requests/request-manager')
-  const { reviewManager } = await import('@shared/lib/proxy/review-manager')
-  const { accountReauthManager } = await import('@shared/lib/proxy/account-reauth-manager')
+  const { agentRegistry, isAgentRegistryInitialized, reinstallAgentRegistry } = await import('./registry')
+  const { agentStatesSurvivingReloads, createLocalAgentActor } = await import('./local-agent-registry')
+  if (!isAgentRegistryInitialized(createLocalAgentActor)) {
+    reinstallAgentRegistry(createLocalAgentActor)
+    // Every agent that had state gets its actor again at once.
+    for (const slug of agentStatesSurvivingReloads.keys()) agentRegistry.get(slug)
+  }
+  const { userInputRequestManager } = await import('@shared/lib/agent-actor/testing/routers/request-manager')
+  const { reviewManager } = await import('@shared/lib/agent-actor/testing/routers/review-manager')
+  const { accountReauthManager } = await import('@shared/lib/agent-actor/testing/routers/account-reauth-manager')
   registries.push(agentRegistry)
   return { agentRegistry, userInputRequestManager, reviewManager, accountReauthManager }
 }
 
-/** The reload: every module is evaluated again; what lives on globalThis carries over. */
+/** The reload: every module is evaluated again; what lives on globalThis (the agents' state) carries over. */
 async function reload() {
   vi.resetModules()
   return load()
@@ -97,9 +103,9 @@ describe('the actors\' state survives a backend module reload', () => {
 
     const reloaded = await reload()
 
-    // The routers carried over on globalThis; the registry is a new object
-    // wrapping the same state.
-    expect(reloaded.userInputRequestManager).toBe(original.userInputRequestManager)
+    // The registry and the routers are new objects of the new code, over the
+    // same state.
+    expect(reloaded.userInputRequestManager).not.toBe(original.userInputRequestManager)
     expect(reloaded.agentRegistry).not.toBe(original.agentRegistry)
     expect(await reloaded.agentRegistry.get('a').inputs.get('reload-secret')).not.toBeNull()
     expect(reloaded.userInputRequestManager.getOpenRequest('a', 'reload-secret')?.id).toBe('reload-secret')
@@ -200,7 +206,8 @@ describe('the actors\' state survives a backend module reload', () => {
 
   it('a registry left over from before the reload adopts the state the current one built, never replacing it', async () => {
     // A singleton pinned on globalThis (the notification manager) keeps
-    // calling the registry of the module evaluation that created it.
+    // calling the registry of the module evaluation that created it, whose
+    // actors keep their state in the same place.
     const stale = await load()
     const current = await reload()
     await current.agentRegistry.get('new-agent').inputs.register({

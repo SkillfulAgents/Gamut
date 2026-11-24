@@ -211,12 +211,6 @@ vi.mock('@shared/lib/services/notification-service', () => ({
 
 vi.mock('@shared/lib/proxy/host-url', () => ({ getContainerHostUrl: () => 'localhost', getAppPort: () => 3000 }))
 
-vi.mock('@shared/lib/proxy/review-manager', () => ({
-  reviewManager: {
-    getPendingReviewsForAgent: () => [], submitDecision: vi.fn(), resolveMatchingPending: vi.fn(),
-    resolveMatchingPendingByLabel: vi.fn(), resolveMatchingXAgentByOperation: vi.fn(),
-  },
-}))
 
 vi.mock('@shared/lib/utils/retry', () => ({ withRetry: vi.fn((fn: () => unknown) => fn()) }))
 vi.mock('@shared/lib/llm-provider/helpers', () => ({

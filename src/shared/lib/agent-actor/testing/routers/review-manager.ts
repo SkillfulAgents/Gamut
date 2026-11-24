@@ -1,25 +1,23 @@
 import type { XAgentFileTransfer, XAgentRuntime } from '@shared/lib/proxy/x-agent-review'
-import { AttachedStores, type AgentStoreDirectory } from '@shared/lib/agent-actor/store-directory'
-import type { AgentReviews, ReviewDecision, ReviewDecisionDetail, ReviewOutcome, ReviewRequest, ReviewRequestOptions, XAgentOperation } from './agent-reviews'
-import type { ReviewDetails } from './review-display'
-import { awaitReview, type ReviewReevaluator, type ReviewResult } from './review-request'
-import type { ScopeLabel } from './scope-metadata'
-
-export { generateReviewDisplayText, humanizeActionName, type ReviewDetails } from './review-display'
-export { AgentReviews, type ReviewDecision, type ReviewDecisionDetail, type ReviewOutcome, type ReviewRequest, type XAgentOperation } from './agent-reviews'
+import { AgentStores, type AgentStoreDirectory } from './store-directory'
+import type { AgentReviews, ReviewDecision, ReviewDecisionDetail, ReviewOutcome, ReviewRequest, ReviewRequestOptions, XAgentOperation } from '@shared/lib/proxy/agent-reviews'
+import type { ReviewDetails } from '@shared/lib/proxy/review-display'
+import { awaitReview, type ReviewReevaluator, type ReviewResult } from '@shared/lib/proxy/review-request'
+import type { ScopeLabel } from '@shared/lib/proxy/scope-metadata'
 
 /**
- * The router in front of every agent's reviews. The reviews live in each
- * agent's actor (`AgentReviews`); this singleton dispatches the calls that
- * arrive with a slug (the proxy's `requestReview` for the agent a call came
- * from) and runs the shutdown sweep.
+ * The router in front of every agent's reviews, for tests: the app raises and
+ * decides a review through the agent's actor (`inputs.reviews`). The reviews
+ * live in each agent's actor (`AgentReviews`); this singleton dispatches a
+ * call that arrives with a slug to the store of that agent's actor, which it
+ * finds in the registry.
  */
 export class ReviewManager {
-  private readonly agents = new AttachedStores<AgentReviews>('reviews')
+  private readonly agents = new AgentStores<AgentReviews>('reviews', (state) => state.reviews)
 
-  /** Called once by the agent registry with the way to each agent's reviews. */
+  /** Tests only: read the agents' reviews from `directory` in place of the registry's actors. */
   attachAgents(directory: AgentStoreDirectory<AgentReviews> | null): void {
-    this.agents.attach(directory)
+    this.agents.replaceWith(directory)
   }
 
   /** Raise a review for the agent a call came from and wait for its decision (see `awaitReview`). */
@@ -107,17 +105,7 @@ export class ReviewManager {
   }
 }
 
-// Use globalThis to persist across dev-server hot reloads, matching the
-// agents' state (see `createAgentRegistry`). The two are coupled: pending
-// reviews live in the agents' actors and write through to their user-input
-// stores (which drive the live sessions' awaiting projection), and that state
-// survives reloads — so the router in front of it must too.
-const globalForReviewManager = globalThis as unknown as {
-  reviewManager: ReviewManager | undefined
-}
-
-export const reviewManager = globalForReviewManager.reviewManager ?? new ReviewManager()
-
-if (process.env.NODE_ENV !== 'production') {
-  globalForReviewManager.reviewManager = reviewManager
-}
+// One per evaluation of this module: it holds nothing, and reads the registry
+// of the same evaluation. The reviews themselves survive a dev-server reload
+// with the agents' state.
+export const reviewManager = new ReviewManager()
