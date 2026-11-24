@@ -22,8 +22,6 @@ import { agentAvatarSchema } from '@shared/lib/types/agent-avatar'
 import { randomAgentAvatar } from './agent-avatar'
 import { AGENT_ID_LENGTH, directoryExists, getAgentDir } from '@shared/lib/utils/file-storage'
 import { LOCAL_RUNTIME } from './agent-directories'
-import { removeAgentWorkspace } from './workspace-removal'
-import { dropDbSessionIndex } from './db-session-index-storage'
 import type { AgentCatalog, AgentIdentityChanges, AgentRecord, AgentSlug } from './types'
 import type { AgentRole } from '@shared/lib/types/agent'
 
@@ -225,15 +223,6 @@ export function createAgentCatalog(): AgentCatalog {
       return row === undefined ? null : toRecord(row)
     },
     remove: async (slug) => {
-      const row = await rowFor(slug)
-      if (row === undefined) return
-      // The workspace goes first: a removal that fails (a busy mount, a
-      // permission) leaves the row, so the agent still exists and the delete
-      // can be retried, instead of a workspace on disk that nothing lists.
-      if (row.runtime === LOCAL_RUNTIME) await removeAgentWorkspace(slug)
-      // Its session index goes with it: a later agent that is given the
-      // slug must not inherit the sessions.
-      await dropDbSessionIndex(slug)
       await db.delete(agents).where(eq(agents.slug, slug)).run()
     },
   }

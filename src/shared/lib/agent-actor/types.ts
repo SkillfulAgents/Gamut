@@ -139,6 +139,13 @@ export interface AgentActor {
    * since nothing reads it again.
    */
   dispose(reason?: 'shutdown'): Promise<void>
+  /**
+   * The agent is being deleted: remove everything it stored, its workspace
+   * and its session index. The caller has stopped its container, and removes
+   * the agent from the catalog after: a removal that fails here leaves the
+   * agent listed, so the delete can be tried again.
+   */
+  delete(): Promise<void>
   readonly container: ContainerOps
   readonly sessions: SessionOps
   readonly messages: MessageOps
@@ -286,7 +293,10 @@ export interface AgentCatalog {
   resolve(input: string): Promise<AgentSlug | null>
   /** The agent for a display slug or a slug, or null when there is no such agent. */
   resolveRecord(input: string): Promise<AgentRecord | null>
-  /** Remove an agent and everything it owns. The caller stops its container first. */
+  /**
+   * Remove an agent from the catalog. What the agent stored is deleted
+   * first, by its actor (`AgentActor.delete`).
+   */
   remove(slug: AgentSlug): Promise<void>
 }
 

@@ -75,7 +75,7 @@ vi.mock('@shared/lib/agent-actor/all-agents', async (importOriginal) => ({
 
 // The agent layer: the catalog lists the agents, and each actor reports and
 // stops its own container (none of them is held by this process's host).
-type MockActor = { container: { status: ReturnType<typeof vi.fn>; stop: ReturnType<typeof vi.fn> } }
+type MockActor = { container: { status: ReturnType<typeof vi.fn>; stop: ReturnType<typeof vi.fn> }; delete: ReturnType<typeof vi.fn> }
 const mockActors = new Map<string, MockActor>()
 
 vi.mock('@shared/lib/agent-actor/agent-catalog', async (importOriginal) => ({
@@ -147,7 +147,6 @@ vi.mock('path', () => ({
 }))
 
 import settings from './settings'
-import { setWorkspaceRemoval } from '@shared/lib/agent-actor/workspace-removal'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -266,6 +265,8 @@ describe('POST /api/settings/factory-reset — agents reached through the agent 
         status: vi.fn(async () => ({ status, port: null })),
         stop: vi.fn(async () => { mockSteps.push(`stop ${slug}`) }),
       },
+      // What the agent stored is the actor's to delete: no agent directory is touched from here.
+      delete: vi.fn(async () => { mockSteps.push(`remove ${slug}`) }),
     }
     mockActors.set(slug, actor)
     return actor
@@ -276,13 +277,10 @@ describe('POST /api/settings/factory-reset — agents reached through the agent 
     mockRm.mockResolvedValue(undefined)
     mockSteps.length = 0
     mockActors.clear()
-    // The deployment's own removal: from here on no workspace directory is touched.
-    setWorkspaceRemoval(async (slug) => { mockSteps.push(`remove ${slug}`) })
     app = createApp()
   })
 
   afterEach(() => {
-    setWorkspaceRemoval(null)
     mockActors.clear()
   })
 
@@ -303,7 +301,7 @@ describe('POST /api/settings/factory-reset — agents reached through the agent 
     expect(writer.container.stop).not.toHaveBeenCalled()
   })
 
-  it('removes every workspace through the removal after the stops and before the tables, touching no agent directory', async () => {
+  it('has every agent delete what it stored after the stops and before the tables, touching no agent directory', async () => {
     addAgent('research-agent', 'running')
     addAgent('writer-agent', 'stopped')
 
