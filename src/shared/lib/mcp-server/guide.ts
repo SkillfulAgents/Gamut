@@ -52,7 +52,7 @@ export const GUIDE: Record<GuideTopic, string> = {
     `Topics: ${GUIDE_TOPICS.join(', ')}.`,
   ].join('\n'),
   agents: [
-    'list_agents returns the agents you have a role on: slug, name, description, status, and whether it is the Team Brain agent.',
+    'list_agents returns the agents you have a role on: slug, name, description, status, whether it is the Team Brain agent, and its resume: members (people and agents, with their roles, at most 25 with member_count the total), created_at, session_running and needs_input, last_activity_at, session counts, dashboards, and account_services (the services it has accounts for, never the accounts).',
     'Address an agent by its slug exactly as list_agents gives it.',
     'status is the agent\'s container: running (ready now), stopped (starts when someone uses it), or another state while it starts or stops. A stopped agent\'s sessions and transcripts can still be read.',
     'You need at least the viewer role on an agent to list or read its sessions, and the user role (or owner) to invoke it.',

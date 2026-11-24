@@ -34,11 +34,17 @@ vi.mock('@shared/lib/agent-actor/registry', () => ({
         container: { status: slug === 'alpha' ? 'running' : 'stopped', port: null, healthWarnings: [], stale: false, idleSince: null },
         activeSessionIds: [],
       }),
-      listing: async () => ({
-        live: { activeSessionIds: [], awaitingSessionIds: [], pendingReviews: [] },
-        sessions: { sessionIds: [], sessionCount: 0, lastActivityAt: null, metadata: {} },
-        artifacts: { dashboards: [], widgets: [] },
-      }),
+      listing: async () => (slug === 'alpha'
+        ? {
+            live: { activeSessionIds: ['s-new'], awaitingSessionIds: [], pendingReviews: [] },
+            sessions: { sessionIds: ['s-new', 's-hidden'], sessionCount: 2, lastActivityAt: new Date(5_000), metadata: { 's-hidden': { isScheduledExecution: true } } },
+            artifacts: { dashboards: [{ slug: 'pipeline', name: 'Pipeline' }], widgets: [] },
+          }
+        : {
+            live: { activeSessionIds: [], awaitingSessionIds: [], pendingReviews: [] },
+            sessions: { sessionIds: [], sessionCount: 0, lastActivityAt: null, metadata: {} },
+            artifacts: { dashboards: [], widgets: [] },
+          }),
       sessions: {
         list: async (options?: { excludeAutomated?: boolean }) => (actors.sessions[slug] ?? [])
           .filter((session) => !(options?.excludeAutomated && session.hidden))
@@ -359,10 +365,14 @@ describe('the tools', () => {
     expect((await callTool('read_drive_file', { drive: 'no-such-drive', path: 'x.md' })).content[0].text).toMatch(/list_drives/)
   })
 
-  it('list_agents gives slug, name, description, status and the Team Brain flag', async () => {
+  it('list_agents gives slug, name, description, status, the Team Brain flag and the resume', async () => {
     const { structuredContent } = await callTool('list_agents', {})
     const byName = Object.fromEntries(structuredContent.agents.map((agent: { name: string }) => [agent.name, agent]))
-    expect(byName.Alpha).toMatchObject({ description: 'Does alpha things', status: 'running', team_brain: false })
+    expect(byName.Alpha).toMatchObject({
+      description: 'Does alpha things', status: 'running', team_brain: false,
+      created_at: new Date(1_000).toISOString(), session_running: true, needs_input: false,
+      last_activity_at: new Date(5_000).toISOString(), session_count: 2, automated_session_count: 1, dashboards: ['Pipeline'],
+    })
     expect(byName.Brain).toMatchObject({ description: null, status: 'stopped', team_brain: true })
     expect(byName.Alpha.slug).toMatch(/alpha/)
   })
