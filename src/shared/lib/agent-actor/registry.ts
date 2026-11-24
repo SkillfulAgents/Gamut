@@ -70,31 +70,8 @@ export function createAgentRegistry(
     states.delete(slug)
   }
 
-  // What the host does across agents (stop all, is anything running, the
-  // startup wake) it asks of the actors' runtimes. Wired here, by the
-  // package that owns the actors, so no entry point has to remember to.
-  deps.containerHost.attachAgentRuntimes({
-    wake: (slug) => get(slug).firstRead,
-    held: () => [...handles.values()].flatMap((actor) => actor.state.peekRuntime() ?? []),
-    drop: (slug) => handles.get(slug)?.state.dropRuntime(),
-  })
-
-  // The routers over the actors' stores get the same: one directory each,
-  // reading through the handles, so nothing is stored anywhere but on them.
-  // A test double may not carry the port; the real routers do.
-  const directory = <T>(pick: (state: AgentState) => T): AgentStoreDirectory<T> => ({
-    get: (slug) => pick(get(slug).state),
-    peek: (slug) => {
-      const actor = handles.get(slug)
-      return actor ? pick(actor.state) : undefined
-    },
-    all: () => [...handles.values()].map((actor) => pick(actor.state)),
-  })
-  deps.userInputRequestManager.attachAgents?.(directory((state) => state.inputRequests))
-  deps.reviewManager.attachAgents?.(directory((state) => state.reviews))
-  deps.accountReauthManager.attachAgents?.(directory((state) => state.accountReauth))
-  deps.mcpReauthManager.attachAgents?.(directory((state) => state.mcpReauth))
-  deps.computerUsePermissionManager.attachAgents?.(directory((state) => state.computerUse))
+  // Wired here, by the package that owns the actors, so no entry point has to remember to.
+  attachLocalActors(deps, { get, peek: (slug) => handles.get(slug), all: () => [...handles.values()] })
 
   return {
     get: (slug): AgentActor => get(slug),
@@ -119,6 +96,46 @@ export function createAgentRegistry(
   }
 }
 
+/** The actors one place in this process holds: a local registry, or the agents' objects in an isolate. */
+export interface LocalActors {
+  /** The agent's actor, made on first use where the holder makes actors on demand. */
+  get(slug: AgentSlug): LocalAgentActor
+  peek(slug: AgentSlug): LocalAgentActor | undefined
+  all(): LocalAgentActor[]
+}
+
+/**
+ * Hands the container host the way to these actors' runtimes, and the
+ * user-input, review, re-auth and computer-use routers the way to each actor's
+ * stores. Called once by the one place in the process that holds its actors.
+ */
+export function attachLocalActors(deps: LocalActorDeps, actors: LocalActors): void {
+  // What the host does across agents (stop all, is anything running, the
+  // startup wake) it asks of the actors' runtimes.
+  deps.containerHost.attachAgentRuntimes({
+    wake: (slug) => actors.get(slug).firstRead,
+    held: () => actors.all().flatMap((actor) => actor.state.peekRuntime() ?? []),
+    drop: (slug) => actors.peek(slug)?.state.dropRuntime(),
+  })
+
+  // The routers over the actors' stores get the same: one directory each,
+  // reading through the actors, so nothing is stored anywhere but on them.
+  // A test double may not carry the port; the real routers do.
+  const directory = <T>(pick: (state: AgentState) => T): AgentStoreDirectory<T> => ({
+    get: (slug) => pick(actors.get(slug).state),
+    peek: (slug) => {
+      const actor = actors.peek(slug)
+      return actor ? pick(actor.state) : undefined
+    },
+    all: () => actors.all().map((actor) => pick(actor.state)),
+  })
+  deps.userInputRequestManager.attachAgents?.(directory((state) => state.inputRequests))
+  deps.reviewManager.attachAgents?.(directory((state) => state.reviews))
+  deps.accountReauthManager.attachAgents?.(directory((state) => state.accountReauth))
+  deps.mcpReauthManager.attachAgents?.(directory((state) => state.mcpReauth))
+  deps.computerUsePermissionManager.attachAgents?.(directory((state) => state.computerUse))
+}
+
 // The actors' state persists across dev-server hot reloads on globalThis,
 // matching the host and the routers it is wired to: a reload
 // that kept the routers but lost the state would leave every parked approval
@@ -135,7 +152,7 @@ if (process.env.NODE_ENV !== 'production') {
 // when this module loads. A test that mocks one of these modules therefore
 // intercepts exactly the call it always intercepted, and the others are never
 // touched — the same as when the consumer imported the module directly.
-const localActorDeps: LocalActorDeps = {
+export const localActorDeps: LocalActorDeps = {
   get containerHost() {
     return containerHost
   },
