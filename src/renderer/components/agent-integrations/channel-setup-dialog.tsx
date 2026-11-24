@@ -17,17 +17,16 @@ export function channelSetupTarget(provider: IntegrationSetupProvider, integrati
 }
 
 /** Capture the installation on open: a new multi-step form keeps its place when it creates its first record. */
-export function ChannelSetupDialog({ agentSlug, target, integrations, onClose, allowDefer }: {
+export function ChannelSetupDialog({ agentSlug, target, integrations, onClose }: {
   agentSlug: string
   target: ChannelSetupTarget
   integrations?: PublicAgentIntegration[]
   onClose: () => void
-  /** Offer "Set this up later". Only creating an agent does: anywhere else, closing the dialog is the same thing. */
-  allowDefer?: boolean
 }) {
   const { provider, integrationId } = target
   const integration = integrations?.find(row => row.id === integrationId)
   const finished = integration && channelSetupComplete(integration)
+  const allowDefer = !integrations?.some(row => row.provider === provider.slug && channelSetupComplete(row))
   useEffect(() => {
     if (integrationId && integrations && (!integration || finished)) onClose()
   }, [integrationId, integrations, integration, finished, onClose])

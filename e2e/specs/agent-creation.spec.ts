@@ -1,6 +1,7 @@
 import { test, expect, type Page } from '@playwright/test'
 import { AppPage } from '../pages/app.page'
 import { AgentPage } from '../pages/agent.page'
+import { openHomeSection } from '../helpers/agent-home'
 
 test.beforeEach(async ({ page }) => {
   const app = new AppPage(page)
@@ -375,6 +376,34 @@ test('the defer action stays visible beside Get started on Slack\'s intro on a s
   await defer.click()
   await expect(dialog).toBeHidden()
   await expect(page.getByRole('button', { name: 'Set up Slack, saved for later' })).toBeEnabled()
+})
+
+test('Agent Home can defer Linear from a phone on the keys step, even for a long agent name', async ({ page, context, request }) => {
+  await page.route('**/api/agent-integrations/providers', route => route.fulfill({ json: [{ provider: 'linear' }] }))
+  await context.route('https://linear.app/**', route => route.fulfill({ body: 'Linear app creation' }))
+  await page.setViewportSize({ width: 320, height: 568 })
+  const name = 'Release Notes Assistant '.repeat(4).trim()
+  const agent = await new AgentPage(page).openEmptyAgent(name)
+  const reminders = `/api/agent-integrations/agents/${agent.slug}/finished-setup`
+  await openHomeSection(page, 'External Integrations')
+  const setup = page.getByRole('button', { name: 'Set up Linear' })
+  const dialog = page.getByRole('dialog', { name: /Linear/ })
+  await setup.click()
+  await page.keyboard.press('Escape')
+  await expect(dialog).toBeHidden()
+  expect(await (await request.get(reminders)).json()).toEqual({ steps: [] })
+  await setup.click()
+  await dialog.getByTestId('integration-setup-start').click()
+  await expect(dialog.getByLabel('App name')).toHaveValue(name.slice(0, 80))
+  await dialog.getByTestId('linear-create-app').click()
+  await expect(dialog.getByLabel('Client ID')).toBeVisible()
+  const defer = dialog.getByRole('button', { name: 'Set this up later' })
+  await expect(defer).toBeInViewport({ ratio: 1 })
+  await defer.click()
+  await expect(dialog).toBeHidden()
+  await page.reload()
+  await expect(page.getByRole('button', { name: 'Finish setup Linear' })).toBeVisible()
+  expect(await (await request.get(reminders)).json()).toEqual({ steps: [{ type: 'channel', provider: 'linear' }] })
 })
 
 for (const surface of ['the wizard', 'Agent Home']) {

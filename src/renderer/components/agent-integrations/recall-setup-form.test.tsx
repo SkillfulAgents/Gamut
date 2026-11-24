@@ -16,8 +16,8 @@ beforeEach(() => { vi.clearAllMocks(); state.agentName = 'Assistant'; state.crea
 afterEach(cleanup)
 // A setup is one step per screen: the name, the instructions, then Connect.
 const next = () => userEvent.click(screen.getByTestId('integration-setup-next'))
-function renderSetup(onIntegrationCreated?: (id: string) => void) {
-  return render(<Dialog open><DialogContent><RecallSetupForm agentSlug="agent" onClose={vi.fn()} onIntegrationCreated={onIntegrationCreated} /></DialogContent></Dialog>)
+function renderSetup(onIntegrationCreated?: (id: string) => void, initial?: Record<string, string>) {
+  return render(<Dialog open><DialogContent><RecallSetupForm agentSlug="agent" onClose={vi.fn()} onIntegrationCreated={onIntegrationCreated} initial={initial} /></DialogContent></Dialog>)
 }
 
 it('starts with the agent\'s name in calls and connects with it when left alone', async () => {
@@ -39,8 +39,9 @@ it('returns the meetings connection to the wizard and keeps it on the add-ons st
 })
 
 it('sends an edited name and the standing instructions with the installation', async () => {
-  renderSetup()
+  renderSetup(undefined, { name: 'Suggested name' })
   const name = screen.getByLabelText(/name in calls/i)
+  expect(name).toHaveValue('Suggested name')
   await userEvent.clear(name)
   // The call's tile follows the field, and falls back to the agent's name while it's empty.
   expect(screen.getByTestId('recall-name-preview')).toHaveTextContent('Assistant')

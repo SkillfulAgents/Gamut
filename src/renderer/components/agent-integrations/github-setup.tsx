@@ -7,6 +7,7 @@ import { DetailCard } from '@renderer/components/triggers/detail-card'
 import type { PublicAgentIntegration } from '@shared/lib/agent-integrations/public'
 import { isPublicGitHubIntegration } from '@shared/lib/task-manager-integrations/github/public'
 import type { IntegrationSetupProps } from './setup-types'
+import { useIntegrationSetupName } from './use-integration-setup-name'
 import { IntegrationSetupChoices, IntegrationSetupField, IntegrationSetupFeedback } from './integration-setup-layout'
 import { IntegrationSetupWizard } from './integration-setup-wizard'
 
@@ -20,8 +21,7 @@ type Owner = typeof OWNERS[number]['value']
 export function GitHubSetupForm({ agentSlug, onClose, initial }: IntegrationSetupProps) {
   const { data: agent } = useAgent(agentSlug)
   const setup = useAgentIntegrationSetup(agentSlug, 'github')
-  // No name field: the app takes the agent's name (or one an agent suggested); GitHub's own page can change it.
-  const name = initial?.name?.slice(0, 34) ?? null
+  const name = useIntegrationSetupName(agent?.name || agentSlug, initial?.name, 34)
   const [organization, setOrganization] = useState(initial?.organization ?? '')
   const [owner, setOwner] = useState<Owner>(initial?.organization ? 'organization' : 'personal')
   // The name only counts while "An organization" is the choice; it is kept if they switch away and back.
@@ -36,7 +36,7 @@ export function GitHubSetupForm({ agentSlug, onClose, initial }: IntegrationSetu
   const closeLogin = login.close
   const { data: integration, error: refreshError } = useAgentIntegration(id)
   const completed = useRef(false)
-  const displayName = (name ?? agent?.name ?? agentSlug).slice(0, 34).trim()
+  const displayName = name.effective
   const connected = !!integration?.hasCredentials
   // GitHub names the app's account after its slug, which can differ from the name typed here.
   const handle = integration && isPublicGitHubIntegration(integration) ? integration.settings.botLogin?.replace(/\[bot\]$/, '') : undefined
@@ -65,7 +65,7 @@ export function GitHubSetupForm({ agentSlug, onClose, initial }: IntegrationSetu
   const waiting = login.waiting && !integration?.reconnectRequired
   return <IntegrationSetupWizard provider="github" label="GitHub"
     description="Mention this agent in issues and pull requests."
-    step={step} onStepChange={setStep}
+    step={step} onStepChange={setStep} complete={connected}
     steps={[
       {
         // Its own step: where the app is created is a decision, and it can't be changed once the app exists.
@@ -84,6 +84,7 @@ export function GitHubSetupForm({ agentSlug, onClose, initial }: IntegrationSetu
       {
         label: 'Create the app',
         subtitle: <><strong>Connect GitHub</strong> opens GitHub with the app’s settings filled in. Create it, install it and choose the repositories it can access.</>,
+        content: <IntegrationSetupField id="github-app-name" label="App name" {...name.input} disabled={busy || !!id} />,
         action: connected ? undefined : { label: id ? 'Continue setup' : 'Connect GitHub', busy, disabled: !displayName || !setup.data, onClick: () => void connect(), external: true },
       },
       {

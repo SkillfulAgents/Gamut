@@ -5,7 +5,9 @@ import { useAgent } from '@renderer/hooks/use-agents'
 import { usePlatformAuthStatus } from '@renderer/hooks/use-platform-auth'
 import { useAgentIntegrationSetup, useCreateAgentIntegration } from '@renderer/hooks/use-agent-integrations'
 import { emailSetupSchema, type EmailAccessLevel } from '@shared/lib/email-integrations/config-schema'
-import { EMAIL_SENDER_CHECKS_NOTE, EmailAccessFields, parseEmailDomains } from './email-access-fields'
+import { EMAIL_SENDER_CHECKS_NOTE, EmailAccessFields } from './email-access-fields'
+import { useEmailDomains } from './email-domains-input'
+import { useIntegrationSetupName } from './use-integration-setup-name'
 import { cn } from '@shared/lib/utils/cn'
 import { Input } from '@renderer/components/ui/input'
 import { Label } from '@renderer/components/ui/label'
@@ -19,9 +21,9 @@ export function EmailIntegrationSetupForm({ agentSlug, onClose, initial, onInteg
   const { data: agent } = useAgent(agentSlug)
   const { data: platform } = usePlatformAuthStatus()
   const [localPart, setLocalPart] = useState(() => initial?.localPart ?? (agent?.name ?? agentSlug).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 64))
-  const [displayName, setDisplayName] = useState(initial?.displayName ?? initial?.name ?? agent?.name ?? agentSlug)
+  const sender = useIntegrationSetupName(agent?.name || agentSlug, initial?.displayName ?? initial?.name, 200)
   const [accessLevel, setAccessLevel] = useState<EmailAccessLevel>('agent-users-and-replies')
-  const [domains, setDomains] = useState('')
+  const domains = useEmailDomains(accessLevel)
   const [error, setError] = useState<string | null>(null)
   const [step, setStep] = useState(0)
   const create = useCreateAgentIntegration()
@@ -29,9 +31,9 @@ export function EmailIntegrationSetupForm({ agentSlug, onClose, initial, onInteg
   const setupError = error ?? setup.error?.message
 
   const submit = async () => {
-    if (create.isPending) return
+    if (create.isPending || domains.invalid) return
     setError(null)
-    const parsed = emailSetupSchema.safeParse({ localPart, displayName, accessLevel, allowedDomains: parseEmailDomains(domains) })
+    const parsed = emailSetupSchema.safeParse({ localPart, displayName: sender.input.value, accessLevel, allowedDomains: domains.allowedDomains })
     if (!parsed.success) {
       const issue = parsed.error.issues[0]
       // Back to the step whose field needs fixing.
@@ -84,15 +86,15 @@ export function EmailIntegrationSetupForm({ agentSlug, onClose, initial, onInteg
       {
         label: 'Name the sender',
         content: <>
-          <IntegrationSetupField id="email-name" label="Sender name" value={displayName} onChange={event => setDisplayName(event.target.value)} required maxLength={200} disabled={create.isPending} />
-          <SenderPreview name={displayName.trim() || agent?.name || agentSlug} />
+          <IntegrationSetupField id="email-name" label="Sender name" {...sender.input} required disabled={create.isPending} />
+          <SenderPreview name={sender.effective} />
         </>,
       },
       {
         label: 'Choose who it talks to',
         subtitle: 'Choose who can email this agent, and who it can email.',
         content: <>
-          <EmailAccessFields agentSlug={agentSlug} value={accessLevel} onChange={setAccessLevel} domains={domains} onDomainsChange={setDomains} disabled={create.isPending} hideLabel senderNote={false} domainsLaterNote />
+          <EmailAccessFields agentSlug={agentSlug} value={accessLevel} onChange={setAccessLevel} domains={domains} disabled={create.isPending} hideLabel senderNote={false} domainsLaterNote />
         </>,
         // In the button row, like the address step's note, rather than trailing under the choices.
         note: accessLevel !== 'anyone' ? EMAIL_SENDER_CHECKS_NOTE : undefined,
@@ -102,7 +104,7 @@ export function EmailIntegrationSetupForm({ agentSlug, onClose, initial, onInteg
       {setupError && <IntegrationSetupFeedback state="error">{setupError}</IntegrationSetupFeedback>}
       {!platform?.connected && <IntegrationSetupFeedback state="error">Connect your Gamut account to set up email.</IntegrationSetupFeedback>}
     </>}
-    finish={{ label: 'Create inbox', busyLabel: 'Creating inbox…', busy: create.isPending, disabled: !platform?.connected, onClick: () => void submit() }}
+    finish={{ label: 'Create inbox', busyLabel: 'Creating inbox…', busy: create.isPending, disabled: !platform?.connected || domains.invalid, onClick: () => void submit() }}
   />
 }
 

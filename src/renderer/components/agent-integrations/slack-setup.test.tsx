@@ -204,6 +204,33 @@ describe('SlackSetup', () => {
     expect(writeText).toHaveBeenCalledWith(manifest.textContent)
   })
 
+  it.each(['manifest', 'from scratch'])('connects a named Socket Mode app set up %s', async mode => {
+    state.relayAvailable = false
+    setup()
+    const name = await screen.findByLabelText('App name')
+    fireEvent.change(name, { target: { value: 'Support Desk' } })
+    if (mode === 'from scratch') {
+      fireEvent.click(screen.getByRole('button', { name: 'Set up from scratch' }))
+      expect(screen.getByLabelText('App name')).toHaveValue('Support Desk')
+    } else {
+      const manifest = JSON.parse(screen.getByTestId('slack-manifest').textContent!)
+      expect(manifest.features.bot_user.display_name).toBe('Support Desk')
+    }
+    goTo('Paste the app token')
+    fireEvent.change(screen.getByLabelText('App-Level Token'), { target: { value: 'xapp-fixture' } })
+    goTo('Paste the bot token')
+    fireEvent.change(screen.getByLabelText('Bot Token'), { target: { value: 'xoxb-fixture' } })
+    goTo('Review settings')
+    fireEvent.click(screen.getByRole('switch', { name: 'Only respond when @mentioned' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Connect' }))
+    await waitFor(() => expect(onClose).toHaveBeenCalledOnce())
+    expect(state.requests).toHaveLength(1)
+    expect(state.requests[0].body).toMatchObject({ provider: 'slack', name: 'Support Desk' })
+    expect(state.requests[0].body.config).toEqual({
+      appToken: 'xapp-fixture', botToken: 'xoxb-fixture', onlyMentioned: false, answerInThread: true, newSessionPerThread: true,
+    })
+  })
+
   it('has the icon step in both Socket Mode setups, with the colour for an app made from scratch', async () => {
     state.relayAvailable = false
     setup()

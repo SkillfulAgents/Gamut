@@ -100,11 +100,11 @@ export function IntegrationSetupHelp({ label, children, testId }: { label: strin
  * One on/off choice in a step, e.g. whether an app uses webhooks: its name on the left, with what it changes
  * behind a help icon, and a switch on the right, like the rows in a setup's settings box.
  */
-export function IntegrationSetupToggle({ id, label, description, checked, onCheckedChange, disabled, testId }: {
-  id: string; label: string; description?: string
+export function IntegrationSetupToggle({ id, label, description, checked, onCheckedChange, disabled, testId, className }: {
+  id: string; label: string; description?: string; className?: string
   checked: boolean; onCheckedChange: (checked: boolean) => void; disabled?: boolean; testId?: string
 }) {
-  return <div className="flex items-center justify-between gap-4 text-xs">
+  return <div className={cn('flex items-center justify-between gap-4 text-xs', className)}>
     <div className="flex min-w-0 items-center gap-1.5">
       <Label htmlFor={id} className="cursor-pointer text-xs font-normal">{label}</Label>
       {description && <IntegrationSetupHelp label={label} testId={`${id}-help`}>{description}</IntegrationSetupHelp>}

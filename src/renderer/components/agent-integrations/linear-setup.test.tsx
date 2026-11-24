@@ -80,7 +80,7 @@ describe('Linear shared setup modal', () => {
     const view = setupForm()
     await loaded()
     expect(screen.getByTestId('integration-setup-wizard')).toBeInTheDocument()
-    expect(screen.queryByLabelText('Integration name')).toBeNull()
+    expect(screen.getByLabelText('App name')).toHaveValue('Release Assistant')
     // One thing to do: the button in the footer. Nothing to open again until it has been opened.
     expect(screen.queryByRole('link', { name: 'Create app in Linear' })).toBeNull()
     toKeys()
@@ -207,6 +207,29 @@ describe('Linear over the webhook relay', () => {
     expect(creates()).toHaveLength(1)
   })
 
+  it('can create a webhook app after opening a direct app, including when the relay appears later', async () => {
+    setupForm()
+    await loaded()
+    fireEvent.click(createButton())
+    await screen.findByRole('textbox', { name: 'Client ID' })
+    fillCredentials()
+    relayAvailable = true
+    await client.invalidateQueries({ queryKey: ['webhook-relay'] })
+    fireEvent.click(screen.getByRole('button', { name: 'Create the app' }))
+    const switchTransport = await screen.findByRole('switch', { name: /Use webhooks/ })
+    expect(switchTransport).not.toBeChecked()
+    fireEvent.click(switchTransport)
+    fireEvent.click(createButton())
+    await waitFor(() => expect(fakeLoginWindow.navigate).toHaveBeenCalledWith(expect.stringContaining('webhook.enabled=true')))
+    expect(JSON.parse(creates()[0][1].body)).toMatchObject({ config: { webhooks: true } })
+    expect(screen.getByLabelText('Client ID')).toHaveValue('')
+    fillCredentials()
+    toSecret()
+    fireEvent.click(screen.getByRole('button', { name: 'Connect' }))
+    await waitFor(() => expect(authorizationCount).toBe(1))
+    expect(creates()).toHaveLength(1)
+  })
+
   it('sends someone who skipped ahead back to what Connect still needs', async () => {
     relayAvailable = true
     setupForm()
@@ -327,6 +350,14 @@ describe('Linear relay reconnection', () => {
   it('names the app with the name an agent suggested when it handed the setup over', async () => {
     render(<Dialog open><DialogContent><LinearSetupForm agentSlug="a" onClose={onClose} initial={{ name: 'Support Triage' }} /></DialogContent></Dialog>, { wrapper })
     await waitFor(() => expect(mocks.request.mock.calls.some(([url]) => typeof url === 'string' && url.includes('/providers/linear/setup?name=Support+Triage'))).toBe(true))
-    expect(screen.queryByLabelText('Integration name')).toBeNull()
+    const field = screen.getByLabelText('App name')
+    expect(field).toHaveValue('Support Triage')
+    fireEvent.change(field, { target: { value: 'Issue Helper' } })
+    await loaded()
+    toKeys()
+    fillCredentials()
+    fireEvent.click(screen.getByRole('button', { name: 'Connect' }))
+    await waitFor(() => expect(creates()).toHaveLength(1))
+    expect(JSON.parse(creates()[0][1].body).name).toBe('Issue Helper')
   })
 })

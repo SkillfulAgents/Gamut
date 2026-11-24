@@ -33,13 +33,12 @@ const next = () => fireEvent.click(screen.getByTestId('integration-setup-next'))
 it('uses the shared modal and creates nothing until the user continues', async () => {
   renderForm()
   expect(screen.getByTestId('integration-setup-wizard')).toBeInTheDocument()
-  // No name to fill in: the app is named after the agent, and can be renamed later.
-  expect(screen.queryByLabelText('Integration name')).toBeNull()
   // Their own account unless they say otherwise, with no name to type for it.
   expect(screen.getByRole('radio', { name: 'Your personal account' })).toBeChecked()
   expect(screen.queryByLabelText('Organization name')).toBeNull()
   next()
   await waitFor(() => expect(screen.getByRole('button', { name: 'Connect GitHub' })).toBeEnabled())
+  expect(screen.getByRole('textbox', { name: 'App name' })).toHaveValue('Release Assistant')
   expect(creates()).toHaveLength(0)
 })
 it('launches the manifest flow and moves on to mentioning it only when the callback has completed installation', async () => {
@@ -50,9 +49,10 @@ it('launches the manifest flow and moves on to mentioning it only when the callb
   fireEvent.change(screen.getByLabelText('Organization name'), { target: { value: ' team ' } })
   next()
   await waitFor(() => expect(screen.getByRole('button', { name: 'Connect GitHub' })).toBeEnabled())
+  fireEvent.change(screen.getByRole('textbox', { name: 'App name' }), { target: { value: 'Triage Bot' } })
   fireEvent.click(screen.getByRole('button', { name: 'Connect GitHub' }))
   await waitFor(() => expect(fakeLoginWindow.navigate).toHaveBeenCalledWith(expect.stringContaining('/providers/github/launch?state=')))
-  expect(JSON.parse(creates()[0][1].body)).toMatchObject({ provider: 'github', name: 'Release Assistant', config: { organization: 'team' } })
+  expect(JSON.parse(creates()[0][1].body)).toMatchObject({ provider: 'github', name: 'Triage Bot', config: { organization: 'team' } })
   expect(onClose).not.toHaveBeenCalled()
   connected = true
   await client.invalidateQueries({ queryKey: agentIntegrationKeys.detail('github-1') })

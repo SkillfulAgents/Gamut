@@ -10,6 +10,7 @@ import { IntegrationSetupWizard } from './integration-setup-wizard'
 import { Face, type IntroAgent } from './integration-setup-intro'
 import danaPhoto from '@renderer/assets/integration-intros/meeting-dana.jpg'
 import type { IntegrationSetupProps } from './setup-types'
+import { useIntegrationSetupName } from './use-integration-setup-name'
 
 /**
  * Meetings run through the Platform, so there is no key to paste: the choices
@@ -17,11 +18,9 @@ import type { IntegrationSetupProps } from './setup-types'
  * edited) and standing instructions for every meeting it joins. The form is
  * offered only where the deployment can host meeting bots (see provider availability).
  */
-export function RecallSetupForm({ agentSlug, onClose, onIntegrationCreated }: IntegrationSetupProps) {
+export function RecallSetupForm({ agentSlug, onClose, onIntegrationCreated, initial }: IntegrationSetupProps) {
   const { data: agent } = useAgent(agentSlug)
-  // null until the person types: the field follows the agent's name as it loads.
-  const [typedName, setTypedName] = useState<string | null>(null)
-  const botName = typedName ?? agent?.name ?? ''
+  const name = useIntegrationSetupName(agent?.name ?? '', initial?.name, 100)
   const [instructions, setInstructions] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [step, setStep] = useState(0)
@@ -33,7 +32,7 @@ export function RecallSetupForm({ agentSlug, onClose, onIntegrationCreated }: In
     if (create.isPending) return
     setError(null)
     const parsed = recallConfigSchema.safeParse({
-      ...(botName.trim() ? { botName: botName.trim() } : {}),
+      ...(name.input.value.trim() ? { botName: name.input.value.trim() } : {}),
       ...(instructions.trim() ? { instructions: instructions.trim() } : {}),
     })
     if (!parsed.success) {
@@ -59,8 +58,8 @@ export function RecallSetupForm({ agentSlug, onClose, onIntegrationCreated }: In
         label: 'Choose its name',
         subtitle: 'This is the name people see in the call.',
         content: <>
-          <IntegrationSetupField id="recall-bot-name" label="Name in calls" hideLabel placeholder="Agent" value={botName} onChange={event => setTypedName(event.target.value)} maxLength={100} disabled={create.isPending} />
-          <CallPreview agent={{ slug: agentSlug, name: botName.trim() || agent?.name || 'Agent', avatar: agent?.avatar ?? null }} />
+          <IntegrationSetupField id="recall-bot-name" label="Name in calls" hideLabel {...name.input} placeholder={name.input.placeholder || 'Agent'} disabled={create.isPending} />
+          <CallPreview agent={{ slug: agentSlug, name: name.effective || 'Agent', avatar: agent?.avatar ?? null }} />
         </>,
       },
       {

@@ -11,6 +11,7 @@ const state = vi.hoisted(() => ({
   requests: [] as Array<{ url: string; method: string; body: any }>,
   provisioning: true as boolean,
   installed: false,
+  rejectPatch: false,
   relay: true,
 }))
 const pending = () => makeChatIntegration({
@@ -29,6 +30,7 @@ vi.mock('@renderer/lib/api', () => {
     }
     if (url === '/api/agent-integrations/agents/a' && method === 'POST') return Response.json(pending(), { status: 201 })
     if (url === '/api/agent-integrations/int-9/authorize') return Response.json({ url: 'https://slack.com/oauth/v2/authorize?client_id=1&state=s' })
+    if (method === 'PATCH' && state.rejectPatch) return Response.json({ error: 'Settings unavailable' }, { status: 503 })
     if (url === '/api/agent-integrations/int-9') return Response.json(pending())
     return Response.json(makeChatIntegration({ provider: 'slack' }))
   }
@@ -45,7 +47,7 @@ const setup = () => render(<Dialog open><DialogContent><SlackSetup agentSlug="a"
 beforeEach(() => {
   vi.clearAllMocks()
   client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
-  Object.assign(state, { requests: [], provisioning: true, installed: false, relay: true })
+  Object.assign(state, { requests: [], provisioning: true, installed: false, relay: true, rejectPatch: false })
 })
 
 describe('Slack setup through a team directory', () => {
@@ -61,6 +63,9 @@ describe('Slack setup through a team directory', () => {
     fireEvent.click(screen.getByTestId('slack-provisioned-create'))
     // Creating the app moves on to its options; unchanged, they need no saving.
     await screen.findByRole('switch', { name: /Reply in thread/ })
+    // Once created, this installation still belongs to the directory if relay availability changes.
+    state.relay = false
+    await client.invalidateQueries({ queryKey: ['webhook-relay'] })
     fireEvent.click(screen.getByTestId('integration-setup-next'))
     await waitFor(() => expect(screen.getByTestId('slack-provisioned-created')).toHaveTextContent('App created in Acme'))
     expect(state.requests[0]).toEqual({ url: '/api/agent-integrations/agents/a', method: 'POST', body: expect.objectContaining({
@@ -79,10 +84,57 @@ describe('Slack setup through a team directory', () => {
     await waitFor(() => expect(onClose).toHaveBeenCalled())
   })
 
+  it.each(['Continue', 'Install the app'])('saves edited behavior before installation via %s', async navigation => {
+    setup()
+    await waitFor(() => expect(screen.getByTestId('slack-provisioned-create')).toBeEnabled())
+    const name = screen.getByLabelText('App name')
+    expect(name).toHaveValue('Infra Agent')
+    fireEvent.change(name, { target: { value: 'Infra Support' } })
+    fireEvent.click(screen.getByTestId('slack-provisioned-create'))
+    const mention = await screen.findByRole('switch', { name: /Only respond when @mentioned/ })
+    expect(state.requests[0].body).toMatchObject({ name: 'Infra Support', config: { provision: { name: 'Infra Support' } } })
+    fireEvent.click(mention)
+    fireEvent.click(screen.getByRole('switch', { name: /Show tool calls/ }))
+    fireEvent.click(screen.getByRole('button', { name: navigation }))
+    await waitFor(() => expect(screen.getByTestId('slack-provisioned-install')).toBeEnabled())
+    fireEvent.click(screen.getByTestId('slack-provisioned-install'))
+    await waitFor(() => expect(state.requests).toHaveLength(3))
+    expect(state.requests.slice(1)).toMatchObject([
+      { method: 'PATCH', body: { config: { onlyMentioned: false }, showToolCalls: true } },
+      { method: 'POST', url: '/api/agent-integrations/int-9/authorize' },
+    ])
+  })
+
+  it('keeps a failed edit available for retry before authorizing', async () => {
+    setup()
+    await waitFor(() => expect(screen.getByTestId('slack-provisioned-create')).toBeEnabled())
+    fireEvent.click(screen.getByTestId('slack-provisioned-create'))
+    fireEvent.click(await screen.findByRole('switch', { name: /Only respond when @mentioned/ }))
+    state.rejectPatch = true
+    fireEvent.click(screen.getByRole('button', { name: 'Install the app' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('Settings unavailable')
+    expect(screen.getByRole('switch', { name: /Only respond when @mentioned/ })).not.toBeChecked()
+    expect(state.requests.some(request => request.url.endsWith('/authorize'))).toBe(false)
+    state.rejectPatch = false
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
+    await waitFor(() => expect(screen.getByTestId('slack-provisioned-install')).toBeEnabled())
+  })
+
   it('keeps the manual setup a click away', async () => {
     setup()
-    fireEvent.click(await screen.findByTestId('slack-setup-manually'))
+    fireEvent.change(await screen.findByLabelText('App name'), { target: { value: 'Escalations' } })
+    fireEvent.click(screen.getByTestId('slack-setup-manually'))
     expect(await screen.findByTestId('slack-create-app')).toBeInTheDocument()
+    expect(screen.getByLabelText('App name')).toHaveValue('Escalations')
+    fireEvent.click(screen.getByTestId('slack-webhooks-choice'))
+    const manifest = await screen.findByTestId('slack-manifest')
+    expect(JSON.parse(manifest.textContent!).display_information.name).toBe('Escalations')
+    fireEvent.click(screen.getByTestId('slack-webhooks-choice'))
+    fireEvent.click(await screen.findByTestId('slack-create-app'))
+    await waitFor(() => expect(fakeLoginWindow.navigate).toHaveBeenCalledOnce())
+    const url = new URL(fakeLoginWindow.navigate.mock.calls[0][0])
+    expect(JSON.parse(url.searchParams.get('manifest_json')!).features.bot_user.display_name).toBe('Escalations')
+    expect(state.requests[0].body.name).toBe('Escalations')
   })
 
   it('is the manual setup when no directory can create apps', async () => {

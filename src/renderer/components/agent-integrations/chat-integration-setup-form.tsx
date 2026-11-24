@@ -9,11 +9,10 @@
 
 import { useState, type ReactNode } from 'react'
 import { Button } from '@renderer/components/ui/button'
-import { Label } from '@renderer/components/ui/label'
-import { Switch } from '@renderer/components/ui/switch'
-import { SessionTimeoutSelect } from './integration-settings-controls'
-import { DEFAULT_SESSION_TIMEOUT_HOURS } from '@shared/lib/agent-integrations/public'
-import { IntegrationSetupField, IntegrationSetupFeedback, IntegrationSetupAdvanced, IntegrationSetupHelp, IntegrationSetupList, IntegrationSetupNote, IntegrationSetupCode } from './integration-setup-layout'
+import { ChatSetupBehavior, DEFAULT_CHAT_SETUP_BEHAVIOR, SETTINGS_STEP_LABEL, SETTINGS_STEP_SUBTITLE, slackBehaviorConfig } from './chat-setup-behavior'
+import { useIntegrationSetupName, type IntegrationSetupName } from './use-integration-setup-name'
+import type { IntegrationSetupProps } from './setup-types'
+import { IntegrationSetupField, IntegrationSetupFeedback, IntegrationSetupAdvanced, IntegrationSetupList, IntegrationSetupNote, IntegrationSetupCode } from './integration-setup-layout'
 import { IntegrationSetupWizard, IntegrationSetupWizardLink, type IntegrationSetupWizardStep } from './integration-setup-wizard'
 import {
   useCreateAgentIntegration,
@@ -22,10 +21,10 @@ import {
 } from '@renderer/hooks/use-agent-integrations'
 import { Copy, Check } from 'lucide-react'
 import { IMESSAGE_PHONE_E164, type ChatProvider } from '@shared/lib/chat-integrations/config-schema'
-import { slackAppManifest, type SlackAppIdentity } from '@shared/lib/chat-integrations/slack-manifest'
+import { SLACK_BOT_EVENTS, SLACK_BOT_SCOPES, slackAppManifest, type SlackAppIdentity } from '@shared/lib/chat-integrations/slack-manifest'
 import { useAgent } from '@renderer/hooks/use-agents'
 import { slackAppIconStep } from './slack-app-appearance'
-import { slackAppIdentity } from './slack-app-identity'
+import { slackAppIdentity, type SlackAppAgent } from './slack-app-identity'
 
 function generateSlackManifest(app: SlackAppIdentity): string {
   return JSON.stringify(slackAppManifest(app), null, 2)
@@ -67,18 +66,13 @@ const CHAT_DESCRIPTIONS: Record<ChatProvider, string> = {
   imessage: 'Text this agent from your phone.',
 }
 
-const SLACK_BOT_SCOPES = ['chat:write', 'im:history', 'im:read', 'im:write', 'channels:history', 'channels:read', 'groups:history', 'groups:read', 'mpim:history', 'mpim:read', 'users:read', 'files:read', 'files:write', 'reactions:write']
-const SLACK_BOT_EVENTS = ['message.im', 'message.channels', 'message.groups', 'message.mpim']
-
 const PROVIDER_INFO: Record<ChatProvider, {
   label: string
-  slug: string
   /** `optional` fields sit under Options: the setup works without them. */
   fields: Array<{ key: string; label: string; placeholder: string; type: 'text' | 'password'; optional?: boolean }>
 }> = {
   telegram: {
     label: 'Telegram',
-    slug: 'telegram',
     fields: [
       { key: 'botToken', label: 'Bot Token', placeholder: '123456789:ABCdefGHIjklMNO…', type: 'password' as const },
       { key: 'chatId', label: 'Chat ID', placeholder: 'Auto-detected on first message', type: 'text' as const, optional: true },
@@ -86,7 +80,6 @@ const PROVIDER_INFO: Record<ChatProvider, {
   },
   slack: {
     label: 'Slack',
-    slug: 'slack',
     fields: [
       { key: 'appToken', label: 'App-Level Token', placeholder: 'xapp-…', type: 'password' as const },
       { key: 'botToken', label: 'Bot Token', placeholder: 'xoxb-…', type: 'password' as const },
@@ -95,7 +88,6 @@ const PROVIDER_INFO: Record<ChatProvider, {
   },
   imessage: {
     label: 'iMessage',
-    slug: 'imessage',
     fields: [
       { key: 'phoneNumber', label: 'Your phone number', placeholder: '+15551234567', type: 'text' as const },
       { key: 'code', label: 'Setup code', placeholder: '6-digit code', type: 'text' as const },
@@ -103,133 +95,49 @@ const PROVIDER_INFO: Record<ChatProvider, {
   },
 }
 
-/** The step of toggles every chat setup has, named and introduced the same way in each. */
-export const SETTINGS_STEP_LABEL = 'Review settings'
-export const SETTINGS_STEP_SUBTITLE = 'You can change these later on the integration’s page.'
-
 /** A wizard step, plus the required fields it holds: an empty one brings the person back to it. */
 type ChatSetupStep = IntegrationSetupWizardStep & { fields?: string[] }
 
-/** How a new chat integration behaves, chosen during setup. */
-export interface ChatSetupBehaviorValue {
-  showToolCalls: boolean
-  sessionTimeout: number | null
-  onlyMentioned: boolean
-  answerInThread: boolean
-  newSessionPerThread: boolean
+export function ChatIntegrationSetupForm(props: IntegrationSetupProps & { provider: ChatProvider }) {
+  const { data: agent } = useAgent(props.agentSlug)
+  const name = useIntegrationSetupName(agent?.name || props.agentSlug, props.initial?.name)
+  return <ChatSetupSteps {...props} agent={agent} name={name} />
 }
 
-export const DEFAULT_CHAT_SETUP_BEHAVIOR: ChatSetupBehaviorValue = {
-  showToolCalls: false, sessionTimeout: DEFAULT_SESSION_TIMEOUT_HOURS, onlyMentioned: true, answerInThread: true, newSessionPerThread: true,
-}
-
-/** Slack's channel behavior, as its stored config spells it. */
-export function slackBehaviorConfig(value: ChatSetupBehaviorValue): Record<string, boolean> {
-  return {
-    ...(value.onlyMentioned ? { onlyMentioned: true } : {}),
-    answerInThread: value.answerInThread,
-    newSessionPerThread: value.answerInThread && value.newSessionPerThread,
-  }
-}
-
-export function ChatSetupBehavior({ provider, value, onChange }: {
+export function ChatSetupSteps({ agentSlug, provider, onClose, leading, agent, name }: IntegrationSetupProps & {
   provider: ChatProvider
-  value: ChatSetupBehaviorValue
-  onChange: (value: ChatSetupBehaviorValue) => void
-}) {
-  const set = (change: Partial<ChatSetupBehaviorValue>) => onChange({ ...value, ...change })
-  // One box, a row per setting divided by hairlines, like the email access choices.
-  return (
-    <div className="divide-y divide-border overflow-hidden rounded-item border">
-      <BehaviorRow id="setup-show-tool-calls" label="Show tool calls in chat"
-        description="Posts a line for each tool it uses, so you can see it working.">
-        <Switch id="setup-show-tool-calls" checked={value.showToolCalls} onCheckedChange={showToolCalls => set({ showToolCalls })} />
-      </BehaviorRow>
-
-      <SessionTimeoutSelect
-        id="setup-session-timeout"
-        layout="setup"
-        value={value.sessionTimeout}
-        onCommit={sessionTimeout => set({ sessionTimeout })}
-      />
-
-      {provider === 'slack' && (
-        <>
-          <BehaviorRow id="setup-only-mentioned" label="Only respond when @mentioned">
-            <Switch id="setup-only-mentioned" checked={value.onlyMentioned} onCheckedChange={onlyMentioned => set({ onlyMentioned })} />
-          </BehaviorRow>
-          <BehaviorRow id="setup-answer-thread" label="Reply in thread (recommended)"
-            description="Replies under the message, not in the channel.">
-            <Switch id="setup-answer-thread" checked={value.answerInThread}
-              onCheckedChange={(checked) => set({ answerInThread: checked, ...(!checked ? { newSessionPerThread: false } : {}) })} />
-          </BehaviorRow>
-          {value.answerInThread && (
-            <BehaviorRow id="setup-session-per-thread" label="Separate conversation per thread (recommended)"
-              description="Each thread stays separate, so requests don’t mix.">
-              <Switch id="setup-session-per-thread" checked={value.newSessionPerThread} onCheckedChange={newSessionPerThread => set({ newSessionPerThread })} />
-            </BehaviorRow>
-          )}
-        </>
-      )}
-    </div>
-  )
-}
-
-/** One setting in a setup's box: its name on the left, with what it does behind a help icon, and its control on the right. */
-function BehaviorRow({ id, label, description, children }: { id: string; label: string; description?: string; children: ReactNode }) {
-  return <div className="flex min-h-11 items-center justify-between gap-4 px-3.5 py-2.5">
-    <div className="flex min-w-0 items-center gap-1.5">
-      <Label htmlFor={id} className="cursor-pointer text-xs font-normal">{label}</Label>
-      {description && <IntegrationSetupHelp label={label} testId={`${id}-help`}>{description}</IntegrationSetupHelp>}
-    </div>
-    {/* The settings cards' switch size, so it sits with 11px text. */}
-    <div className="flex shrink-0 [&>button]:origin-right [&>button]:scale-75">{children}</div>
-  </div>
-}
-
-export function ChatIntegrationSetupForm({
-  agentSlug,
-  provider,
-  onClose,
-  leading,
-  initial,
-}: {
-  agentSlug: string
-  provider: ChatProvider
-  onClose: () => void
-  /** Starting values an agent suggested when it handed the setup over. */
-  initial?: Record<string, string>
-  /** Shown first in the first step, e.g. Slack's choice of webhooks. */
+  agent: SlackAppAgent | undefined
+  name: IntegrationSetupName
   leading?: ReactNode
 }) {
   const createIntegration = useCreateAgentIntegration()
   const testCredentials = useTestAgentIntegrationCredentials()
 
   const [formData, setFormData] = useState<Record<string, string>>({})
-  // No name field: it takes the agent's name (or one an agent suggested), and can be renamed on its page.
-  const integrationName = initial?.name ?? ''
   const [behavior, setBehavior] = useState(DEFAULT_CHAT_SETUP_BEHAVIOR)
   const [testResult, setTestResult] = useState<{ valid: boolean; info?: string } | null>(null)
   const [slackSetupMode, setSlackSetupMode] = useState<'manifest' | 'manual'>('manifest')
   const [manifestCopied, setManifestCopied] = useState(false)
-  const { data: agent } = useAgent(provider === 'slack' ? agentSlug : null)
-  const slackApp = slackAppIdentity(agent, integrationName)
+  const slackApp = slackAppIdentity(agent, name.effective)
 
   const info = PROVIDER_INFO[provider]
   const [step, setStep] = useState(0)
   // Telegram's last step comes after connecting, so the dialog stays open once the bot is connected.
   const [connected, setConnected] = useState(false)
 
+  const readOnly = connected || createIntegration.isPending
+  const nameField = <IntegrationSetupField id="setup-integration-name" label={provider === 'slack' ? 'App name' : 'Integration name'} {...name.input} disabled={readOnly} />
+
   const field = (key: string, { label, verify, hideLabel }: { label?: string; verify?: boolean; hideLabel?: boolean } = {}) => {
     const spec = info.fields.find(f => f.key === key)
     if (!spec) return null
     return <IntegrationSetupField
-      key={spec.key} id={`setup-${spec.key}`} label={label ?? spec.label} hideLabel={hideLabel}
+      key={spec.key} id={`setup-${spec.key}`} label={label ?? spec.label} hideLabel={hideLabel} optional={spec.optional}
       action={verify && !connected ? verifyAction : undefined}
       type={spec.type} value={formData[spec.key] || ''}
       onChange={e => setFormData({ ...formData, [spec.key]: e.target.value })}
       placeholder={spec.placeholder}
-      disabled={connected}
+      disabled={readOnly}
     />
   }
 
@@ -238,16 +146,10 @@ export function ChatIntegrationSetupForm({
     label: SETTINGS_STEP_LABEL,
     subtitle: SETTINGS_STEP_SUBTITLE,
     content: <>
-      <ChatSetupBehavior provider={provider} value={behavior} onChange={setBehavior} />
+      {provider !== 'slack' && nameField}
+      <ChatSetupBehavior provider={provider} value={behavior} onChange={setBehavior} disabled={readOnly} />
       {info.fields.some(spec => spec.optional) && <IntegrationSetupAdvanced>
-        {info.fields.filter(spec => spec.optional).map(spec => (
-          <IntegrationSetupField
-            key={spec.key} id={`setup-${spec.key}`} label={spec.label} optional
-            type={spec.type} value={formData[spec.key] || ''}
-            onChange={e => setFormData({ ...formData, [spec.key]: e.target.value })}
-            placeholder={spec.placeholder}
-          />
-        ))}
+        {info.fields.filter(spec => spec.optional).map(spec => field(spec.key))}
       </IntegrationSetupAdvanced>}
     </>,
   }
@@ -273,7 +175,7 @@ export function ChatIntegrationSetupForm({
   }
   // The agent's avatar as the app's icon: a step only for an agent that has one.
   const iconStep = (options?: { withColor?: boolean }): ChatSetupStep[] => {
-    const step = slackAppIconStep(agent, { name: integrationName, ...options })
+    const step = slackAppIconStep(agent, { name: name.effective, ...options })
     return step ? [step] : []
   }
 
@@ -323,6 +225,7 @@ export function ChatIntegrationSetupForm({
       label: 'Copy the manifest',
       subtitle: 'The manifest sets up the Slack app for you. You’ll paste it into Slack in the next step.',
       content: <>
+        {nameField}
         {leading}
         {/* Always shown, with its copy button pinned to the corner: outside the scrolling text, so it stays put. */}
         <div className="relative">
@@ -361,6 +264,7 @@ export function ChatIntegrationSetupForm({
       label: 'Create the app',
       subtitle: <>Open Slack’s app page and choose <strong>Create New App → From scratch</strong>. Name the app and pick your workspace.</>,
       content: <>
+        {nameField}
         {leading}
         <IntegrationSetupWizardLink href={SLACK_APPS_URL}>Open api.slack.com/apps</IntegrationSetupWizardLink>
         <IntegrationSetupNote>Rather not add each setting yourself? {modeSwitch('Use a manifest instead', 'manifest')}</IntegrationSetupNote>
@@ -435,7 +339,7 @@ export function ChatIntegrationSetupForm({
       await createIntegration.mutateAsync({
         agentSlug,
         provider,
-        name: integrationName.trim() || undefined,
+        name: name.override,
         config,
         showToolCalls: behavior.showToolCalls,
         sessionTimeout: behavior.sessionTimeout,
@@ -452,6 +356,7 @@ export function ChatIntegrationSetupForm({
       label={info.label}
       heading={provider === 'telegram' ? 'Chat with this agent over Telegram' : undefined}
       description={CHAT_DESCRIPTIONS[provider]}
+      complete={connected}
       steps={steps}
       step={step}
       // A check's result belongs to the step it was made on.

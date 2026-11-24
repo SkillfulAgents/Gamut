@@ -437,8 +437,8 @@ agentIntegrationsRouter.patch('/:integrationId', IntegrationAgentRole('user'), R
       await agentIntegrationManager.pauseIntegration(id)
     } else if (status === 'active') {
       await agentIntegrationManager.resumeIntegration(id)
-    } else if ((config !== undefined || settingsChange?.reconnect) && status !== 'paused') {
-      // Config changed while active — reconnect to pick up new credentials
+    } else if ((config !== undefined || settingsChange?.reconnect) && provisionedAppOf(integration.config)?.installed !== false) {
+      // A provisioned app receives its credentials at installation. Until then, only save its settings.
       await agentIntegrationManager.removeIntegration(id)
       if (integration.status !== 'paused') {
         try {

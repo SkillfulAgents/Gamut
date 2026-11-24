@@ -1,6 +1,6 @@
 import { createContext, useContext, type ReactNode } from 'react'
 import { ArrowUpRight, Clock3, Loader2 } from 'lucide-react'
-import { Button } from '@renderer/components/ui/button'
+import { Button, buttonVariants } from '@renderer/components/ui/button'
 import { DialogDescription, DialogTitle } from '@renderer/components/ui/dialog'
 import { ServiceIcon } from '@renderer/components/ui/service-icon'
 import { cn } from '@shared/lib/utils/cn'
@@ -64,7 +64,7 @@ export interface IntegrationSetupWizardAside { label: string; busyLabel?: string
  * The caller holds the step, so it can move on when an action succeeds, or
  * send someone back to the step whose field is still empty.
  */
-export function IntegrationSetupWizard({ provider, label, verb = 'Connect', heading, description, steps, step, onStepChange, feedback, finish, aside, testId }: {
+export function IntegrationSetupWizard({ provider, label, verb = 'Connect', heading, description, steps, step, onStepChange, feedback, finish, aside, testId, complete }: {
   /** The provider's slug, for its mark at the top of the rail. */
   provider: string
   label: string
@@ -83,13 +83,16 @@ export function IntegrationSetupWizard({ provider, label, verb = 'Connect', head
   /** A quiet action at the footer's start on the last step, e.g. checking a token. */
   aside?: IntegrationSetupWizardAside
   testId?: string
+  /** Some integrations keep a final instruction on screen after connecting. */
+  complete?: boolean
 }) {
   const index = Math.min(Math.max(step, 0), steps.length - 1)
   const current = steps[index]
   const last = index === steps.length - 1
   const action = current.action ?? (last ? finish : undefined)
   const quiet = current.aside ?? (last ? aside : undefined)
-  const later = useContext(SetUpLaterContext)
+  const reminder = useContext(SetUpLaterContext)
+  const later = complete ? null : reminder
   return (
     <div className="flex min-h-[26rem] w-[min(40rem,calc(100vw-2rem))]" data-testid={testId ?? 'integration-setup-wizard'}>
       {/* Dark in both themes, the provider's mark above the steps: the intro before it has already said what this is. */}
@@ -158,33 +161,34 @@ export function IntegrationSetupWizard({ provider, label, verb = 'Connect', head
             )
           })}
         </div>
-        <footer className="flex items-center justify-end gap-2">
-          {current.note && <p className="mr-auto pr-4 text-xs text-muted-foreground">{current.note}</p>}
-          {/* The rail holds it; a phone has no rail, so it comes down here, where the row's start is free. */}
-          {later && !current.note && !quiet && <div className="mr-auto sm:hidden"><SetUpLaterButton later={later} /></div>}
+        <footer className="flex flex-wrap items-center justify-end gap-2">
+          {current.note && <p className="mr-auto pr-4 text-xs text-muted-foreground max-sm:basis-full">{current.note}</p>}
+          {later && <div className={cn('mr-auto sm:hidden', (quiet || current.secondary) && 'basis-full')}><SetUpLaterButton later={later} /></div>}
           {quiet && (
             <Button type="button" size="sm" variant="ghost" className="-ml-3 mr-auto text-muted-foreground" onClick={quiet.onClick} disabled={quiet.disabled} loading={quiet.busy}>
               {quiet.busy ? quiet.busyLabel ?? quiet.label : quiet.label}
             </Button>
           )}
-          {index > 0 && (
-            <Button type="button" size="sm" variant="ghost" onClick={() => onStepChange(index - 1)} data-testid="integration-setup-back">Back</Button>
-          )}
-          {current.secondary && (
-            <Button type="button" size="sm" variant="ghost" onClick={current.secondary.onClick} disabled={current.secondary.disabled} loading={current.secondary.busy}
-              data-testid={current.secondary.testId}>
-              {current.secondary.busy ? current.secondary.busyLabel ?? current.secondary.label : current.secondary.label}
-            </Button>
-          )}
-          {action ? (
-            <Button type="button" size="sm" className={cn(SETUP_PRIMARY_BUTTON, action.external && EXTERNAL_BUTTON)} onClick={action.onClick} disabled={action.disabled} loading={action.busy}
-              data-testid={action.testId ?? (last ? 'integration-setup-finish' : 'integration-setup-next')}>
-              {action.busy ? action.busyLabel ?? action.label : action.label}
-              {action.external && <ExternalArrow reveal />}
-            </Button>
-          ) : (
-            <Button type="button" size="sm" className={SETUP_PRIMARY_BUTTON} onClick={() => onStepChange(index + 1)} data-testid="integration-setup-next">Next</Button>
-          )}
+          <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
+            {index > 0 && (
+              <Button type="button" size="sm" variant="ghost" onClick={() => onStepChange(index - 1)} data-testid="integration-setup-back">Back</Button>
+            )}
+            {current.secondary && (
+              <Button type="button" size="sm" variant="ghost" onClick={current.secondary.onClick} disabled={current.secondary.disabled} loading={current.secondary.busy}
+                data-testid={current.secondary.testId}>
+                {current.secondary.busy ? current.secondary.busyLabel ?? current.secondary.label : current.secondary.label}
+              </Button>
+            )}
+            {action ? (
+              <Button type="button" size="sm" className={cn(SETUP_PRIMARY_BUTTON, action.external && EXTERNAL_BUTTON)} onClick={action.onClick} disabled={action.disabled} loading={action.busy}
+                data-testid={action.testId ?? (last ? 'integration-setup-finish' : 'integration-setup-next')}>
+                {action.busy ? action.busyLabel ?? action.label : action.label}
+                {action.external && <ExternalArrow reveal />}
+              </Button>
+            ) : (
+              <Button type="button" size="sm" className={SETUP_PRIMARY_BUTTON} onClick={() => onStepChange(index + 1)} data-testid="integration-setup-next">Next</Button>
+            )}
+          </div>
         </footer>
       </section>
     </div>
@@ -192,14 +196,14 @@ export function IntegrationSetupWizard({ provider, label, verb = 'Connect', head
 }
 
 /** On a button whose `ExternalArrow` is revealed on hover: names the group the arrow listens to. */
-export const EXTERNAL_BUTTON = 'group/external'
+const EXTERNAL_BUTTON = 'group/external'
 
 /**
  * The mark on a button or link that opens another site. On a button (`reveal`, inside `EXTERNAL_BUTTON`) it
  * slides out from the end of the label on hover or keyboard focus, and is always there on a touch screen,
  * which has no hover. In running text it is always there.
  */
-export function ExternalArrow({ className, reveal }: { className?: string; reveal?: boolean }) {
+function ExternalArrow({ className, reveal }: { className?: string; reveal?: boolean }) {
   const arrow = <ArrowUpRight aria-hidden="true" className={cn('h-3.5 w-3.5 shrink-0', className)} />
   if (!reveal) return arrow
   // Collapsed, the negative margin takes back the button's gap, so the label stays centred.
@@ -207,8 +211,12 @@ export function ExternalArrow({ className, reveal }: { className?: string; revea
 }
 
 /** A link to another site inside a step's text, with the arrow that says it leaves the app. */
-export function IntegrationSetupWizardLink({ href, children }: { href: string; children: ReactNode }) {
-  return <a className="inline-flex items-baseline gap-0.5 font-normal text-foreground underline decoration-foreground/30 underline-offset-[3px] transition-colors hover:decoration-foreground" href={href} target="_blank" rel="noopener noreferrer" onClick={event => {
+export function IntegrationSetupWizardLink({ href, children, variant = 'text' }: { href: string; children: ReactNode; variant?: 'text' | 'button' }) {
+  const button = variant === 'button'
+  const className = button
+    ? buttonVariants({ variant: 'outline', size: 'sm', className: EXTERNAL_BUTTON })
+    : 'inline-flex items-baseline gap-0.5 font-normal text-foreground underline decoration-foreground/30 underline-offset-[3px] hover:decoration-foreground'
+  return <a className={className} href={href} target="_blank" rel="noopener noreferrer" onClick={event => {
     if (window.electronAPI) { event.preventDefault(); void window.electronAPI.openExternal(href) }
-  }}>{children}<ExternalArrow className="h-3 w-3 self-center" /></a>
+  }}>{children}<ExternalArrow reveal={button} className={button ? undefined : 'h-3 w-3 self-center'} /></a>
 }
