@@ -19,9 +19,6 @@ vi.mock('@shared/lib/proxy/policy-resolver', () => ({
   }),
 }))
 
-vi.mock('@shared/lib/proxy/review-manager', () => ({
-  reviewManager: { requestReview: vi.fn() },
-}))
 
 vi.mock('@shared/lib/mcp/mcp-safe-fetch', () => ({
   mcpSafeFetch: (...args: unknown[]) => mocks.safeFetch(...args),
@@ -59,9 +56,9 @@ vi.mock('drizzle-orm', () => ({
 }))
 
 import mcpProxy from './mcp-proxy'
-import { mcpReauthManager } from '@shared/lib/proxy/mcp-reauth-manager'
+import { mcpReauthManager } from '@shared/lib/agent-actor/testing/routers/mcp-reauth-manager'
 import { agentRegistry } from '@shared/lib/agent-actor'
-import { userInputRequestManager } from '@shared/lib/tools/requests/request-manager'
+import { userInputRequestManager } from '@shared/lib/agent-actor/testing/routers/request-manager'
 
 function mcp(status: 'active' | 'auth_required', accessToken: string) {
   return {

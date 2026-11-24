@@ -1,12 +1,9 @@
 import type { XAgentFileTransfer, XAgentRuntime } from '@shared/lib/proxy/x-agent-review'
-import { AgentStores, type AgentStoreDirectory } from '@shared/lib/agent-actor/store-directory'
-import type { AgentReviews, ReviewDecision, ReviewDecisionDetail, ReviewOutcome, ReviewRequest, ReviewRequestOptions, XAgentOperation } from './agent-reviews'
-import type { ReviewDetails } from './review-display'
-import { awaitReview, type ReviewReevaluator, type ReviewResult } from './review-request'
-import type { ScopeLabel } from './scope-metadata'
-
-export { generateReviewDisplayText, humanizeActionName, type ReviewDetails } from './review-display'
-export { AgentReviews, type ReviewDecision, type ReviewDecisionDetail, type ReviewOutcome, type ReviewRequest, type XAgentOperation } from './agent-reviews'
+import { AgentStores, type AgentStoreDirectory } from './store-directory'
+import type { AgentReviews, ReviewDecision, ReviewDecisionDetail, ReviewOutcome, ReviewRequest, ReviewRequestOptions, XAgentOperation } from '@shared/lib/proxy/agent-reviews'
+import type { ReviewDetails } from '@shared/lib/proxy/review-display'
+import { awaitReview, type ReviewReevaluator, type ReviewResult } from '@shared/lib/proxy/review-request'
+import type { ScopeLabel } from '@shared/lib/proxy/scope-metadata'
 
 /**
  * The router in front of every agent's reviews, for tests: the app raises and

@@ -70,10 +70,9 @@ import type {
   UserInputRequestOutcome,
 } from '@shared/lib/tools/requests/request-schema'
 import type { SettledUserInputRequest } from '@shared/lib/tools/requests/agent-input-requests'
-import type { ReviewDecisionDetail, ReviewDetails, ReviewOutcome, ReviewRequest } from '@shared/lib/proxy/review-manager'
-import type { AccountReauthDetails } from '@shared/lib/proxy/account-reauth-manager'
-import type { McpReauthDetails } from '@shared/lib/proxy/mcp-reauth-manager'
-import type { ReauthOutcome } from '@shared/lib/proxy/reauth-waits'
+import type { ReviewDecisionDetail, ReviewOutcome, ReviewRequest } from '@shared/lib/proxy/agent-reviews'
+import type { ReviewDetails } from '@shared/lib/proxy/review-display'
+import type { AccountReauthDetails, McpReauthDetails, ReauthOutcome } from '@shared/lib/proxy/reauth-waits'
 import type { ScopeLabel } from '@shared/lib/proxy/scope-metadata'
 import type { ComputerUsePermissionLevel, PermissionGrantType } from '@shared/lib/computer-use/types'
 import type { ComputerUseRun, HostRunOutcome, ScriptRun } from './host-runs'

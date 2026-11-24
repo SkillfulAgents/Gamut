@@ -1,14 +1,12 @@
 import type { AgentSlug } from '@shared/lib/agent-actor/types'
-import { AgentStores, type AgentStoreDirectory } from '@shared/lib/agent-actor/store-directory'
-import type { AgentInputRequests, SettledUserInputRequest } from './agent-input-requests'
+import { AgentStores, type AgentStoreDirectory } from './store-directory'
+import type { AgentInputRequests, SettledUserInputRequest } from '@shared/lib/tools/requests/agent-input-requests'
 import type {
   PendingUserInputRequest,
   PendingUserInputRequestInput,
   UserInputRequestOutcome,
   UserInputRequestStore,
-} from './request-schema'
-
-export type { SettledUserInputRequest, UserInputRequestTransition } from './agent-input-requests'
+} from '@shared/lib/tools/requests/request-schema'
 
 /**
  * The router in front of every agent's pending user-input requests, for

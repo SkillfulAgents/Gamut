@@ -55,9 +55,9 @@ async function load() {
     // Every agent that had state gets its actor again at once.
     for (const slug of agentStatesSurvivingReloads.keys()) agentRegistry.get(slug)
   }
-  const { userInputRequestManager } = await import('@shared/lib/tools/requests/request-manager')
-  const { reviewManager } = await import('@shared/lib/proxy/review-manager')
-  const { accountReauthManager } = await import('@shared/lib/proxy/account-reauth-manager')
+  const { userInputRequestManager } = await import('@shared/lib/agent-actor/testing/routers/request-manager')
+  const { reviewManager } = await import('@shared/lib/agent-actor/testing/routers/review-manager')
+  const { accountReauthManager } = await import('@shared/lib/agent-actor/testing/routers/account-reauth-manager')
   registries.push(agentRegistry)
   return { agentRegistry, userInputRequestManager, reviewManager, accountReauthManager }
 }

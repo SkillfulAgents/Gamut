@@ -121,9 +121,6 @@ vi.mock('../../api/credentials/credential-broker', () => ({
 }))
 vi.mock('../../main/browser-stream-proxy', () => ({ setupBrowserStreamProxy: vi.fn() }))
 vi.mock('../../main/cloud-stream-proxy', () => ({ setupCloudStreamProxy: vi.fn() }))
-vi.mock('./proxy/review-manager', () => ({ reviewManager: { rejectAll: vi.fn() } }))
-vi.mock('./proxy/account-reauth-manager', () => ({ accountReauthManager: { rejectAll: vi.fn() } }))
-vi.mock('./proxy/mcp-reauth-manager', () => ({ mcpReauthManager: { rejectAll: vi.fn() } }))
 vi.mock('./scheduler/task-scheduler', () => ({
   taskScheduler: { id: 'task-scheduler', phase: 'background', startupIo: true, start: () => taskSchedulerStart(), stop: () => { released.push('task-scheduler') } },
 }))

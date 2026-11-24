@@ -204,7 +204,7 @@ vi.mock('@shared/lib/utils/file-storage', () => ({
 
 // Import the agents router after all mocks are set up
 import agents from './agents'
-import { userInputRequestManager } from '@shared/lib/tools/requests/request-manager'
+import { userInputRequestManager } from '@shared/lib/agent-actor/testing/routers/request-manager'
 
 function createApp() {
   const app = new Hono()
