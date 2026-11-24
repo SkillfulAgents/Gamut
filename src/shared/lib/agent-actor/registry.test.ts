@@ -10,7 +10,15 @@ import * as usageService from '@shared/lib/services/usage-service'
 import * as sessionService from '@shared/lib/services/session-service'
 import { getAgentWorkspaceDir } from '@shared/lib/utils/file-storage'
 import * as transcriptOps from './local-transcript-ops'
-import { _resetAgentRegistryForTest, agentRegistry, createAgentRegistry as createRegistryOver } from './registry'
+import {
+  _resetAgentRegistryForTest,
+  agentRegistry,
+  createAgentRegistry as createRegistryOver,
+  initializeAgentRegistry,
+  isAgentRegistryInitialized,
+  reinstallAgentRegistry,
+  type CreateAgentActor,
+} from './registry'
 import { LiveSessions } from './live/live-sessions'
 import type { AgentState } from './agent-state'
 import { LocalAgentActor, type LocalActorParts } from './local-agent-actor'
@@ -721,6 +729,38 @@ describe('createAgentRegistry', () => {
       const first = registry.get('a') as LocalAgentActor
       await registry.evict('a')
       expect((registry.get('a') as LocalAgentActor).state).not.toBe(first.state)
+    })
+
+    it('the registry is reinstalled when only the code that makes the actors was re-evaluated', async () => {
+      const states = new Map<string, AgentState>()
+      // As the dev server boots: the registry over the code that makes the actors.
+      const before: CreateAgentActor = (slug) => new LocalAgentActor(slug, fake.deps, states)
+      _resetAgentRegistryForTest()
+      initializeAgentRegistry(before)
+      const actor = agentRegistry.get('a') as LocalAgentActor
+      await actor.inputs.register({ id: 'q1', kind: 'question', scope: { sessionId: 's' }, blocking: true, payload: {} } as never)
+
+      // An edit re-evaluated that code and not the registry module: the same job, done by a new function.
+      const edited: CreateAgentActor = (slug) => new LocalAgentActor(slug, fake.deps, states)
+      expect(isAgentRegistryInitialized()).toBe(true)
+      expect(isAgentRegistryInitialized(before)).toBe(true)
+      expect(isAgentRegistryInitialized(edited)).toBe(false)
+      // The entry point's call is not what swaps it: a repeat call does nothing.
+      initializeAgentRegistry(edited)
+      expect(isAgentRegistryInitialized(edited)).toBe(false)
+
+      reinstallAgentRegistry(edited)
+
+      expect(isAgentRegistryInitialized(edited)).toBe(true)
+      expect(isAgentRegistryInitialized(before)).toBe(false)
+      const rebuilt = agentRegistry.get('a') as LocalAgentActor
+      expect(rebuilt).not.toBe(actor)
+      // The earlier actor was forgotten, not disposed: what the agent held is still held.
+      expect(rebuilt.state).toBe(actor.state)
+      expect((await rebuilt.inputs.get('q1'))?.id).toBe('q1')
+
+      await agentRegistry.evict('a')
+      _resetAgentRegistryForTest()
     })
   })
 
