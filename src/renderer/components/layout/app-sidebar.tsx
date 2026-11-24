@@ -142,7 +142,7 @@ import {
   uniqueFolderName,
   applyTreeOperation,
   type TreeOperation,
-} from '@renderer/lib/agent-folders'
+} from '@shared/lib/utils/agent-folders'
 import { useRenderTracker } from '@renderer/lib/perf'
 import { useHasDiscoverableAgents } from '@renderer/hooks/use-agent-templates'
 import { useRememberedFlag } from '@renderer/hooks/use-remembered-flag'

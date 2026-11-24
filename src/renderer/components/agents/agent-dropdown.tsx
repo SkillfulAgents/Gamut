@@ -9,7 +9,7 @@ import { AgentAvatar } from '@renderer/components/agents/agent-avatar/agent-avat
 import { useAgents } from '@renderer/hooks/use-agents'
 import { useUserSettings } from '@renderer/hooks/use-user-settings'
 import { applyAgentOrder } from '@renderer/lib/agent-ordering'
-import { buildFolderSections, type AgentFolder } from '@renderer/lib/agent-folders'
+import { buildFolderSections, type AgentFolder } from '@shared/lib/utils/agent-folders'
 
 export interface AgentDropdownSection {
   folder: AgentFolder

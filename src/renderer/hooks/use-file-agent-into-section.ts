@@ -1,7 +1,7 @@
 import { useCallback } from 'react'
 import { toast } from 'sonner'
 import { useUpdateUserSettings } from '@renderer/hooks/use-user-settings'
-import { assignAgentToFolder } from '@renderer/lib/agent-folders'
+import { assignAgentToFolder } from '@shared/lib/utils/agent-folders'
 
 /**
  * Files a just-created agent into the left-nav section whose + started it.
