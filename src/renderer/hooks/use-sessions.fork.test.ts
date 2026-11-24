@@ -41,11 +41,15 @@ describe('useForkSession', () => {
     // Navigation is held open so the test can see the mutation wait for it.
     let finishNavigation!: () => void
     mockNavigate.mockImplementation(() => new Promise<void>((resolve) => { finishNavigation = resolve }))
+    const fork = { id: 'fork-1', agentSlug: 'agent-a', name: 'Pricing (fork)' }
     mockApiFetch.mockResolvedValue({
       ok: true,
-      json: async () => ({ id: 'fork-1', agentSlug: 'agent-a', name: 'Pricing (fork)' }),
+      json: async () => fork,
     })
     const { result } = renderHook(() => ({ fork: useForkSession(), store: useDraftsStore() }), { wrapper })
+    const source = { id: 'src-1', agentSlug: 'agent-a', name: 'Pricing' }
+    const listKey = ['sessions', 'agent-a']
+    queryClient.setQueryData(listKey, [source])
     // Everything unsent in the source: its text, a file that finished uploading, a model pick.
     const upload = { status: 'done' as const, path: '/workspace/uploads/a.txt', agentSlug: 'agent-a' }
     const file = { type: 'file' as const, id: 'f-1', file: new File(['x'], 'a.txt'), upload }
@@ -57,6 +61,8 @@ describe('useForkSession', () => {
       let settled = false
       const forked = result.current.fork.mutateAsync({ sessionId: 'src-1', agentSlug: 'agent-a' }).then(() => { settled = true })
       await vi.waitFor(() => expect(mockNavigate).toHaveBeenCalled())
+      expect(queryClient.getQueryData(listKey)).toEqual([fork, source])
+      expect(queryClient.getQueryState(listKey)?.isInvalidated).toBe(true)
       await Promise.resolve()
       // A caller that acts on the opened copy (e.g. sends into it) relies on this.
       expect(settled).toBe(false)

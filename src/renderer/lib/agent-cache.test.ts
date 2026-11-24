@@ -5,7 +5,8 @@ import {
   applySessionActivityStatus,
   invalidateAgentArtifacts,
   markDashboardScreenshotReady,
-  seedCreatedSessionInRecent,
+  recentSessionsKey,
+  seedCreatedSession,
   sessionListMembership,
   sessionTotalKey,
   updateAgentRuntimeCache,
@@ -121,6 +122,21 @@ describe('targeted agent cache updates', () => {
       client.setQueryData(['session', 'sess-1', 'agent-a'], sessions[0])
       return client
     }
+
+    it('keeps invalidated lists stale when opening a fork clears no unread flags', async () => {
+      const client = seededClient()
+      const full = ['sessions', 'agent-a']
+      const recent = recentSessionsKey('agent-a')
+      const source = session('source')
+      client.setQueryData(full, [source])
+      client.setQueryData(recent, [session('fork'), source])
+      await client.invalidateQueries({ queryKey: full })
+
+      expect(applySessionActivityStatus(client, 'agent-a', 'fork', { hasUnreadNotifications: false })).toBe(false)
+
+      expect(client.getQueryState(full)?.isInvalidated).toBe(true)
+      expect(client.getQueryState(recent)?.isInvalidated).toBe(true)
+    })
 
     it('raises the flag on the session entry and the agent rollup in every cache', () => {
       const client = seededSessionClient([session('sess-1'), session('sess-2')])
@@ -307,8 +323,8 @@ describe('targeted agent cache updates', () => {
         const client = sliceClient({ recent: [1, 2, 3, 4, 5, 6].map((n) => session(`sess-${n}`)) })
         client.setQueryData(sessionTotalKey('agent-a'), 12)
 
-        seedCreatedSessionInRecent(client, 'agent-a', session('new'))
-        seedCreatedSessionInRecent(client, 'agent-a', session('new'))
+        seedCreatedSession(client, session('new'))
+        seedCreatedSession(client, session('new'))
 
         expect(client.getQueryData<ApiSession[]>(RECENT)?.map((entry) => entry.id))
           .toEqual(['new', 'sess-1', 'sess-2', 'sess-3', 'sess-4', 'sess-5'])

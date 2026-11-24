@@ -109,6 +109,28 @@ test.describe('Fork Session', () => {
     await expect(page.locator('[data-testid="message-input"]')).toHaveText(draft)
   })
 
+  test('shows the fork in Recent sessions on returning to Agent Home', async ({ page, request }, testInfo) => {
+    const agent = await createAgent(request, uniqueName(testInfo, 'Fork Agent'))
+    const source = await createSession(request, agent, 'A session to fork')
+    await waitForSessionIdle(request, agent, source)
+    await gotoAgentHome(page, agent)
+    const recent = page.getByTestId('home-recent-sessions')
+    const sourceRow = recent.getByTestId(`session-row-menu-${source.id}`)
+    await expect(sourceRow).toBeVisible()
+    await page.getByTestId(`session-item-${source.id}`).click()
+
+    const breadcrumb = page.getByTestId('session-breadcrumb')
+    await breadcrumb.click({ button: 'right' })
+    await page.getByTestId('fork-session-trigger').hover()
+    await page.getByTestId('fork-session-item').click()
+    await expect(breadcrumb).toContainText('(fork)')
+    const fork = await waitForCurrentSessionId(page)
+    await page.getByTestId('agent-breadcrumb').click()
+
+    await expect(recent.getByTestId(`session-row-menu-${fork.id}`)).toBeVisible()
+    await expect(sourceRow).toBeVisible()
+  })
+
   test('Fork & Summarize sends /compact into the copy and leaves the source alone', async ({ page, request }, testInfo) => {
     const { agent, session: created } = await fixture(page, request, testInfo)
     const session = (await listSessions(request, agent)).find((s) => s.id === created.id)!
