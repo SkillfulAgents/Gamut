@@ -205,7 +205,7 @@ test.describe('sessions waiting on a person', () => {
 
       await page.goto(asked.pending_request.open_in_gamut_url)
       await expect(page.getByTestId('session-breadcrumb')).toBeVisible({ timeout: 30_000 })
-      await expect(page.getByTestId('mcp-session-banner')).toBeVisible()
+      await expect(page.getByTestId('inbound-x-agent-breadcrumb')).toBeVisible()
       await expect(page.getByText('OPENAI_API_KEY').first()).toBeVisible()
     } finally {
       await mcp.close()
@@ -343,8 +343,7 @@ test.describe('in Gamut', () => {
     await expect(page.getByTestId('inbound-mcp-session-note').first()).toHaveText('Through MCP')
 
     await page.goto(`${baseUrl()}/agents/${runner.slug}/sessions/${sessionId}`)
-    await expect(page.getByTestId('mcp-session-banner')).toContainText('Session started through MCP from "gamut-e2e-v2-modern"')
-    await expect(page.getByTestId('inbound-x-agent-breadcrumb')).toBeVisible()
+    await expect(page.getByTestId('inbound-x-agent-breadcrumb')).toContainText('gamut-e2e-v2-modern')
     expect(await mainList(runner.slug)).not.toContain(sessionId)
   })
 

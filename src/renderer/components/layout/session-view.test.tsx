@@ -11,7 +11,6 @@ const xAgentSession = {
 }
 const mocks = vi.hoisted(() => ({
   navigate: vi.fn(),
-  history: { canGoBack: vi.fn(() => false), back: vi.fn() },
   markRead: vi.fn(),
   setMarkedUnread: vi.fn(),
   // Reports whether a dot was actually showing; defaults to the common no-op open.
@@ -19,15 +18,12 @@ const mocks = vi.hoisted(() => ({
   session: {} as Record<string, unknown>,
   canUseAgent: true,
   commentsEnabled: [] as Array<boolean | undefined>,
-  integrationId: null as string | null,
-  integration: undefined as Record<string, unknown> | undefined,
   search: {} as Record<string, unknown>,
   chatColumnProps: undefined as undefined | { messageTarget?: { id: string; onSettled: (outcome: string) => void } },
 }))
 
 vi.mock('@tanstack/react-router', () => ({
   useNavigate: () => mocks.navigate,
-  useRouter: () => ({ history: mocks.history }),
   useSearch: () => mocks.search,
 }))
 
@@ -37,11 +33,6 @@ vi.mock('@renderer/hooks/use-sessions', () => ({
   // notification read-marking below.
   useSetSessionMarkedUnread: () => ({ mutate: mocks.setMarkedUnread }),
   useClearSessionUnread: () => mocks.clearUnread,
-}))
-
-vi.mock('@renderer/hooks/use-agent-integrations', () => ({
-  useSessionAgentIntegrationId: (_slug: string, sessionId: string | null) => ({ data: sessionId ? mocks.integrationId : undefined }),
-  useAgentIntegration: (id: string | null) => ({ data: id ? mocks.integration : undefined }),
 }))
 
 vi.mock('@renderer/hooks/use-notifications', () => ({
@@ -121,99 +112,18 @@ describe('SessionView unread clearing', () => {
   })
 })
 
-describe('SessionView x-agent provenance', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-    mocks.session = xAgentSession
-    mocks.clearUnread.mockReturnValue(false)
-  })
+describe('SessionView provenance', () => {
+  it('draws no bar above the chat for an automated session; its source is a header crumb', () => {
+    mocks.session = { ...xAgentSession, scheduledTaskId: 'task-1', scheduledTaskName: 'Nightly' }
+    const { container } = render(<SessionView agentSlug="target-agent" sessionId="x-session" />)
 
-  it('returns to the previous page when the session was opened in the app', () => {
-    mocks.history.canGoBack.mockReturnValueOnce(true)
-    render(<SessionView agentSlug="target-agent" sessionId="x-session" />)
-    fireEvent.click(screen.getByTestId('x-agent-session-back-button'))
-    expect(mocks.history.back).toHaveBeenCalledOnce()
-    expect(mocks.navigate).not.toHaveBeenCalled()
-  })
-
-  it('opens Called from Other Agents when a direct link has no prior app page', () => {
-    render(<SessionView agentSlug="target-agent" sessionId="x-session" />)
-
-    expect(screen.getByTestId('x-agent-session-banner')).toHaveTextContent(
-      'Session created by x-agent call from "Caller Agent"',
-    )
-    fireEvent.click(screen.getByTestId('x-agent-session-back-button'))
-    expect(mocks.navigate).toHaveBeenCalledWith({
-      to: '/agents/$slug/called-from-agents',
-      params: { slug: 'target-agent' },
-      replace: true,
-    })
-  })
-})
-
-describe('SessionView widget repair provenance', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-    mocks.session = {
-      id: 'repair-session',
-      agentSlug: 'target-agent',
-      name: 'Invoked to fix widget',
-      isWidgetRepair: true,
-      widgetRepairSlug: 'weather',
-    }
-    mocks.clearUnread.mockReturnValue(false)
-  })
-
-  it('identifies the widget and returns to the invocation history', () => {
-    render(<SessionView agentSlug="target-agent" sessionId="repair-session" />)
-
-    expect(screen.getByTestId('widget-repair-session-banner')).toHaveTextContent('Invoked to fix widget: weather')
-    expect(screen.queryByTestId('x-agent-session-banner')).not.toBeInTheDocument()
-    fireEvent.click(screen.getByTestId('widget-repair-session-back-button'))
-    expect(mocks.navigate).toHaveBeenCalledWith({
-      to: '/agents/$slug/called-from-agents',
-      params: { slug: 'target-agent' },
-    })
-  })
-})
-
-describe('SessionView agent integration provenance', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-    mocks.session = { id: 'int-session', agentSlug: 'target-agent', name: 'Dana' }
-    mocks.integrationId = 'int-1'
-    mocks.integration = { id: 'int-1', provider: 'slack', name: 'Support bot' }
-  })
-
-  it('names the integration and returns to its open conversation', () => {
-    render(<SessionView agentSlug="target-agent" sessionId="int-session" />)
-
-    expect(screen.getByTestId('integration-session-banner')).toHaveTextContent('Session from Slack integration "Support bot"')
-    fireEvent.click(screen.getByTestId('integration-session-back-button'))
-    expect(mocks.navigate).toHaveBeenCalledWith({
-      to: '/agents/$slug/chat/$integrationId',
-      params: { slug: 'target-agent', integrationId: 'int-1' },
-      search: { session: 'int-session' },
-    })
-  })
-
-  it('still offers the way back before the integration loads', () => {
-    mocks.integration = undefined
-    render(<SessionView agentSlug="target-agent" sessionId="int-session" />)
-
-    expect(screen.getByTestId('integration-session-banner')).toHaveTextContent('Session from agent integration')
-  })
-
-  it('draws no integration bar for an ordinary session', () => {
-    mocks.integrationId = null
-    render(<SessionView agentSlug="target-agent" sessionId="s1" />)
-
-    expect(screen.queryByTestId('integration-session-banner')).toBeNull()
+    // A top banner would also stop the transcript scrolling under the glass header (globals.css).
+    expect(container.querySelector('[data-top-banner]')).toBeNull()
   })
 })
 
 describe('SessionView fork provenance', () => {
-  it('draws no header bar for a fork; the thread marks the fork point instead', () => {
+  it('draws no bar above the chat for a fork; the thread marks the fork point instead', () => {
     mocks.session = { id: 'fork-1', agentSlug: 'agent-a', name: 'Pricing (fork)', forkedFromSessionId: 'src-1', forkedFromSessionName: 'Pricing' }
     render(<SessionView agentSlug="agent-a" sessionId="fork-1" />)
 
