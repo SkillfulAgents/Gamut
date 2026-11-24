@@ -24,7 +24,7 @@ import { Copy, Check, Eye, EyeOff } from 'lucide-react'
 import { IMESSAGE_PHONE_E164, type ChatProvider } from '@shared/lib/chat-integrations/config-schema'
 import { slackAppManifest, type SlackAppIdentity } from '@shared/lib/chat-integrations/slack-manifest'
 import { useAgent } from '@renderer/hooks/use-agents'
-import { SlackAppIconAside } from './slack-app-appearance'
+import { slackAppIconStep } from './slack-app-appearance'
 import { slackAppIdentity } from './slack-app-identity'
 
 function generateSlackManifest(app: SlackAppIdentity): string {
@@ -272,6 +272,11 @@ export function ChatIntegrationSetupForm({
     content: field('botToken', { verify: true }),
     fields: ['botToken'],
   }
+  // The agent's avatar as the app's icon: a step only for an agent that has one.
+  const iconStep = (options?: { withColor?: boolean }): ChatSetupStep[] => {
+    const step = slackAppIconStep(agent, { name: integrationName, ...options })
+    return step ? [step] : []
+  }
 
   const providerSteps: ChatSetupStep[] = provider === 'telegram' ? [
     {
@@ -348,10 +353,11 @@ export function ChatIntegrationSetupForm({
       subtitle: <>Open Slack’s app page and choose <strong>Create New App → From a manifest</strong>. Pick your workspace, then paste the manifest in place of Slack’s.</>,
       content: <>
         <IntegrationSetupWizardLink href={SLACK_APPS_URL}>Open api.slack.com/apps</IntegrationSetupWizardLink>
-        {agent && <SlackAppIconAside agent={agent} />}
       </>,
     },
     appTokenStep,
+    // On the page the app token comes from, so it follows it.
+    ...iconStep(),
     botTokenStep,
     optionsStep,
   ] : [
@@ -361,12 +367,13 @@ export function ChatIntegrationSetupForm({
       content: <>
         {leading}
         <IntegrationSetupWizardLink href={SLACK_APPS_URL}>Open api.slack.com/apps</IntegrationSetupWizardLink>
-        {agent && <SlackAppIconAside agent={agent} withColor />}
         <IntegrationSetupNote>Rather not add each setting yourself? {modeSwitch('Use a manifest instead', 'manifest')}</IntegrationSetupNote>
       </>,
     },
     { label: 'Turn on Socket Mode', subtitle: <>In Slack, go to <strong>Settings → Socket Mode</strong> and turn it on.</> },
     appTokenStep,
+    // An app made from scratch has no colour either.
+    ...iconStep({ withColor: true }),
     {
       label: 'Add the bot scopes',
       subtitle: <>In Slack, go to <strong>OAuth &amp; Permissions → Scopes → Bot Token Scopes</strong> and add each of these.</>,

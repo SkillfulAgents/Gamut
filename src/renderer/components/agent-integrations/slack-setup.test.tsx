@@ -44,16 +44,17 @@ beforeEach(() => {
 // A setup is one step per screen: these move between them, or jump to one by its name in the rail.
 const next = () => fireEvent.click(screen.getByTestId('integration-setup-next'))
 const goTo = (name: string) => fireEvent.click(screen.getByRole('button', { name }))
+/** The step on screen: the others stay mounted, hidden. */
+const step = () => screen.getByTestId('integration-setup-step')
 
 describe('SlackSetup', () => {
   it('sends an explicit off for threading turned off at setup, so the server default does not turn it back on', async () => {
     setup()
     fireEvent.click(await screen.findByTestId('slack-create-app'))
     fireEvent.change(await screen.findByLabelText('Signing Secret'), { target: { value: 'secret' } })
-    next()
     fireEvent.change(screen.getByLabelText('Bot Token'), { target: { value: 'xoxb-1' } })
     // The options are a step of their own, sent with Connect.
-    next()
+    goTo('Review settings')
     fireEvent.click(screen.getByRole('switch', { name: /Reply in thread/ }))
     fireEvent.click(screen.getByRole('button', { name: 'Connect' }))
     await waitFor(() => expect(state.requests[1]).toBeDefined())
@@ -63,8 +64,6 @@ describe('SlackSetup', () => {
   it('with a relay, creates the installation first and opens Slack with the webhook URL in the manifest', async () => {
     setup()
     await screen.findByTestId('slack-create-app')
-    // The icon is offered once there's an app to upload it to.
-    expect(screen.queryByTestId('slack-app-icon-download')).toBeNull()
     // No Socket Mode token to paste, and nothing to paste into until the app exists.
     expect(screen.queryByRole('button', { name: 'Paste the app token' })).toBeNull()
     goTo('Paste the bot token')
@@ -89,9 +88,9 @@ describe('SlackSetup', () => {
 
     goTo('Paste the secret')
     fireEvent.change(screen.getByLabelText('Signing Secret'), { target: { value: 'secret' } })
-    next()
+    goTo('Paste the bot token')
     fireEvent.change(screen.getByLabelText('Bot Token'), { target: { value: 'xoxb-1' } })
-    next()
+    goTo('Review settings')
     fireEvent.click(screen.getByRole('button', { name: 'Connect' }))
     await waitFor(() => expect(onClose).toHaveBeenCalled())
     expect(state.requests[1]).toEqual({ url: '/api/agent-integrations/int-9', method: 'PATCH', body: { status: 'active', showToolCalls: false, sessionTimeout: 6, config: { botToken: 'xoxb-1', signingSecret: 'secret', onlyMentioned: true, answerInThread: true, newSessionPerThread: true } } })
@@ -102,11 +101,31 @@ describe('SlackSetup', () => {
     await waitFor(() => expect(client.getQueryData(['agents', 'a'])).toBeTruthy())
     fireEvent.click(await screen.findByTestId('slack-create-app'))
     await waitFor(() => expect(fakeLoginWindow.navigate).toHaveBeenCalledOnce())
-    expect(await screen.findByTestId('slack-app-icon-download')).toHaveTextContent('Download icon')
     expect(state.requests[0].body.name).toBeUndefined()
     const manifest = JSON.parse(new URL(fakeLoginWindow.navigate.mock.calls[0][0]).searchParams.get('manifest_json')!)
     expect(manifest.display_information).toEqual({ name: 'Infra Agent', description: 'Keeps the servers up', background_color: slackBackgroundColor(avatarSource(AGENT.avatar as AgentAvatar).orb) })
     expect(manifest.features.bot_user.display_name).toBe('Infra Agent')
+  })
+
+  it('gives the icon a step of its own, after the secret copied from the same page in Slack', async () => {
+    setup()
+    await waitFor(() => expect(client.getQueryData(['agents', 'a'])).toBeTruthy())
+    // There before the app is: the download needs nothing from Slack.
+    await screen.findByTestId('slack-create-app')
+    const rail = Array.from(document.querySelectorAll('[role=dialog] aside ol button')).map(button => button.getAttribute('aria-label') ?? button.textContent)
+    expect(rail.map(label => label?.replace(/^\d+/, ''))).toEqual(['Create the app', 'Paste the secret', 'Add the icon', 'Paste the bot token', 'Review settings'])
+    goTo('Add the icon')
+    expect(step()).toHaveAttribute('data-step', '3')
+    expect(screen.getByTestId('slack-app-icon-download')).toHaveTextContent('Download icon')
+    // Beside it, the picture it saves: the icon's own SVG, on its ground.
+    expect(screen.getByTestId('slack-app-icon-thumbnail').getAttribute('src')).toMatch(/^data:image\/svg\+xml/)
+    // The preview shows the app as Slack will: this agent's name beside its icon.
+    expect(screen.getByTestId('slack-app-icon-preview').parentElement).toHaveTextContent('Infra Agent')
+    // The manifest already carries the colour, so only an app made from scratch is told to set it.
+    expect(step()).not.toHaveTextContent('background color')
+    // Optional: the step moves on without it.
+    next()
+    expect(step()).toHaveAttribute('data-step', '4')
   })
 
   it('falls back to Gamut Bot, with no colour or icon, for an agent without an avatar', async () => {
@@ -118,6 +137,7 @@ describe('SlackSetup', () => {
     const manifest = JSON.parse(new URL(fakeLoginWindow.navigate.mock.calls[0][0]).searchParams.get('manifest_json')!)
     expect(manifest.display_information).toEqual({ name: 'Gamut Bot' })
     expect(screen.queryByTestId('slack-app-icon-download')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Add the icon' })).toBeNull()
   })
 
   it('keeps a created installation’s form while the relay goes away and comes back', async () => {
@@ -167,6 +187,25 @@ describe('SlackSetup', () => {
     expect(screen.getByTestId('slack-webhooks-choice')).not.toBeChecked()
     next(); next()
     expect(screen.getByLabelText('App-Level Token')).toBeInTheDocument()
+  })
+
+  it('has the icon step in both Socket Mode setups, with the colour for an app made from scratch', async () => {
+    state.relayAvailable = false
+    setup()
+    await waitFor(() => expect(client.getQueryData(['agents', 'a'])).toBeTruthy())
+    const color = slackBackgroundColor(avatarSource(AGENT.avatar as AgentAvatar).orb)
+    // From a manifest: after the app token, which comes from the same page.
+    goTo('Add the icon')
+    expect(step()).toHaveAttribute('data-step', '4')
+    expect(screen.getByTestId('slack-app-icon-download')).toBeInTheDocument()
+    expect(screen.queryByText(color)).toBeNull()
+
+    goTo('Copy the manifest')
+    fireEvent.click(screen.getByRole('button', { name: 'Set up from scratch' }))
+    goTo('Add the icon')
+    expect(step()).toHaveAttribute('data-step', '4')
+    expect(step()).toHaveTextContent('and set the background color')
+    expect(screen.getByText(color)).toBeInTheDocument()
   })
 })
 

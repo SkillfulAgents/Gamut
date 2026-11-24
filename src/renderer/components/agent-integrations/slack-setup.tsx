@@ -15,7 +15,7 @@ import { ChatIntegrationSetupForm, ChatSetupBehavior, DEFAULT_CHAT_SETUP_BEHAVIO
 import { IntegrationSetupAdvanced, IntegrationSetupFeedback, IntegrationSetupField, IntegrationSetupNote, IntegrationSetupToggle } from './integration-setup-layout'
 import { EXTERNAL_BUTTON, ExternalArrow, IntegrationSetupWizard } from './integration-setup-wizard'
 import type { IntegrationSetupProps } from './setup-types'
-import { SlackAppIconAside } from './slack-app-appearance'
+import { SlackAppIconAside, slackAppIconStep } from './slack-app-appearance'
 import { slackAppIdentity } from './slack-app-identity'
 import { SlackProvisionedSetupForm } from './slack-provisioned-setup'
 
@@ -90,6 +90,7 @@ function SlackWebhookSetupForm({ agentSlug, onClose, choice, onCreated, initial 
   const { data: agent } = useAgent(agentSlug)
   const app = slackAppIdentity(agent, name)
   const webhooksChoice = choice(!!created)
+  const iconStep = slackAppIconStep(agent, { name })
 
   // The URL must exist before the app, so the first click creates the
   // installation, then opens Slack with it filled in. The tab opens inside
@@ -164,13 +165,11 @@ function SlackWebhookSetupForm({ agentSlug, onClose, choice, onCreated, initial 
         subtitle: created
           ? <>In Slack, go to <strong>Basic Information → App Credentials</strong> and copy the <strong>Signing Secret</strong>.</>
           : <>Once you’ve created the app, go to <strong>Basic Information → App Credentials</strong> in Slack and copy the <strong>Signing Secret</strong>.</>,
-        content: <>
-          <IntegrationSetupField id="setup-signingSecret" label="Signing Secret" type="password" autoComplete="new-password" value={signingSecret}
-            onChange={event => setSigningSecret(event.target.value)} placeholder="Paste signing secret" disabled={!created} />
-          {/* Uploaded on the page the Signing Secret is copied from, so offered while they're on it, once there's an app to upload it to. */}
-          {created && agent && <SlackAppIconAside agent={agent} />}
-        </>,
+        content: <IntegrationSetupField id="setup-signingSecret" label="Signing Secret" type="password" autoComplete="new-password" value={signingSecret}
+          onChange={event => setSigningSecret(event.target.value)} placeholder="Paste signing secret" disabled={!created} />,
       },
+      // Uploaded on the page the Signing Secret is copied from, so it comes while they're on it.
+      ...(iconStep ? [iconStep] : []),
       {
         label: 'Paste the bot token',
         // It follows the Signing Secret, which has already said the app comes first.
