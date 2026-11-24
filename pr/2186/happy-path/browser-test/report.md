@@ -1,7 +1,7 @@
 [TEST_PASS]
-[REASON] Sent a browser-task prompt to agent QA-20261124-082346-t4yp and checked that the reply names the page title "Example Domain".
-[STEP] Step 1: Navigated to http://localhost:47891 — the Gamut home page loaded with the sidebar listing agents QA-20261124-082346-t4yp and QA-20261124-082345-hcu2. No errors.
-[STEP] Step 2: Clicked the "QA-20261124-082346-t4yp" agent in the sidebar — its agent page opened (URL /agents/qa-20261124-082346-t4yp-8uc0dnk4pa), status "idle", with an empty message input. Screenshot taken of the opened agent.
-[STEP] Step 3: Typed "Open a browser and go to https://example.com. Tell me the page title." into the message input and clicked Send — the message posted, a new session "Check Example.com Page Title" was created, and the agent went to "Working..." status.
-[STEP] Step 4: Waited up to 3 minutes for a response — the reply appeared within the window (the agent showed "Worked for 4s · 3 tool calls"), and the agent returned to idle.
-[STEP] Step 5: Verified the response text: "The page title of https://example.com is "Example Domain". I closed the browser afterward." The text "Example Domain" is present, so the check passes. Screenshot taken of the response.
+[REASON] Sent the browser-task prompt to agent QA-20261124-084714-s08m and verified the reply reports the example.com page title as "Example Domain".
+[STEP] Step 1: Navigated to http://localhost:47891 — Gamut app loaded with the sidebar listing "QA-20261124-084714-s08m" under Your Agents.
+[STEP] Step 2: Clicked the "QA-20261124-084714-s08m" agent in the sidebar — navigated to /agents/qa-20261124-084714-s08m-7pl2b5e04x, showing an empty chat composer and status "idle".
+[STEP] Step 3: Typed "Open a browser and go to https://example.com. Tell me the page title." into the composer and pressed Enter — Enter only inserted a newline and did not send. I then clicked the Send button, which created session "Check Example.com Page Title" and showed the message in the transcript with status "Working...". This is consistent with the composer placeholder "Press cmd+enter to send", so I did not log it as a bug.
+[STEP] Step 4: Waited for the response — the agent finished within about 5 seconds of sending (the wait_for call returned once "Example Domain" appeared, well inside the 3-minute limit). The turn showed "Worked for 5s · 3 tool calls · 164,575 tokens" and the agent status returned to "idle".
+[STEP] Step 5: The agent's reply reads "The page title at https://example.com is "Example Domain". I've closed the browser." — the expected text is present. Screenshot taken (step5-response-verified.png).

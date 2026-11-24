@@ -1,8 +1,10 @@
 [TEST_PASS]
-[REASON] Opened agent QA-20261124-082345-hcu2 at http://localhost:47891, confirmed it was idle, sent "Hello! What is 2+2?", and verified the reply mentions 4.
-[STEP] Step 1, navigate to http://localhost:47891 — the Gamut app loaded with the sidebar listing QA-20261124-082345-hcu2 and QA-20261124-082346-t4yp.
-[STEP] Step 2, click the QA-20261124-082345-hcu2 agent in the sidebar — the agent page opened at /agents/qa-20261124-082345-hcu2-l1xt55fhap.
-[STEP] Step 3, verify status is running or idle — the status badge in the header reads "idle", which passes. Screenshot taken (step2-agent-idle.png).
-[STEP] Step 4, send "Hello! What is 2+2?" — the message was typed into the composer and sent, and a new session "Basic Arithmetic Question Check" was created.
-[STEP] Step 5, wait up to 3 minutes for a response — the response was already in the message list on the first check after sending, so no wait was needed.
-[STEP] Step 6, verify the response mentions "4" and take a screenshot — the assistant reply reads "2 + 2 = 4.", which passes. Screenshot taken (step6-response.png).
+[REASON] Sent "Hello! What is 2+2?" to agent QA-20261124-084713-1g15 in the browser and confirmed the reply contains 4.
+[STEP] 1. Navigated to http://localhost:47891 — the Gamut home page loaded with the sidebar listing QA-20261124-084713-1g15.
+[STEP] 2. Clicked QA-20261124-084713-1g15 in the sidebar — its agent page opened (URL /agents/qa-20261124-084713-1g15-2xwuaemu1e). Screenshot: step2-agent-selected.png.
+[STEP] 3. Checked the agent status — the header shows "idle", which satisfies the running-or-idle requirement.
+[STEP] 4. Typed "Hello! What is 2+2?" in the composer and clicked Send — a new session "Basic Arithmetic Greeting Check" opened, showing the message and "Working..." with the agent status "working". Screenshot: step4-message-typed.png.
+[STEP] 5. Waited for "Working..." to disappear (up to 180 seconds) — the reply "2 + 2 = 4." appeared and the agent returned to "idle" well within the limit.
+[STEP] 6. Verified the response mentions 4 — "2 + 2 = 4." is shown in the chat. Screenshot: step6-response-verified.png.
+
+Console showed 0 errors on every snapshot (4 WebGL driver warnings and one "Banner not shown" info message). No bugs found.
