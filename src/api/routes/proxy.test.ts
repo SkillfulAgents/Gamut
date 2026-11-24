@@ -103,39 +103,30 @@ vi.mock('@shared/lib/proxy/policy-resolver', () => ({
   resolveApiPolicy: (...args: unknown[]) => mockResolveApiPolicy(...args),
 }))
 
-// The agent's reviews, as its router answers the actor's review ops: a
-// request resolves to its outcome; resume and settle follow a recheck.
+// The agent's reviews: a request resolves to its outcome; resume and settle
+// follow a recheck. The mocks are told which agent's reviews were asked.
 const mockResumeReview = vi.fn(async (..._args: unknown[]): Promise<string> => 'allow')
 const mockSettleReview = vi.fn(async (_slug: string, _id: string, decision: string): Promise<string> => decision)
-vi.mock('@shared/lib/proxy/review-manager', () => ({
-  reviewManager: {
-    request: (agentSlug: string, details: object, options: unknown) => mockRequestReview({ ...details, agentSlug }, options),
-    withdraw: vi.fn(),
-    resume: (...args: unknown[]) => mockResumeReview(...args),
-    settle: (slug: string, id: string, decision: string) => mockSettleReview(slug, id, decision),
-    takeDecisionDetail: vi.fn(async () => ({})),
-  },
-}))
-// The actor's review ops read the agent's own reviews: they answer as the router mock above does.
 vi.mock('@shared/lib/proxy/agent-reviews', async (importOriginal) => {
-  const { reviewsAnsweredByRouterMock } = await import('@shared/lib/agent-actor/testing/router-shaped-mocks')
-  const { reviewManager } = await import('@shared/lib/proxy/review-manager')
-  return reviewsAnsweredByRouterMock(await importOriginal<typeof import('@shared/lib/proxy/agent-reviews')>(), reviewManager)
+  const { agentReviewsWith } = await import('@shared/lib/agent-actor/testing/agent-store-mocks')
+  return agentReviewsWith(await importOriginal<typeof import('@shared/lib/proxy/agent-reviews')>(), (agentSlug) => ({
+    request: (details, options) => mockRequestReview({ ...details, agentSlug }, options),
+    withdraw: vi.fn(),
+    resume: (id) => mockResumeReview(agentSlug, id),
+    settle: (id, decision) => mockSettleReview(agentSlug, id, decision),
+    takeDecisionDetail: vi.fn(async () => ({})),
+  }))
 })
 
-// The agent's account re-auth waits, as its router answers the actor's ops:
-// a request resolves to how the wait ended.
-vi.mock('@shared/lib/proxy/account-reauth-manager', () => ({
-  accountReauthManager: {
-    request: (agentSlug: string, details: object, options: unknown) => mockRequestReauth({ ...details, agentSlug }, options),
-    withdraw: vi.fn(),
-  },
-}))
-// The actor's re-auth ops read the agent's own waits: they answer as the router mock above does.
+// The agent's account re-auth waits: a request resolves to how the wait ended.
 vi.mock('@shared/lib/proxy/reauth-waits', async (importOriginal) => {
-  const { reauthWaitsAnsweredByRouterMocks } = await import('@shared/lib/agent-actor/testing/router-shaped-mocks')
-  const { accountReauthManager } = await import('@shared/lib/proxy/account-reauth-manager')
-  return reauthWaitsAnsweredByRouterMocks(await importOriginal<typeof import('@shared/lib/proxy/reauth-waits')>(), { account: accountReauthManager })
+  const { reauthWaitsWith } = await import('@shared/lib/agent-actor/testing/agent-store-mocks')
+  return reauthWaitsWith(await importOriginal<typeof import('@shared/lib/proxy/reauth-waits')>(), {
+    account: (agentSlug) => ({
+      request: (details, options) => mockRequestReauth({ ...details, agentSlug }, options),
+      withdraw: vi.fn(),
+    }),
+  })
 })
 
 // Mock analytics

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createFakeAgentActor, createFakeRegistry } from './fake-agent-actor'
-import { hostFromManagerMock, allAgentsFromManagerMock } from './host-from-manager-mock'
+import { hostFromManagerMock } from './host-from-manager-mock'
 
 describe('createFakeAgentActor', () => {
   it('gives every method a mock on first access and keeps it', async () => {
@@ -88,31 +88,5 @@ describe('hostFromManagerMock', () => {
     host.onBeforeContainerStop = hook
     expect(manager.onBeforeContainerStop).toBe(hook)
     expect(host.createRuntime('a')).toBe(runtime)
-  })
-})
-
-describe('allAgentsFromManagerMock', () => {
-  it('answers what is asked of every agent from the manager method of old, and the rest for real', async () => {
-    const manager = {
-      hasRunningAgents: vi.fn().mockReturnValue(true),
-      getRunningAgentIds: vi.fn().mockReturnValue(['a']),
-      stopAll: vi.fn(),
-    }
-    const actual = { wakeAgents: vi.fn(async () => {}), hasRunningAgents: vi.fn(async () => false) }
-    const agents = allAgentsFromManagerMock(manager, actual) as {
-      hasRunningAgents(): Promise<boolean>
-      runningAgentSlugs(): Promise<string[]>
-      stopAllAgents(): Promise<void>
-      wakeAgents(slugs: string[]): Promise<void>
-    }
-
-    await expect(agents.hasRunningAgents()).resolves.toBe(true)
-    await expect(agents.runningAgentSlugs()).resolves.toEqual(['a'])
-    await agents.stopAllAgents()
-    expect(manager.stopAll).toHaveBeenCalledOnce()
-    // Not spelled by the mock: the real one.
-    await agents.wakeAgents(['a'])
-    expect(actual.wakeAgents).toHaveBeenCalledWith(['a'])
-    expect(actual.hasRunningAgents).not.toHaveBeenCalled()
   })
 })

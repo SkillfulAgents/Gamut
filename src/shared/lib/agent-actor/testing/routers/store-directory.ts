@@ -15,9 +15,9 @@
  * complete. Only an actor that runs in this process has stores here: one that
  * forwards to its agent elsewhere keeps them where the agent runs.
  */
-import type { AgentState } from './agent-state'
-import { agentRegistry, isAgentRegistryInitialized } from './registry'
-import type { AgentActor, AgentSlug } from './types'
+import type { AgentState } from '../../agent-state'
+import { agentRegistry, isAgentRegistryInitialized } from '../../registry'
+import type { AgentActor, AgentSlug } from '../../types'
 
 export interface AgentStoreDirectory<T> {
   /** The store of one agent, making its actor on first use. Never does I/O. */

@@ -1,14 +1,6 @@
-import { AgentStores, type AgentStoreDirectory } from '@shared/lib/agent-actor/store-directory'
-import type { McpReauthDetails, McpReauthWaits, ReauthOutcome } from './reauth-waits'
-import { awaitReauth } from './reauth-request'
-
-export {
-  MCP_REAUTH_TIMEOUT_MS,
-  createMcpReauthWaits,
-  type McpReauthDetails,
-  type McpReauthRequest,
-  type McpReauthWaits,
-} from './reauth-waits'
+import { AgentStores, type AgentStoreDirectory } from './store-directory'
+import type { McpReauthDetails, McpReauthWaits, ReauthOutcome } from '@shared/lib/proxy/reauth-waits'
+import { awaitReauth } from '@shared/lib/proxy/reauth-request'
 
 /**
  * The router in front of every agent's MCP re-auth waits, for tests: the

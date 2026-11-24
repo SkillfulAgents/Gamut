@@ -10,9 +10,8 @@
  * forwards the host-level methods as they are.
  *
  * What the manager answered about every agent at once (is anything running,
- * stop them all) is asked of the agents' actors now, in `all-agents.ts`:
- * `allAgentsFromManagerMock` presents the same manager-shaped mock as that
- * module.
+ * stop them all) is asked of the agents' actors now, in `all-agents.ts`: a
+ * test mocks that module by its own names.
  *
  * Usage inside a `vi.mock` factory:
  *
@@ -72,38 +71,9 @@ const HOST_METHODS = [
   'agentHostPath',
 ] as const
 
-/** What `all-agents.ts` exports, by the manager method that used to answer it. */
-const ALL_AGENTS: Record<string, string> = {
-  hasRunningAgents: 'hasRunningAgents',
-  runningAgentSlugs: 'getRunningAgentIds',
-  agentsHoldingDrives: 'getAgentIdsHoldingDrives',
-  markRunningAgentsStale: 'markAgentsStale',
-  wakeAgents: 'initializeAgents',
-  stopAllAgents: 'stopAll',
-}
-
 /** Host-level methods whose manager counterpart had a different name. */
 const RENAMED_HOST: Record<string, string> = {
   clearRuntimes: 'clearClients',
-}
-
-/**
- * The questions asked of every agent at once, answered by a manager-shaped
- * mock: each export of `all-agents.ts` calls the manager method that used to
- * answer it, and one the mock does not spell is answered for real (`actual`).
- *
- *   vi.mock('@shared/lib/agent-actor/all-agents', async (importOriginal) => {
- *     const { allAgentsFromManagerMock } = await import('@shared/lib/agent-actor/testing/host-from-manager-mock')
- *     return allAgentsFromManagerMock({ hasRunningAgents: mockHasRunningAgents, stopAll: mockStopAll }, await importOriginal())
- *   })
- */
-export function allAgentsFromManagerMock(manager: ManagerShapedMock, actual: unknown): Record<string, unknown> {
-  const answers: Record<string, unknown> = { ...(actual as Record<string, unknown>) }
-  for (const [name, managerName] of Object.entries(ALL_AGENTS)) {
-    const fn = manager[managerName]
-    if (typeof fn === 'function') answers[name] = async (...args: unknown[]) => (fn as AnyFn).call(manager, ...args)
-  }
-  return answers
 }
 
 export function hostFromManagerMock(manager: ManagerShapedMock): Record<string, unknown> {

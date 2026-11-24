@@ -107,7 +107,7 @@ vi.mock('@shared/lib/config/settings', () => ({
 }))
 
 const mockHasRunningAgents = vi.fn()
-const mockGetRunningAgentIds = vi.fn()
+const mockRunningAgentSlugs = vi.fn()
 const mockClearClients = vi.fn()
 const mockEnsureImageReady = vi.fn()
 const mockGetReadiness = vi.fn()
@@ -116,13 +116,11 @@ const mockMarkRuntimeUnavailable = vi.fn()
 const mockUpdateStartProgress = vi.fn()
 
 // What the route asks of every agent at once (is anything running, which ones).
-vi.mock('@shared/lib/agent-actor/all-agents', async (importOriginal) => {
-  const { allAgentsFromManagerMock } = await import('@shared/lib/agent-actor/testing/host-from-manager-mock')
-  return allAgentsFromManagerMock({
-    hasRunningAgents: (...args: unknown[]) => mockHasRunningAgents(...args),
-    getRunningAgentIds: (...args: unknown[]) => mockGetRunningAgentIds(...args),
-  }, await importOriginal())
-})
+vi.mock('@shared/lib/agent-actor/all-agents', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@shared/lib/agent-actor/all-agents')>()),
+  hasRunningAgents: async (...args: unknown[]) => mockHasRunningAgents(...args),
+  runningAgentSlugs: async (...args: unknown[]) => mockRunningAgentSlugs(...args),
+}))
 
 // The route reaches the host through `@shared/lib/agent-actor`, which re-exports
 // the container-host singleton and runs the real agent registry against it;
@@ -324,7 +322,7 @@ function setupDefaults() {
     return s
   })
   mockHasRunningAgents.mockReturnValue(false)
-  mockGetRunningAgentIds.mockResolvedValue([])
+  mockRunningAgentSlugs.mockResolvedValue([])
   mockCheckAllRunnersAvailability.mockResolvedValue([])
   mockGetAnthropicApiKeyStatus.mockReturnValue({ isConfigured: true, source: 'settings' })
   mockGetComposioApiKeyStatus.mockReturnValue({ isConfigured: false, source: 'none' })
@@ -935,7 +933,7 @@ describe('settings route', () => {
   describe('cannot change runner while agents running', () => {
     it('returns 409 when changing containerRunner while agents are running', async () => {
       mockHasRunningAgents.mockReturnValue(true)
-      mockGetRunningAgentIds.mockResolvedValue(['agent-1', 'agent-2'])
+      mockRunningAgentSlugs.mockResolvedValue(['agent-1', 'agent-2'])
 
       const res = await putSettings({
         container: { containerRunner: 'podman' },
@@ -951,7 +949,7 @@ describe('settings route', () => {
 
     it('returns 409 when changing resourceLimits while agents are running', async () => {
       mockHasRunningAgents.mockReturnValue(true)
-      mockGetRunningAgentIds.mockResolvedValue(['agent-1'])
+      mockRunningAgentSlugs.mockResolvedValue(['agent-1'])
 
       const res = await putSettings({
         container: { resourceLimits: { cpu: 8, memory: '16g' } },

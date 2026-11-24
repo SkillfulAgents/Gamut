@@ -54,9 +54,9 @@ vi.mock('@shared/lib/utils/file-storage', () => ({ resolveAgentId: vi.fn() }))
 vi.mock('@shared/lib/proxy/token-store', () => ({ validateProxyToken: vi.fn() }))
 
 import mcpReauth from './mcp-reauth'
-import { mcpReauthManager } from '@shared/lib/proxy/mcp-reauth-manager'
+import { mcpReauthManager } from '@shared/lib/agent-actor/testing/routers/mcp-reauth-manager'
 import { agentRegistry } from '@shared/lib/agent-actor'
-import { userInputRequestManager } from '@shared/lib/tools/requests/request-manager'
+import { userInputRequestManager } from '@shared/lib/agent-actor/testing/routers/request-manager'
 
 type TestEnv = { Variables: { user: { id: string }; agentId: string } }
 let app: Hono<TestEnv>

@@ -36,7 +36,7 @@ import type { HostToolResult } from '../host-port'
 import { runtimeCapabilities } from '@shared/lib/facts/capabilities'
 import { declareServerCapabilities } from '@shared/lib/facts/server-facts'
 import { MAIN_THREAD_ONLY_TOOL_MESSAGE } from '../../../../../agent-container/src/main-thread-tools'
-import { userInputRequestManager } from '@shared/lib/tools/requests/request-manager'
+import { userInputRequestManager } from '@shared/lib/agent-actor/testing/routers/request-manager'
 import * as toolRegistry from '@shared/lib/tools/registry'
 
 const SESSION_ID = 'test-session-1'

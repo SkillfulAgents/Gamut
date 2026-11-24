@@ -1,14 +1,6 @@
-import { AgentStores, type AgentStoreDirectory } from '@shared/lib/agent-actor/store-directory'
-import type { AccountReauthDetails, AccountReauthWaits, ReauthOutcome } from './reauth-waits'
-import { awaitReauth } from './reauth-request'
-
-export {
-  ACCOUNT_REAUTH_TIMEOUT_MS,
-  createAccountReauthWaits,
-  type AccountReauthDetails,
-  type AccountReauthRequest,
-  type AccountReauthWaits,
-} from './reauth-waits'
+import { AgentStores, type AgentStoreDirectory } from './store-directory'
+import type { AccountReauthDetails, AccountReauthWaits, ReauthOutcome } from '@shared/lib/proxy/reauth-waits'
+import { awaitReauth } from '@shared/lib/proxy/reauth-request'
 
 /**
  * The router in front of every agent's account re-auth waits, for tests: the

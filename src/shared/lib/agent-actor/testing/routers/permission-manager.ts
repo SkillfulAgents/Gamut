@@ -9,9 +9,9 @@
  * directly. A read for an agent that has no actor finds nothing in memory; a
  * check reads the agent's persisted grants from settings through its store.
  */
-import { AgentStores, type AgentStoreDirectory } from '@shared/lib/agent-actor/store-directory'
-import { AgentComputerUse } from './agent-permissions'
-import type { ComputerUsePermissionLevel, PermissionGrant, PermissionGrantType } from './types'
+import { AgentStores, type AgentStoreDirectory } from './store-directory'
+import { AgentComputerUse } from '@shared/lib/computer-use/agent-permissions'
+import type { ComputerUsePermissionLevel, PermissionGrant, PermissionGrantType } from '@shared/lib/computer-use/types'
 
 export class ComputerUsePermissionManager {
   private readonly agents = new AgentStores<AgentComputerUse>('computer-use permissions', (state) => state.computerUse)

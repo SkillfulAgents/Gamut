@@ -93,9 +93,6 @@ vi.mock('./health-monitor', () => ({
 }))
 
 vi.mock('@shared/lib/computer-use/executor', () => ({ endComputerUseSessions: vi.fn().mockResolvedValue(undefined) }))
-vi.mock('@shared/lib/computer-use/permission-manager', () => ({
-  computerUsePermissionManager: { getActiveApp: () => null, clearActiveApp: vi.fn() },
-}))
 vi.mock('@shared/lib/services/agent-service', () => ({}))
 vi.mock('@shared/lib/composio/client', () => ({ isPlatformComposioActive: () => false, isPlatformComposioActiveFrom: () => false }))
 vi.mock('@shared/lib/services/timezone-resolver', () => ({ resolveTimezoneForAgent: () => 'UTC' }))

@@ -16,14 +16,14 @@
  * recording host port and a runtime with no container; `sessions` replaces
  * any of those for a slug.
  */
-import { accountReauthManager } from '@shared/lib/proxy/account-reauth-manager'
-import { mcpReauthManager } from '@shared/lib/proxy/mcp-reauth-manager'
-import { reviewManager } from '@shared/lib/proxy/review-manager'
-import { computerUsePermissionManager } from '@shared/lib/computer-use/permission-manager'
-import { userInputRequestManager } from '@shared/lib/tools/requests/request-manager'
+import { accountReauthManager } from '@shared/lib/agent-actor/testing/routers/account-reauth-manager'
+import { mcpReauthManager } from '@shared/lib/agent-actor/testing/routers/mcp-reauth-manager'
+import { reviewManager } from '@shared/lib/agent-actor/testing/routers/review-manager'
+import { computerUsePermissionManager } from '@shared/lib/agent-actor/testing/routers/permission-manager'
+import { userInputRequestManager } from '@shared/lib/agent-actor/testing/routers/request-manager'
 import { createAgentState, releaseAgentState, type AgentState, type AgentStateHooks } from '../agent-state'
 import type { SessionsRuntime } from '../live/live-sessions'
-import type { AgentStoreDirectory } from '../store-directory'
+import type { AgentStoreDirectory } from '@shared/lib/agent-actor/testing/routers/store-directory'
 import type { AgentSlug } from '../types'
 import { createInMemorySessionStore } from './in-memory-session-store'
 import { createRecordingHostPort } from './recording-host-port'

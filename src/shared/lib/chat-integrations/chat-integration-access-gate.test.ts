@@ -42,14 +42,13 @@ vi.mock('@shared/lib/container/container-host', async () => {
   return { containerHost: hostFromManagerMock(containerManager) }
 })
 
-vi.mock('@shared/lib/proxy/review-manager', () => ({
-  reviewManager: { submitDecision: vi.fn() },
-}))
-// The actor's review ops read the agent's own reviews: they answer as the router mock above does.
+// The agent's reviews: a decision submitted to them. The mock is told which agent's.
+const mockSubmitReview = vi.hoisted(() => vi.fn())
 vi.mock('@shared/lib/proxy/agent-reviews', async (importOriginal) => {
-  const { reviewsAnsweredByRouterMock } = await import('@shared/lib/agent-actor/testing/router-shaped-mocks')
-  const { reviewManager } = await import('@shared/lib/proxy/review-manager')
-  return reviewsAnsweredByRouterMock(await importOriginal<typeof import('@shared/lib/proxy/agent-reviews')>(), reviewManager)
+  const { agentReviewsWith } = await import('@shared/lib/agent-actor/testing/agent-store-mocks')
+  return agentReviewsWith(await importOriginal<typeof import('@shared/lib/proxy/agent-reviews')>(), (agentSlug) => ({
+    submit: (...args) => mockSubmitReview(agentSlug, ...args),
+  }))
 })
 
 vi.mock('@shared/lib/services/agent-service', () => ({
@@ -61,7 +60,6 @@ import { registerTasks } from '@shared/lib/background-work/testing/register-task
 
 beforeEach(() => registerTasks(agentIntegrationManager))
 import { agentExists } from '@shared/lib/services/agent-service'
-import { reviewManager } from '@shared/lib/proxy/review-manager'
 import {
   getChatAccess,
   approveChatAccess,
@@ -321,7 +319,7 @@ describe('chat-integration inbound access gate', () => {
 // isChatAllowed before any review/resolve logic, failing closed when the
 // chat id is missing (undefined → '' → not allowed).
 //
-// Spy: reviewManager.submitDecision — hit on the review: branch immediately
+// Spy: the agent's reviews' `submit` — hit on the review: branch immediately
 // after the gate, so it's the cheapest probe for "did the handler run?"
 // ---------------------------------------------------------------------------
 
@@ -336,7 +334,7 @@ describe('chat-integration callback access gate', () => {
     migrate(testDb, { migrationsFolder: path.join(process.cwd(), 'src/shared/lib/db/migrations') })
     seedIntegration(true)
 
-    vi.mocked(reviewManager.submitDecision).mockReset()
+    mockSubmitReview.mockReset()
     vi.spyOn(console, 'error').mockImplementation(() => {})
 
     mgr.connections.clear()
@@ -359,10 +357,10 @@ describe('chat-integration callback access gate', () => {
 
     await callback('c1')
 
-    expect(reviewManager.submitDecision).toHaveBeenCalledTimes(1)
+    expect(mockSubmitReview).toHaveBeenCalledTimes(1)
     // Bound to the integration's agent: a caller-supplied review id must not be
     // decidable through another agent's chat.
-    expect(reviewManager.submitDecision).toHaveBeenCalledWith('test-agent', 'test-review', 'allow', undefined)
+    expect(mockSubmitReview).toHaveBeenCalledWith('test-agent', 'test-review', 'allow', undefined)
   })
 
   it('revoked chat → silently dropped before review/resolve', async () => {
@@ -372,19 +370,19 @@ describe('chat-integration callback access gate', () => {
 
     await callback('c1')
 
-    expect(reviewManager.submitDecision).not.toHaveBeenCalled()
+    expect(mockSubmitReview).not.toHaveBeenCalled()
   })
 
   it('unknown chat → silently dropped (no row)', async () => {
     await callback('unknown-chat')
 
-    expect(reviewManager.submitDecision).not.toHaveBeenCalled()
+    expect(mockSubmitReview).not.toHaveBeenCalled()
   })
 
   it('chatId undefined → fails closed (empty string is not an allowed chat)', async () => {
     // Even if there were a row for '', the gate must reject it.
     await callback(undefined)
 
-    expect(reviewManager.submitDecision).not.toHaveBeenCalled()
+    expect(mockSubmitReview).not.toHaveBeenCalled()
   })
 })
