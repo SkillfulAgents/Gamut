@@ -17,11 +17,13 @@ export function channelSetupTarget(provider: IntegrationSetupProvider, integrati
 }
 
 /** Capture the installation on open: a new multi-step form keeps its place when it creates its first record. */
-export function ChannelSetupDialog({ agentSlug, target, integrations, onClose }: {
+export function ChannelSetupDialog({ agentSlug, target, integrations, onClose, allowDefer }: {
   agentSlug: string
   target: ChannelSetupTarget
   integrations?: PublicAgentIntegration[]
   onClose: () => void
+  /** Offer "Set this up later". Only creating an agent does: anywhere else, closing the dialog is the same thing. */
+  allowDefer?: boolean
 }) {
   const { provider, integrationId } = target
   const integration = integrations?.find(row => row.id === integrationId)
@@ -31,7 +33,7 @@ export function ChannelSetupDialog({ agentSlug, target, integrations, onClose }:
   }, [integrationId, integrations, integration, finished, onClose])
 
   if (!integrationId) return <AgentIntegrationSetupDialog agentSlug={agentSlug} provider={provider}
-    allowDefer onIntegrationCreated={onClose} onOpenChange={open => { if (!open) onClose() }} />
+    allowDefer={allowDefer} onIntegrationCreated={onClose} onOpenChange={open => { if (!open) onClose() }} />
 
   if (!integration || finished) return null
   return <Dialog open onOpenChange={open => { if (!open) onClose() }}>
@@ -40,7 +42,7 @@ export function ChannelSetupDialog({ agentSlug, target, integrations, onClose }:
       {integration.provisionedApp
         ? <ProvisionedAppCard integration={integration} />
         : provider.ConnectionSettings && <provider.ConnectionSettings integration={integration} />}
-      <DeferChannelButton agentSlug={agentSlug} provider={provider.slug} onClose={onClose} />
+      {allowDefer && <DeferChannelButton agentSlug={agentSlug} provider={provider.slug} onClose={onClose} />}
     </DialogContent>
   </Dialog>
 }

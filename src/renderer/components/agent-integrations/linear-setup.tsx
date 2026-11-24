@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { ExternalLink, Loader2 } from 'lucide-react'
+import { Loader2 } from 'lucide-react'
 import { useAgent } from '@renderer/hooks/use-agents'
 import { agentIntegrationKeys, useAgentIntegration, useAgentIntegrationSetup, useAgentIntegrationStatus, useAuthorizeAgentIntegration, useCreateAgentIntegration, useUpdateAgentIntegration } from '@renderer/hooks/use-agent-integrations'
 import { useLoginWindow } from '@renderer/hooks/use-login-window'
@@ -13,20 +13,22 @@ import type { PublicAgentIntegration } from '@shared/lib/agent-integrations/publ
 import { isPublicLinearIntegration, type PublicLinearIntegration } from '@shared/lib/task-manager-integrations/linear/public'
 import { useWebhookRelay } from '@renderer/hooks/use-webhook-relay'
 import { ToggleRow } from './integration-settings-controls'
-import { IntegrationSetupLayout, IntegrationSetupField, IntegrationSetupFeedback } from './integration-setup-layout'
+import { IntegrationSetupAdvanced, IntegrationSetupField, IntegrationSetupFeedback, IntegrationSetupToggle } from './integration-setup-layout'
+import { EXTERNAL_BUTTON, ExternalArrow, IntegrationSetupWizard, type IntegrationSetupWizardStep } from './integration-setup-wizard'
 import type { IntegrationSetupProps } from './setup-types'
 
 function ExternalButton({ href, children }: { href: string; children: React.ReactNode }) {
-  return <a className={buttonVariants({ variant: 'outline', size: 'sm' })} href={href} target="_blank" rel="noreferrer" onClick={event => {
+  return <a className={buttonVariants({ variant: 'outline', size: 'sm', className: EXTERNAL_BUTTON })} href={href} target="_blank" rel="noreferrer" onClick={event => {
     if (window.electronAPI) { event.preventDefault(); void window.electronAPI.openExternal(href) }
-  }}>{children}<ExternalLink className="h-3.5 w-3.5" /></a>
+  }}>{children}<ExternalArrow reveal /></a>
 }
 
 
 /** OAuth changes the connection step, while the setup frame remains shared. */
 export function LinearSetupForm({ agentSlug, onClose, initial }: IntegrationSetupProps) {
   const { data: agent } = useAgent(agentSlug)
-  const [name, setName] = useState<string | null>(initial?.name?.slice(0, 80) ?? null)
+  // No name field: the app takes the agent's name (or one an agent suggested); Linear's own form can change it.
+  const name = initial?.name?.slice(0, 80) ?? null
   const displayName = (name ?? agent?.name ?? agentSlug).trim()
   const setup = useAgentIntegrationSetup(agentSlug, 'linear', displayName || undefined)
   const create = useCreateAgentIntegration()
@@ -42,6 +44,9 @@ export function LinearSetupForm({ agentSlug, onClose, initial }: IntegrationSetu
   const [authUrl, setAuthUrl] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [step, setStep] = useState(0)
+  // Linear's form has been opened from here: the step's own button has done its job and gives way to Next.
+  const [opened, setOpened] = useState(false)
   const connecting = useRef(false)
   const completed = useRef(false)
   const queryClient = useQueryClient()
@@ -76,6 +81,7 @@ export function LinearSetupForm({ agentSlug, onClose, initial }: IntegrationSetu
       const row = await create.mutateAsync({ agentSlug, provider: 'linear', name: displayName, config: { webhooks: true } })
       setIntegrationId(row.id)
       if (!isPublicLinearIntegration(row)) throw new Error('Could not load the Linear app setup')
+      setStep(1)
       await tab.navigate(row.linear.setup.creationUrl)
     } catch (error) {
       tab.close()
@@ -83,8 +89,20 @@ export function LinearSetupForm({ agentSlug, onClose, initial }: IntegrationSetu
     } finally { setBusy(false) }
   }
 
+  // Without webhooks there is nothing to create first: the button only opens Linear's form.
+  const openApp = async () => {
+    if (!creationUrl) return
+    const tab = prepareOAuthPopup()
+    setError(null); setOpened(true); setStep(1)
+    await tab.navigate(creationUrl)
+  }
+
+  const keysMissing = !credentialsSaved && (!clientId.trim() || !clientSecret.trim())
   const connect = async () => {
     if (connecting.current) return
+    // With webhooks the keys are a step back from Connect, and the app a step before that: say what's missing where it is.
+    if (viaRelay && !integrationId) { setError('Create the app in Linear first.'); setStep(0); return }
+    if (keysMissing) { setError('Paste the Client ID and Client secret first.'); setStep(1); return }
     connecting.current = true
     setBusy(true); setError(null); setAuthUrl(null)
     try {
@@ -104,56 +122,76 @@ export function LinearSetupForm({ agentSlug, onClose, initial }: IntegrationSetu
     finally { connecting.current = false; setBusy(false) }
   }
 
-  return <IntegrationSetupLayout
-    provider="linear" label="Linear" iconClassName="dark:invert"
-    instructions={<>
-      <ol className="list-decimal list-outside ml-5 space-y-2.5 text-sm font-normal text-foreground">
-        <li>Choose a name for this agent, then create its own private app in Linear.
-          <div className="mt-3">
-            {viaRelay && !integrationId
-              ? <Button size="sm" variant="outline" disabled={busy || !displayName || !setup.data} onClick={() => void createAppWithWebhooks()}>Create app in Linear<ExternalLink className="h-3.5 w-3.5" /></Button>
-              : creationUrl ? <ExternalButton href={creationUrl}>Create app in Linear</ExternalButton> : <span className="text-xs text-muted-foreground">Loading app setup…</span>}
-          </div>
-        </li>
-        {viaRelay
-          ? <li>Add an avatar and keep the app private. The callback and this agent’s webhook URL are prefilled: keep webhooks on, with inbox notifications, comments and issues.</li>
-          : <li>Add an avatar, keep the app private, and leave webhooks off. The callback URL is prefilled.</li>}
-        <li>{viaRelay
-          ? 'Copy the app’s Client ID and Client secret into this form, and its webhook Signing secret (strongly recommended: with it, only Linear can send this agent events).'
-          : 'Copy the app’s Client ID and Client secret into this form.'}</li>
-        <li>Click Connect, then authorize the agent in Linear. Choose the workspace and teams it can access.</li>
-      </ol>
-      <p className="text-xs text-muted-foreground">This agent will have its own identity. Mention it in comments or delegate issues to it to start work.</p>
-      {setup.data?.redirectUri && <details className="text-xs text-muted-foreground"><summary className="cursor-pointer">Callback URL</summary><p className="mt-2 break-all select-all">{setup.data.redirectUri}</p></details>}
-    </>}
-    feedback={<>
+  const appOpened = opened || !!integrationId
+  // What Connect does, beside it: the last step is about what to paste. Broken by hand, so it doesn't re-wrap
+  // when the button grows its arrow on hover.
+  const connectNote = credentialsSaved ? undefined : <>Connect opens Linear, where you{' '}<br />choose its workspace and teams.</>
+  const keys: IntegrationSetupWizardStep = {
+    label: 'Paste the keys',
+    subtitle: <>In Linear, open the app’s page and copy the <strong>Client ID</strong> and <strong>Client secret</strong>.</>,
+    content: <>
+      <IntegrationSetupField id="linear-client-id" label="Client ID" placeholder="Paste Client ID" value={clientId} onChange={event => { setClientId(event.target.value); setError(null) }} autoComplete="off" disabled={busy || credentialsSaved} />
+      <IntegrationSetupField id="linear-client-secret" label="Client secret" type="password" value={clientSecret} onChange={event => { setClientSecret(event.target.value); setError(null) }} autoComplete="new-password" placeholder={credentialsSaved ? 'Saved securely' : 'Paste Client secret'} disabled={busy || credentialsSaved} />
+    </>,
+    note: viaRelay ? undefined : connectNote,
+  }
+  // Its own step: it comes from another part of the app's page, and it is the one key that can be left out.
+  const signingSecret: IntegrationSetupWizardStep = {
+    label: 'Add the signing secret',
+    subtitle: <>On the same page, copy the webhook <strong>Signing secret</strong>. It lets this agent check that events really come from Linear.</>,
+    content: <IntegrationSetupField id="linear-webhook-secret" label="Webhook signing secret" type="password" value={webhookSecret} onChange={event => setWebhookSecret(event.target.value)} autoComplete="new-password"
+      placeholder={credentialsSaved ? 'Saved securely' : 'Paste signing secret'} disabled={busy || credentialsSaved}
+      hint="Strongly recommended. Without it, events aren’t verified." />,
+    note: connectNote,
+  }
+
+  return <IntegrationSetupWizard provider="linear" label="Linear"
+    description="Assign this agent issues, or mention it in comments."
+    step={step} onStepChange={setStep}
+    steps={[
+      {
+        label: 'Create the app',
+        // The link fills in everything the app needs (its name, that it's private, its webhooks), so there is nothing to set.
+        subtitle: <><strong>Create app in Linear</strong> opens Linear with the app’s settings filled in. Leave them as they are and create the app.</>,
+        // One thing to do, as in Slack's setup. The choice almost no one changes and the URL Linear's form already
+        // has wait under Advanced; opening Linear again is offered once it has been opened.
+        content: (appOpened || webhooksOffered || setup.data?.redirectUri) && <>
+          {appOpened && creationUrl && <div><ExternalButton href={creationUrl}>Create app in Linear</ExternalButton></div>}
+          <IntegrationSetupAdvanced flush>
+            {/* It decides how the app is created, so it is fixed once the account exists. */}
+            {webhooksOffered && <IntegrationSetupToggle id="linear-webhooks-choice" testId="linear-webhooks-choice" label="Use webhooks (recommended)"
+              description="Events that happen while this agent is offline arrive when it’s back. Without webhooks it uses a live connection and misses them."
+              checked={viaRelay} onCheckedChange={setWebhooksChosen} disabled={busy || !!integrationId} />}
+            {setup.data?.redirectUri && <div className="text-muted-foreground">Callback URL<p className="mt-1 break-all select-all text-foreground" data-testid="linear-setup-callback-url">{setup.data.redirectUri}</p></div>}
+          </IntegrationSetupAdvanced>
+        </>,
+        // The first click opens Linear (creating the account first, with webhooks); after that it's an ordinary Next.
+        action: appOpened ? undefined : {
+          label: 'Create app in Linear', busy, disabled: !displayName || !setup.data || (!viaRelay && !creationUrl), external: true, testId: 'linear-create-app',
+          onClick: () => void (viaRelay ? createAppWithWebhooks() : openApp()),
+        },
+      },
+      keys,
+      ...(viaRelay ? [signingSecret] : []),
+    ]}
+    feedback={(setup.error || error || linear?.authorizationMessage || refreshError || pending) && <>
       {setup.error && <IntegrationSetupFeedback state="error">{setup.error.message} <button className="underline" onClick={() => void setup.refetch()}>Try again</button></IntegrationSetupFeedback>}
       {(error || linear?.authorizationMessage || refreshError) && <IntegrationSetupFeedback state="error">{error ?? linear?.authorizationMessage ?? 'Could not check authorization. Reopen this integration to continue.'}</IntegrationSetupFeedback>}
       {pending && <IntegrationSetupFeedback state="pending">
-        <p>Waiting for authorization in Linear. This window will update when you’re connected.</p>
+        <p>Approve access in Linear. This window updates when you’re done.</p>
         {authUrl && <a href={authUrl} target="_blank" rel="noreferrer" className="mt-2 inline-block underline" onClick={event => {
           if (window.electronAPI) { event.preventDefault(); void window.electronAPI.openExternal(authUrl) }
         }}>Open Linear again</a>}
       </IntegrationSetupFeedback>}
     </>}
-    actions={<>
-      {credentialsSaved && <Button size="sm" variant="ghost" className="mr-auto" disabled={busy} onClick={() => {
-        closeLogin(); setCredentialsSaved(false); setAuthUrl(null); setError(null)
-      }}>Edit credentials</Button>}
-      <Button size="sm" disabled={busy || !displayName || !setup.data || (viaRelay && !integrationId) || (!credentialsSaved && (!clientId.trim() || !clientSecret.trim()))} onClick={() => void connect()}>
-        {busy ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Connecting...</> : pending ? 'Start again' : 'Connect'}
-      </Button>
-    </>}
-  >
-    {webhooksOffered && !integrationId && <label className="flex items-start gap-2 text-sm cursor-pointer">
-      <input type="checkbox" className="mt-1" checked={webhooksChosen} disabled={busy} onChange={event => setWebhooksChosen(event.target.checked)} />
-      <span>Set up webhooks (recommended)<span className="block text-xs text-muted-foreground">Events that happen while this agent is offline are delivered when it’s back. Without them it uses a live connection and misses those.</span></span>
-    </label>}
-    <IntegrationSetupField id="setup-integration-name" label="Integration name" value={name ?? agent?.name ?? agentSlug} onChange={event => setName(event.target.value)} maxLength={80} disabled={busy || !!integrationId} />
-    <IntegrationSetupField id="linear-client-id" label="Client ID" value={clientId} onChange={event => setClientId(event.target.value)} autoComplete="off" disabled={busy || credentialsSaved} />
-    <IntegrationSetupField id="linear-client-secret" label="Client secret" type="password" value={clientSecret} onChange={event => setClientSecret(event.target.value)} autoComplete="new-password" placeholder={credentialsSaved ? 'Saved securely' : undefined} disabled={busy || credentialsSaved} />
-    {viaRelay && <IntegrationSetupField id="linear-webhook-secret" label="Webhook signing secret (strongly recommended)" type="password" value={webhookSecret} onChange={event => setWebhookSecret(event.target.value)} autoComplete="new-password" placeholder={credentialsSaved ? 'Saved securely' : undefined} disabled={busy || credentialsSaved} />}
-  </IntegrationSetupLayout>
+    aside={credentialsSaved ? { label: 'Edit keys', disabled: busy, onClick: () => { closeLogin(); setCredentialsSaved(false); setAuthUrl(null); setError(null) } } : undefined}
+    finish={{
+      label: pending ? 'Start again' : 'Connect', busyLabel: 'Connecting…', busy, external: true,
+      // Where the keys are on the same screen, the button waits for them; a step away, it says what's missing instead.
+      disabled: !displayName || !setup.data || (!viaRelay && keysMissing),
+      onClick: () => void connect(),
+    }}
+  />
 }
 
 /** Only credentials differ by provider; lifecycle, settings and history stay shared. */

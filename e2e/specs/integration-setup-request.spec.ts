@@ -28,8 +28,9 @@ test.describe('Integration setup request', () => {
     await expect(card).toContainText('Finish setting up my Linear app')
 
     await card.getByTestId('integration-setup-open-btn').click()
-    const dialog = page.getByRole('dialog')
-    await expect(dialog.getByLabel('Integration name')).toHaveValue('Support Triage')
+    // It opens on Linear's intro; the agent's suggested name names the app (no field to show it in).
+    const dialog = page.getByRole('dialog', { name: /Add this agent to Linear/ })
+    await expect(dialog.getByTestId('integration-setup-start')).toBeVisible()
     await page.keyboard.press('Escape')
     await expect(dialog).toBeHidden()
     // Closing the form leaves the ask open.

@@ -67,12 +67,23 @@ beforeEach(() => {
   })
 })
 
+// A setup is one step per screen: creating the app, then pasting its keys. The rail goes to a step without
+// doing what the step before it does (its button opens Linear).
+const toKeys = () => fireEvent.click(screen.getByRole('button', { name: 'Paste the keys' }))
+const toSecret = () => fireEvent.click(screen.getByRole('button', { name: 'Add the signing secret' }))
+const createButton = () => screen.getByRole('button', { name: 'Create app in Linear' })
+/** The setup has loaded once its one button can be pressed. */
+const loaded = () => waitFor(() => expect(createButton()).toBeEnabled())
+
 describe('Linear shared setup modal', () => {
   it('loads setup links without creating an account when opened or dismissed', async () => {
     const view = setupForm()
-    expect(await screen.findByRole('link', { name: 'Create app in Linear' })).toHaveAttribute('href', current.linear.setup.creationUrl)
-    expect(screen.getByTestId('integration-setup-layout')).toBeInTheDocument()
-    expect(screen.getByLabelText('Integration name')).toHaveValue('Release Assistant')
+    await loaded()
+    expect(screen.getByTestId('integration-setup-wizard')).toBeInTheDocument()
+    expect(screen.queryByLabelText('Integration name')).toBeNull()
+    // One thing to do: the button in the footer. Nothing to open again until it has been opened.
+    expect(screen.queryByRole('link', { name: 'Create app in Linear' })).toBeNull()
+    toKeys()
     expect(screen.getByRole('button', { name: /^Connect$/ })).toBeDisabled()
     view.unmount()
     expect(creates()).toHaveLength(0)
@@ -80,13 +91,14 @@ describe('Linear shared setup modal', () => {
   })
   it('keeps setup open through authorization and finishes only after the callback is observed', async () => {
     setupForm()
-    await screen.findByRole('link', { name: 'Create app in Linear' })
+    await loaded()
+    toKeys()
     fillCredentials()
     fireEvent.click(screen.getByRole('button', { name: /^Connect$/ }))
     expect(fakeLoginWindow.prepare).toHaveBeenCalledOnce()
     await waitFor(() => expect(fakeLoginWindow.navigate).toHaveBeenCalledWith(expect.stringContaining('state=attempt-1')))
     expect(creates()).toHaveLength(1)
-    expect(screen.getByRole('status')).toHaveTextContent('Waiting for authorization')
+    expect(screen.getByRole('status')).toHaveTextContent('Approve access in Linear')
     expect(screen.getByLabelText('Client secret')).toHaveValue('')
     expect(onClose).not.toHaveBeenCalled()
     current = integration('connected')
@@ -97,7 +109,8 @@ describe('Linear shared setup modal', () => {
   it('retries failed authorization on the same installation', async () => {
     rejectAuthorization = true
     setupForm()
-    await screen.findByRole('link', { name: 'Create app in Linear' })
+    await loaded()
+    toKeys()
     fillCredentials()
     fireEvent.click(screen.getByRole('button', { name: /^Connect$/ }))
     expect(await screen.findByRole('alert')).toHaveTextContent('Authorization unavailable')
@@ -109,7 +122,8 @@ describe('Linear shared setup modal', () => {
   })
   it('keeps cancellation in the modal and retries with saved credentials', async () => {
     setupForm()
-    await screen.findByRole('link', { name: 'Create app in Linear' })
+    await loaded()
+    toKeys()
     fillCredentials()
     fireEvent.click(screen.getByRole('button', { name: /^Connect$/ }))
     await waitFor(() => expect(fakeLoginWindow.navigate).toHaveBeenCalled())
@@ -161,22 +175,30 @@ describe('Linear over the webhook relay', () => {
   it('sets up webhooks by default, and one click creates the webhook URL and opens Linear with it', async () => {
     relayAvailable = true
     setupForm()
-    const createApp = await screen.findByRole('button', { name: 'Create app in Linear' })
-    expect(screen.getByRole('checkbox', { name: /Set up webhooks/ })).toBeChecked()
+    await loaded()
+    expect(screen.getByRole('switch', { name: /Use webhooks/ })).toBeChecked()
 
-    fireEvent.click(createApp)
+    fireEvent.click(createButton())
     // The tab opens inside the click, then goes to the form once the URL exists.
     expect(fakeLoginWindow.prepare).toHaveBeenCalledOnce()
     await waitFor(() => expect(fakeLoginWindow.navigate).toHaveBeenCalledWith(expect.stringContaining('webhook.enabled=true')))
     expect(JSON.parse(creates()[0][1].body)).toMatchObject({ config: { webhooks: true } })
-    // Fixed once the account exists; the link stays for opening it again.
-    expect(screen.queryByRole('checkbox')).toBeNull()
+    // On to the keys while Linear opens, as in Slack's setup.
+    await waitFor(() => expect(screen.getByTestId('integration-setup-step')).toHaveAttribute('data-step', '2'))
+    // Back on the first step the choice is fixed, now the account exists, and the link is there for opening Linear again.
+    fireEvent.click(screen.getByRole('button', { name: 'Create the app' }))
+    expect(screen.getByRole('switch', { name: /Use webhooks/ })).toBeDisabled()
     expect(await screen.findByRole('link', { name: 'Create app in Linear' })).toHaveAttribute('href', expect.stringContaining('webhook.enabled=true'))
+    expect(screen.getByTestId('integration-setup-next')).toHaveTextContent('Next')
 
+    toKeys()
     fillCredentials()
+    // The signing secret is a step of its own, and Connect waits on it.
+    expect(screen.queryByRole('button', { name: /^Connect$/ })).toBeNull()
+    fireEvent.click(screen.getByTestId('integration-setup-next'))
     // Optional, though strongly recommended.
     expect(screen.getByRole('button', { name: /^Connect$/ })).toBeEnabled()
-    fireEvent.change(screen.getByLabelText('Webhook signing secret (strongly recommended)'), { target: { value: 'lin_wh_secret' } })
+    fireEvent.change(screen.getByLabelText('Webhook signing secret'), { target: { value: 'lin_wh_secret' } })
     fireEvent.click(screen.getByRole('button', { name: /^Connect$/ }))
 
     await waitFor(() => expect(authorizationCount).toBe(1))
@@ -185,18 +207,46 @@ describe('Linear over the webhook relay', () => {
     expect(creates()).toHaveLength(1)
   })
 
-  it('offers only the live connection while the relay is unavailable', async () => {
+  it('sends someone who skipped ahead back to what Connect still needs', async () => {
+    relayAvailable = true
     setupForm()
-    await screen.findByRole('link', { name: 'Create app in Linear' })
-    expect(screen.queryByRole('checkbox')).toBeNull()
+    await loaded()
+    toSecret()
+    fireEvent.click(screen.getByRole('button', { name: /^Connect$/ }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('Create the app in Linear first.')
+    expect(screen.getByTestId('integration-setup-step')).toHaveAttribute('data-step', '1')
+    fireEvent.click(createButton())
+    await waitFor(() => expect(creates()).toHaveLength(1))
+    toSecret()
+    fireEvent.click(screen.getByRole('button', { name: /^Connect$/ }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('Paste the Client ID and Client secret first.')
+    expect(screen.getByTestId('integration-setup-step')).toHaveAttribute('data-step', '2')
+    expect(authorizationCount).toBe(0)
+  })
+
+  it('offers only the live connection while the relay is unavailable, and its button just opens Linear', async () => {
+    setupForm()
+    await loaded()
+    expect(screen.queryByRole('switch')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Add the signing secret' })).toBeNull()
+    fireEvent.click(createButton())
+    await waitFor(() => expect(fakeLoginWindow.navigate).toHaveBeenCalledWith(current.linear.setup.creationUrl))
+    // Nothing is created until there are keys to connect with.
+    expect(creates()).toHaveLength(0)
+    expect(screen.getByTestId('integration-setup-step')).toHaveAttribute('data-step', '2')
+    expect(screen.getByLabelText('Client secret')).toBeInTheDocument()
     expect(screen.queryByLabelText(/Webhook signing secret/)).toBeNull()
   })
 
   it('skips webhooks when unticked, for a plain live connection', async () => {
     relayAvailable = true
     setupForm()
-    fireEvent.click(await screen.findByRole('checkbox', { name: /Set up webhooks/ }))
-    expect(await screen.findByRole('link', { name: 'Create app in Linear' })).toHaveAttribute('href', expect.not.stringContaining('webhook.enabled=true'))
+    fireEvent.click(await screen.findByRole('switch', { name: /Use webhooks/ }))
+    await loaded()
+    fireEvent.click(createButton())
+    await waitFor(() => expect(fakeLoginWindow.navigate).toHaveBeenCalledWith(expect.not.stringContaining('webhook.enabled=true')))
+    expect(creates()).toHaveLength(0)
+    expect(screen.getByLabelText('Client secret')).toBeInTheDocument()
     expect(screen.queryByLabelText(/Webhook signing secret/)).toBeNull()
   })
 
@@ -272,5 +322,11 @@ describe('Linear relay reconnection', () => {
     runningTransport = 'relay'
     render(<LinearIntegrationSettings integration={rejected} />, { wrapper })
     await waitFor(() => expect(screen.getByTestId('linear-delivery-next')).toHaveTextContent('don’t match the saved signing secret'))
+  })
+
+  it('names the app with the name an agent suggested when it handed the setup over', async () => {
+    render(<Dialog open><DialogContent><LinearSetupForm agentSlug="a" onClose={onClose} initial={{ name: 'Support Triage' }} /></DialogContent></Dialog>, { wrapper })
+    await waitFor(() => expect(mocks.request.mock.calls.some(([url]) => typeof url === 'string' && url.includes('/providers/linear/setup?name=Support+Triage'))).toBe(true))
+    expect(screen.queryByLabelText('Integration name')).toBeNull()
   })
 })

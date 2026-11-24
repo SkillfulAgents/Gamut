@@ -41,38 +41,57 @@ beforeEach(() => {
   Object.assign(state, { relayAvailable: true, requests: [], agent: AGENT })
 })
 
+// A setup is one step per screen: these move between them, or jump to one by its name in the rail.
+const next = () => fireEvent.click(screen.getByTestId('integration-setup-next'))
+const goTo = (name: string) => fireEvent.click(screen.getByRole('button', { name }))
+
 describe('SlackSetup', () => {
   it('sends an explicit off for threading turned off at setup, so the server default does not turn it back on', async () => {
     setup()
-    fireEvent.change(await screen.findByLabelText('Integration name'), { target: { value: 'Helper' } })
+    fireEvent.click(await screen.findByTestId('slack-create-app'))
+    fireEvent.change(await screen.findByLabelText('Signing Secret'), { target: { value: 'secret' } })
+    next()
+    fireEvent.change(screen.getByLabelText('Bot Token'), { target: { value: 'xoxb-1' } })
+    // The options are a step of their own, sent with Connect.
+    next()
     fireEvent.click(screen.getByRole('switch', { name: /Reply in thread/ }))
-    fireEvent.click(screen.getByTestId('slack-create-app'))
-    await waitFor(() => expect(state.requests[0]).toBeDefined())
-    expect(state.requests[0].body.config).toMatchObject({ answerInThread: false, newSessionPerThread: false })
+    fireEvent.click(screen.getByRole('button', { name: 'Connect' }))
+    await waitFor(() => expect(state.requests[1]).toBeDefined())
+    expect(state.requests[1].body.config).toMatchObject({ answerInThread: false, newSessionPerThread: false })
   })
 
   it('with a relay, creates the installation first and opens Slack with the webhook URL in the manifest', async () => {
     setup()
-    fireEvent.change(await screen.findByLabelText('Integration name'), { target: { value: 'Helper' } })
-    expect(screen.queryByLabelText('App-Level Token')).toBeNull()
+    await screen.findByTestId('slack-create-app')
+    // The icon is offered once there's an app to upload it to.
+    expect(screen.queryByTestId('slack-app-icon-download')).toBeNull()
+    // No Socket Mode token to paste, and nothing to paste into until the app exists.
+    expect(screen.queryByRole('button', { name: 'Paste the app token' })).toBeNull()
+    goTo('Paste the bot token')
     expect(screen.getByLabelText('Bot Token')).toBeDisabled()
+    goTo('Review settings')
     expect(screen.getByRole('button', { name: 'Connect' })).toBeDisabled()
+    goTo('Create the app')
 
     fireEvent.click(screen.getByTestId('slack-create-app'))
     await waitFor(() => expect(fakeLoginWindow.navigate).toHaveBeenCalledOnce())
-    expect(state.requests[0]).toEqual({ url: '/api/agent-integrations/agents/a', method: 'POST', body: expect.objectContaining({ provider: 'slack', name: 'Helper', config: { webhooks: true, onlyMentioned: true, answerInThread: true, newSessionPerThread: true } }) })
+    expect(state.requests[0]).toEqual({ url: '/api/agent-integrations/agents/a', method: 'POST', body: expect.objectContaining({ provider: 'slack', config: { webhooks: true, onlyMentioned: true, answerInThread: true, newSessionPerThread: true } }) })
     const opened = new URL(fakeLoginWindow.navigate.mock.calls[0][0])
     expect(opened.origin + opened.pathname).toBe('https://api.slack.com/apps')
     expect(JSON.parse(opened.searchParams.get('manifest_json')!)).toMatchObject({
-      display_information: { name: 'Helper' },
+      display_information: { name: 'Infra Agent' },
       settings: { socket_mode_enabled: false, event_subscriptions: { request_url: 'https://relay.test/v1/hooks/whep_1' }, interactivity: { request_url: 'https://relay.test/v1/hooks/whep_1' } },
     })
-    // The choice is fixed once the installation exists.
+    // Creating the app moves on to its Signing Secret. Back on the first step, the choice is fixed once the installation exists.
+    await screen.findByLabelText('Signing Secret')
+    goTo('Create the app')
     expect(screen.getByTestId('slack-webhooks-choice')).toBeDisabled()
-    expect(screen.getByLabelText('Integration name')).toBeDisabled()
 
+    goTo('Paste the secret')
     fireEvent.change(screen.getByLabelText('Signing Secret'), { target: { value: 'secret' } })
+    next()
     fireEvent.change(screen.getByLabelText('Bot Token'), { target: { value: 'xoxb-1' } })
+    next()
     fireEvent.click(screen.getByRole('button', { name: 'Connect' }))
     await waitFor(() => expect(onClose).toHaveBeenCalled())
     expect(state.requests[1]).toEqual({ url: '/api/agent-integrations/int-9', method: 'PATCH', body: { status: 'active', showToolCalls: false, sessionTimeout: 6, config: { botToken: 'xoxb-1', signingSecret: 'secret', onlyMentioned: true, answerInThread: true, newSessionPerThread: true } } })
@@ -80,10 +99,10 @@ describe('SlackSetup', () => {
 
   it('names the Slack app and its bot after the agent, in its colour, and offers its icon', async () => {
     setup()
-    await screen.findByPlaceholderText('Infra Agent')
-    expect(screen.getByTestId('slack-app-icon-download')).toHaveTextContent('Download icon')
-    fireEvent.click(screen.getByTestId('slack-create-app'))
+    await waitFor(() => expect(client.getQueryData(['agents', 'a'])).toBeTruthy())
+    fireEvent.click(await screen.findByTestId('slack-create-app'))
     await waitFor(() => expect(fakeLoginWindow.navigate).toHaveBeenCalledOnce())
+    expect(await screen.findByTestId('slack-app-icon-download')).toHaveTextContent('Download icon')
     expect(state.requests[0].body.name).toBeUndefined()
     const manifest = JSON.parse(new URL(fakeLoginWindow.navigate.mock.calls[0][0]).searchParams.get('manifest_json')!)
     expect(manifest.display_information).toEqual({ name: 'Infra Agent', description: 'Keeps the servers up', background_color: slackBackgroundColor(avatarSource(AGENT.avatar as AgentAvatar).orb) })
@@ -105,26 +124,37 @@ describe('SlackSetup', () => {
     setup()
     fireEvent.click(await screen.findByTestId('slack-create-app'))
     await waitFor(() => expect(fakeLoginWindow.navigate).toHaveBeenCalledOnce())
-    fireEvent.change(screen.getByLabelText('Signing Secret'), { target: { value: 'secret' } })
+    fireEvent.change(await screen.findByLabelText('Signing Secret'), { target: { value: 'secret' } })
+    goTo('Create the app')
     state.relayAvailable = false
     await client.invalidateQueries({ queryKey: ['webhook-relay'] })
     await waitFor(() => expect(screen.queryByTestId('slack-webhooks-choice')).toBeNull())
-    expect(screen.queryByLabelText('App-Level Token')).toBeNull()
+    // Still the webhook setup's steps, not Socket Mode's.
+    expect(screen.queryByRole('button', { name: 'Paste the app token' })).toBeNull()
+    next()
     expect(screen.getByLabelText('Signing Secret')).toHaveValue('secret')
+    goTo('Create the app')
     state.relayAvailable = true
     await client.invalidateQueries({ queryKey: ['webhook-relay'] })
     await screen.findByTestId('slack-webhooks-choice')
     // The Slack app already targets the first installation's URL.
     expect(screen.getByTestId('slack-setup-webhook-url')).toHaveTextContent('https://relay.test/v1/hooks/whep_1')
+    next()
     expect(screen.getByLabelText('Signing Secret')).toHaveValue('secret')
+    next()
     expect(screen.getByLabelText('Bot Token')).toBeEnabled()
     expect(state.requests.filter(request => request.method === 'POST')).toHaveLength(1)
   })
 
   it('uses Socket Mode without a relay, or when webhooks are turned off', async () => {
     state.relayAvailable = false
+    // Socket Mode's steps: the manifest, the app, then a token each.
     const view = setup()
-    expect(await screen.findByLabelText('App-Level Token')).toBeInTheDocument()
+    await screen.findByTestId('integration-setup-wizard')
+    next(); next()
+    expect(screen.getByLabelText('App-Level Token')).toBeInTheDocument()
+    next()
+    expect(screen.getByLabelText('Bot Token')).toBeInTheDocument()
     expect(screen.queryByTestId('slack-webhooks-choice')).toBeNull()
     view.unmount()
 
@@ -132,8 +162,11 @@ describe('SlackSetup', () => {
     client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     setup()
     fireEvent.click(await screen.findByTestId('slack-webhooks-choice'))
-    expect(await screen.findByLabelText('App-Level Token')).toBeInTheDocument()
+    await screen.findByTestId('integration-setup-wizard')
+    // The Socket Mode setup opens on its first step, where the choice still is.
     expect(screen.getByTestId('slack-webhooks-choice')).not.toBeChecked()
+    next(); next()
+    expect(screen.getByLabelText('App-Level Token')).toBeInTheDocument()
   })
 })
 

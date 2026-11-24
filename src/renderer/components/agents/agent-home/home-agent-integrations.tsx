@@ -1,4 +1,3 @@
-import { channelSetupComplete } from '@shared/lib/agent-integrations/public'
 import { isPublicChatIntegration } from '@shared/lib/chat-integrations/public'
 import { useState } from 'react'
 import { Plus } from 'lucide-react'
@@ -114,7 +113,7 @@ function HomeAgentIntegrationsBody({ agentSlug, rows }: { agentSlug: string; row
                 aria-label={`Set up ${tile.label}`}
                 className="flex items-center gap-2.5 rounded-lg bg-muted/60 p-2 text-left transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
-                <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-border bg-background dark:bg-zinc-200 shadow-sm">
+                <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-border bg-background dark:bg-zinc-200 dark:text-zinc-900 shadow-sm">
                   <ServiceIcon slug={tile.slug} fallback="mcp" className="h-4 w-4" />
                 </div>
                 <span className="min-w-0 flex-1 truncate text-xs font-normal text-foreground">{tile.label}</span>
@@ -133,17 +132,21 @@ function HomeAgentIntegrationsBody({ agentSlug, rows }: { agentSlug: string; row
                   <Plus /> Add Integration
                 </Button>
               </PopoverTrigger>
-              <PopoverContent align="end" className="w-44 p-1">
+              <PopoverContent align="end" className="w-64 p-1">
                 {providers.map((tile) => (
                   <button
                     key={tile.slug}
-                    className="flex w-full items-center gap-2 rounded-item px-2 py-1.5 text-xs hover:bg-muted transition-colors"
+                    aria-label={tile.label}
+                    className="flex w-full items-center gap-2.5 rounded-item px-2 py-1.5 text-left text-xs hover:bg-muted transition-colors"
                     onClick={() => setSetupProvider(tile)}
                   >
-                    <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-control border border-border bg-background dark:bg-zinc-200">
-                      <ServiceIcon slug={tile.slug} fallback="mcp" className="h-3 w-3" />
+                    <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-control border border-border bg-background dark:bg-zinc-200">
+                      <ServiceIcon slug={tile.slug} fallback="mcp" className="h-3.5 w-3.5" />
                     </div>
-                    {tile.label}
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate">{tile.label}</span>
+                      <span className="block truncate text-2xs text-muted-foreground">{tile.description}</span>
+                    </span>
                   </button>
                 ))}
               </PopoverContent>
@@ -152,7 +155,6 @@ function HomeAgentIntegrationsBody({ agentSlug, rows }: { agentSlug: string; row
         </div>
       )}
       <AgentIntegrationSetupDialog
-        allowDefer={!rows.some(row => row.provider === setupProvider?.slug && channelSetupComplete(row))}
         agentSlug={agentSlug}
         provider={setupProvider}
         onOpenChange={(open) => { if (!open) setSetupProvider(null) }}

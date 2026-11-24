@@ -295,12 +295,20 @@ test('Telegram setup returns to the wizard after connecting', async ({ page }) =
   await expect(github).toHaveAccessibleDescription(/webhook relay/)
   await expect(page.getByRole('button', { name: 'Set up Meetings' })).toBeDisabled()
   await page.getByRole('button', { name: 'Set up Linear' }).click()
+  // Each setup opens on its intro; its keys are on the second step. The rail goes there: the first step's own
+  // button opens Linear.
+  await page.getByRole('dialog').getByTestId('integration-setup-start').click()
+  await page.getByRole('dialog').getByRole('button', { name: 'Paste the keys' }).click()
   await expect(page.getByRole('dialog').getByLabel('Client ID')).toBeVisible()
   await page.keyboard.press('Escape')
   await telegram.click()
   const dialog = page.getByRole('dialog')
-  await dialog.getByLabel('Bot Token').fill('fixture-token')
+  await dialog.getByTestId('integration-setup-start').click()
+  await dialog.getByLabel('Paste the token BotFather sends back').fill('fixture-token')
+  await dialog.getByTestId('integration-setup-next').click()
   await dialog.getByRole('button', { name: 'Connect', exact: true }).click()
+  // Connecting moves on to saying hello to the bot; Done closes the setup.
+  await dialog.getByRole('button', { name: 'Done' }).click()
   await expect(dialog).toBeHidden()
   await expect(page.getByRole('button', { name: 'Configured Telegram' })).toBeDisabled()
   await expect(page.getByTestId('create-agent-finish')).toBeEnabled()
@@ -340,7 +348,8 @@ test('deferred channels survive reload, reopen from Agent Home, and dismiss inde
   await dismissSlack.click()
   await expect(panel.getByText('Slack')).toBeHidden()
   await panel.getByRole('button', { name: 'Finish setup Telegram' }).click()
-  await expect(dialog.getByLabel('Bot Token')).toBeVisible()
+  await dialog.getByTestId('integration-setup-start').click()
+  await expect(dialog.getByLabel('Paste the token BotFather sends back')).toBeVisible()
   await page.keyboard.press('Escape')
   expect(await (await request.get(reminders)).json()).toEqual({ steps: [{ type: 'channel', provider: 'telegram' }] })
   await panel.getByRole('heading').hover()
@@ -355,12 +364,12 @@ test('deferred channels survive reload, reopen from Agent Home, and dismiss inde
   expect(await (await request.get(reminders)).json()).toEqual({ steps: [] })
 })
 
-test('the defer action stays visible beneath long Slack instructions on a small phone', async ({ page }) => {
+test('the defer action stays visible beside Get started on Slack\'s intro on a small phone', async ({ page }) => {
   await reachAddons(page)
   await page.setViewportSize({ width: 320, height: 568 })
   await page.getByRole('button', { name: 'Set up Slack' }).click()
-  const dialog = page.getByRole('dialog', { name: 'Set up integration with Slack' })
-  await expect(dialog.getByTestId('integration-setup-layout')).toBeVisible()
+  const dialog = page.getByRole('dialog', { name: /Add this agent to Slack/ })
+  await expect(dialog.getByTestId('integration-setup-start')).toBeInViewport({ ratio: 1 })
   const defer = dialog.getByRole('button', { name: 'Set this up later' })
   await expect(defer).toBeInViewport({ ratio: 1 })
   await defer.click()

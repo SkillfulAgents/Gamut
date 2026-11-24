@@ -51,11 +51,17 @@ beforeEach(() => {
 describe('Slack setup through a team directory', () => {
   it('creates the agent’s app, then installs it with one click', async () => {
     setup()
-    expect(await screen.findByTestId('slack-provisioned-setup')).toHaveTextContent('Create this agent’s Slack app in Acme')
+    expect(await screen.findByTestId('slack-provisioned-setup')).toHaveTextContent('Gamut creates this agent’s Slack app in Acme')
+    // One step per screen: installing waits on its own step until the app exists.
+    fireEvent.click(screen.getByRole('button', { name: 'Install the app' }))
     expect(screen.getByTestId('slack-provisioned-install')).toBeDisabled()
+    fireEvent.click(screen.getByRole('button', { name: 'Create the app' }))
 
     await waitFor(() => expect(screen.getByTestId('slack-provisioned-create')).toBeEnabled())
     fireEvent.click(screen.getByTestId('slack-provisioned-create'))
+    // Creating the app moves on to its options; unchanged, they need no saving.
+    await screen.findByRole('switch', { name: /Reply in thread/ })
+    fireEvent.click(screen.getByTestId('integration-setup-next'))
     await waitFor(() => expect(screen.getByTestId('slack-provisioned-created')).toHaveTextContent('App created in Acme'))
     expect(state.requests[0]).toEqual({ url: '/api/agent-integrations/agents/a', method: 'POST', body: expect.objectContaining({
       provider: 'slack',
@@ -90,7 +96,7 @@ describe('Slack setup through a team directory', () => {
   it('says why the setup is by hand when a directory could create the app but this host has no relay', async () => {
     state.relay = false
     setup()
-    expect(await screen.findByTestId('slack-provisioning-needs-relay')).toHaveTextContent('One-click setup through Acme needs this host’s webhook relay')
+    expect(await screen.findByTestId('slack-provisioning-needs-relay')).toHaveTextContent('One-click setup through Acme needs a webhook relay')
     expect(screen.queryByTestId('slack-provisioned-setup')).toBeNull()
   })
 })

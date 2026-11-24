@@ -8,6 +8,7 @@ import { saveBlob } from '@renderer/lib/download'
 import type { PublicAgentIntegration } from '@shared/lib/agent-integrations/public'
 import { publicSlackDelivery } from '@shared/lib/chat-integrations/public'
 import { CopyTextButton, SlackAppsLink } from './slack-delivery-card'
+import { IntegrationSetupAside } from './integration-setup-layout'
 import { slackAppIcon, slackAppIdentity, type SlackAppAgent } from './slack-app-identity'
 
 const where = <strong className="font-medium">Basic Information → Display Information</strong>
@@ -41,18 +42,18 @@ function ColorSwatch({ color }: { color: string }) {
 }
 
 /**
- * The setup step for what a manifest can't set: the icon, and, for an app
- * made without the manifest, its colour. Only for an agent with an avatar.
+ * Under the setup's steps, what a manifest can't set: the icon, and, for an
+ * app made without the manifest, its colour. Only for an agent with an avatar.
  */
-export function SlackAppIconStep({ agent, withColor = false }: { agent: SlackAppAgent; withColor?: boolean }) {
+export function SlackAppIconAside({ agent, withColor = false }: { agent: SlackAppAgent; withColor?: boolean }) {
   const { backgroundColor } = slackAppIdentity(agent)
-  return <>
-    Optional: in {where}, upload this agent’s avatar as the app icon{withColor && backgroundColor ? ' and set the background color' : ''}.
-    <div className="mt-2 flex flex-wrap items-center gap-3">
-      <SlackAppIconButton agent={agent} />
-      {withColor && backgroundColor && <ColorSwatch color={backgroundColor} />}
-    </div>
-  </>
+  if (!agent.avatar) return null
+  return <IntegrationSetupAside action={<span className="inline-flex flex-wrap items-center gap-3">
+    <SlackAppIconButton agent={agent} />
+    {withColor && backgroundColor && <ColorSwatch color={backgroundColor} />}
+  </span>}>
+    Optional: to give the app this agent’s face, upload its icon{withColor && backgroundColor ? ' and set the background color' : ''} under {where}.
+  </IntegrationSetupAside>
 }
 
 /**
@@ -63,7 +64,7 @@ export function SlackAppIconStep({ agent, withColor = false }: { agent: SlackApp
 export function SlackAppAppearanceCard({ integration }: { integration: PublicAgentIntegration }) {
   const slack = publicSlackDelivery(integration)
   const { data: agent } = useAgent(integration.agentSlug)
-  // Before the app is connected, its setup steps carry the icon; an app a team directory created has its own card.
+  // Before the app is connected, its setup carries the icon; an app a team directory created has its own card.
   if (!slack?.botTokenSaved || integration.provisionedApp) return null
   const { backgroundColor } = agent ? slackAppIdentity(agent) : { backgroundColor: undefined }
   // Slack has no API that lets a bot rename itself: an app made by hand is renamed in its settings.

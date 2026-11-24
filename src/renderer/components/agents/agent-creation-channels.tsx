@@ -83,7 +83,7 @@ export function AgentCreationChannels({ agentSlug }: { agentSlug: string }) {
 
   return <>
     <div className={CHANNEL_GRID_CLASS}>{channels.map(channelRow)}</div>
-    {target && <ChannelSetupDialog agentSlug={agentSlug} target={target} integrations={integrations.data} onClose={() => {
+    {target && <ChannelSetupDialog allowDefer agentSlug={agentSlug} target={target} integrations={integrations.data} onClose={() => {
       setTarget(null)
       void integrations.refetch()
     }} />}

@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { CheckCircle2, Loader2 } from 'lucide-react'
-import { Button } from '@renderer/components/ui/button'
-import { agentIntegrationKeys, useAgentIntegration, useCreateAgentIntegration } from '@renderer/hooks/use-agent-integrations'
+import { CheckCircle2 } from 'lucide-react'
+import { agentIntegrationKeys, useAgentIntegration, useCreateAgentIntegration, useUpdateAgentIntegration } from '@renderer/hooks/use-agent-integrations'
 import { useAgent } from '@renderer/hooks/use-agents'
-import { ChatSetupBehavior, DEFAULT_CHAT_SETUP_BEHAVIOR, slackBehaviorConfig } from './chat-integration-setup-form'
-import { IntegrationSetupFeedback, IntegrationSetupField, IntegrationSetupLayout } from './integration-setup-layout'
+import { ChatSetupBehavior, DEFAULT_CHAT_SETUP_BEHAVIOR, SETTINGS_STEP_LABEL, SETTINGS_STEP_SUBTITLE, slackBehaviorConfig } from './chat-integration-setup-form'
+import { IntegrationSetupFeedback } from './integration-setup-layout'
+import { IntegrationSetupWizard } from './integration-setup-wizard'
 import type { IntegrationSetupProps } from './setup-types'
 import { agentAppIconBase64 } from './agent-app-icon'
 import { slackAppIdentity } from './slack-app-identity'
@@ -23,13 +23,17 @@ export function SlackProvisionedSetupForm({ agentSlug, onClose, provisioning, on
   const { data: agent } = useAgent(agentSlug)
   const create = useCreateAgentIntegration()
   const queryClient = useQueryClient()
-  const [name, setName] = useState('')
   const [behavior, setBehavior] = useState(DEFAULT_CHAT_SETUP_BEHAVIOR)
   const [createdId, setCreatedId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [step, setStep] = useState(0)
+  // The options the app was created with, so changing them afterwards is saved.
+  const [createdWith, setCreatedWith] = useState(DEFAULT_CHAT_SETUP_BEHAVIOR)
+  const update = useUpdateAgentIntegration()
   const { data: integration } = useAgentIntegration(createdId)
   const { install, waiting, busy: installing, close } = useInstallProvisionedApp(integration ?? null)
-  const app = slackAppIdentity(agent, name)
+  // No name field: the app takes the agent's name, and its card can rename it later.
+  const app = slackAppIdentity(agent, '')
 
   // Installed in the other window: done.
   useEffect(() => {
@@ -45,7 +49,7 @@ export function SlackProvisionedSetupForm({ agentSlug, onClose, provisioning, on
       // The avatar as the app's icon; an app without one still works.
       const icon = agent?.avatar ? await agentAppIconBase64(agent).catch(() => undefined) : undefined
       const row = await create.mutateAsync({
-        agentSlug, provider: 'slack', name: name.trim() || undefined,
+        agentSlug, provider: 'slack',
         config: {
           webhooks: true, ...slackBehaviorConfig(behavior),
           provision: {
@@ -58,8 +62,22 @@ export function SlackProvisionedSetupForm({ agentSlug, onClose, provisioning, on
         showToolCalls: behavior.showToolCalls, sessionTimeout: behavior.sessionTimeout,
       })
       setCreatedId(row.id)
+      setCreatedWith(behavior)
+      setStep(1)
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : 'Could not create the app')
+    }
+  }
+
+  const saveOptions = async () => {
+    if (!createdId) return
+    setError(null)
+    try {
+      await update.mutateAsync({ id: createdId, config: slackBehaviorConfig(behavior), showToolCalls: behavior.showToolCalls, sessionTimeout: behavior.sessionTimeout })
+      setCreatedWith(behavior)
+      setStep(2)
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : 'Could not save the options')
     }
   }
 
@@ -69,43 +87,36 @@ export function SlackProvisionedSetupForm({ agentSlug, onClose, provisioning, on
   }
 
   const created = !!createdId
-  return <IntegrationSetupLayout
-    provider="slack" label="Slack"
-    instructions={<div className="space-y-3" data-testid="slack-provisioned-setup">
-      <ol className="list-decimal list-outside ml-5 space-y-3 text-sm font-normal text-foreground">
-        <li>
-          <span className={created ? 'text-muted-foreground' : undefined}>Create this agent’s Slack app in {provisioning.workspace}, with its name, @handle and avatar.</span>
-          <div className="mt-2">
-            {created
-              ? <span className="inline-flex items-center gap-1.5 text-xs text-green-700 dark:text-green-400" data-testid="slack-provisioned-created"><CheckCircle2 className="h-3.5 w-3.5" />App created in {provisioning.workspace}</span>
-              : <Button size="sm" disabled={create.isPending || !agent} onClick={() => void createApp()} data-testid="slack-provisioned-create">
-                {create.isPending && <Loader2 className="h-4 w-4 animate-spin" />}Create app
-              </Button>}
-          </div>
-        </li>
-        <li>
-          <span className={created ? undefined : 'text-muted-foreground'}>Install it to {provisioning.workspace}: one click on Slack’s page.</span>
-          <div className="mt-2">
-            <Button size="sm" variant={created ? 'default' : 'outline'} disabled={!created || !integration || installing} onClick={startInstall} data-testid="slack-provisioned-install">
-              {installing && <Loader2 className="h-4 w-4 animate-spin" />}Install to {provisioning.workspace}
-            </Button>
-          </div>
-        </li>
-      </ol>
-      {!created && (
-        <button type="button" className="text-xs text-muted-foreground underline hover:text-foreground" onClick={onManual} data-testid="slack-setup-manually">
-          Set up manually instead
-        </button>
-      )}
-    </div>}
-    feedback={<>
-      {waiting && <IntegrationSetupFeedback state="pending">Approve the install in the window that opened. This updates when it’s done.</IntegrationSetupFeedback>}
+  return <IntegrationSetupWizard provider="slack" label="Slack" testId="slack-provisioned-setup"
+    description={`DM this agent in Slack, or mention it in channels. Gamut sets up its app in ${provisioning.workspace} for you.`}
+    step={step} onStepChange={setStep}
+    steps={[
+      {
+        label: 'Create the app',
+        subtitle: `Gamut creates this agent’s Slack app in ${provisioning.workspace}, with its name, @handle and avatar. No tokens to copy.`,
+        // The other way in, beside the button it's the alternative to, until the app exists.
+        secondary: created ? undefined : { label: 'Set up manually', onClick: onManual, testId: 'slack-setup-manually' },
+        // The first click creates the app; after that it's an ordinary Next.
+        action: created ? undefined : { label: 'Create app', busy: create.isPending, disabled: !agent, onClick: () => void createApp(), testId: 'slack-provisioned-create' },
+      },
+      {
+        label: SETTINGS_STEP_LABEL,
+        subtitle: SETTINGS_STEP_SUBTITLE,
+        content: <ChatSetupBehavior provider="slack" value={behavior} onChange={setBehavior} />,
+        // Changed after the app was created: saved before moving on to the install.
+        action: created && behavior !== createdWith ? { label: 'Continue', busy: update.isPending, onClick: () => void saveOptions() } : undefined,
+      },
+      {
+        label: 'Install the app',
+        subtitle: <><strong>Install to {provisioning.workspace}</strong> opens Slack in a new window. Approve the install there.</>,
+        content: created && <p className="inline-flex items-center gap-1.5 text-xs text-green-700 dark:text-green-400" data-testid="slack-provisioned-created"><CheckCircle2 className="h-3.5 w-3.5" />App created in {provisioning.workspace}</p>,
+        action: { label: `Install to ${provisioning.workspace}`, busy: installing, disabled: !created || !integration, onClick: startInstall, testId: 'slack-provisioned-install', external: true },
+      },
+    ]}
+    feedback={(waiting || error) && <>
+      {waiting && <IntegrationSetupFeedback state="pending">Approve the install in Slack. This window updates when you’re done.</IntegrationSetupFeedback>}
       {error && <IntegrationSetupFeedback state="error">{error}</IntegrationSetupFeedback>}
     </>}
-    actions={<Button size="sm" variant="ghost" onClick={onClose}>{created ? 'Close' : 'Cancel'}</Button>}
-  >
-    <IntegrationSetupField id="setup-integration-name" label="App name" value={name} maxLength={35}
-      onChange={(event) => setName(event.target.value)} placeholder={agent?.name || 'My Slack app'} disabled={created || create.isPending} />
-    <ChatSetupBehavior provider="slack" value={behavior} onChange={setBehavior} />
-  </IntegrationSetupLayout>
+    aside={created ? { label: 'Close', onClick: onClose } : undefined}
+  />
 }

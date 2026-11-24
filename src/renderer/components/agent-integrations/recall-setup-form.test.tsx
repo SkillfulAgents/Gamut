@@ -14,6 +14,8 @@ vi.mock('@renderer/hooks/use-agent-integrations', () => ({
 
 beforeEach(() => { vi.clearAllMocks(); state.agentName = 'Assistant'; state.create.mockResolvedValue({ id: 'int-1' }) })
 afterEach(cleanup)
+// A setup is one step per screen: the name, the instructions, then Connect.
+const next = () => userEvent.click(screen.getByTestId('integration-setup-next'))
 function renderSetup(onIntegrationCreated?: (id: string) => void) {
   return render(<Dialog open><DialogContent><RecallSetupForm agentSlug="agent" onClose={vi.fn()} onIntegrationCreated={onIntegrationCreated} /></DialogContent></Dialog>)
 }
@@ -21,6 +23,7 @@ function renderSetup(onIntegrationCreated?: (id: string) => void) {
 it('starts with the agent\'s name in calls and connects with it when left alone', async () => {
   renderSetup()
   expect(screen.getByLabelText(/name in calls/i)).toHaveValue('Assistant')
+  await next(); await next()
   await userEvent.click(screen.getByRole('button', { name: 'Connect' }))
   expect(state.create).toHaveBeenCalledWith({ agentSlug: 'agent', provider: 'recall', name: 'Assistant', config: { botName: 'Assistant' } })
   expect(state.navigate).toHaveBeenCalledWith({ to: '/agents/$slug/chat/$integrationId', params: { slug: 'agent', integrationId: 'int-1' } })
@@ -29,6 +32,7 @@ it('starts with the agent\'s name in calls and connects with it when left alone'
 it('returns the meetings connection to the wizard and keeps it on the add-ons step', async () => {
   const complete = vi.fn()
   renderSetup(complete)
+  await next(); await next()
   await userEvent.click(screen.getByRole('button', { name: 'Connect' }))
   expect(complete).toHaveBeenCalledWith('int-1')
   expect(state.navigate).not.toHaveBeenCalled()
@@ -38,8 +42,13 @@ it('sends an edited name and the standing instructions with the installation', a
   renderSetup()
   const name = screen.getByLabelText(/name in calls/i)
   await userEvent.clear(name)
+  // The call's tile follows the field, and falls back to the agent's name while it's empty.
+  expect(screen.getByTestId('recall-name-preview')).toHaveTextContent('Assistant')
   await userEvent.type(name, 'Notes Bot')
+  expect(screen.getByTestId('recall-name-preview')).toHaveTextContent('Notes Bot')
+  await next()
   await userEvent.type(screen.getByLabelText(/instructions for every meeting/i), 'Track action items with owners.')
+  await next()
   await userEvent.click(screen.getByRole('button', { name: 'Connect' }))
   expect(state.create).toHaveBeenCalledWith({ agentSlug: 'agent', provider: 'recall', name: 'Notes Bot', config: { botName: 'Notes Bot', instructions: 'Track action items with owners.' } })
 })
@@ -47,6 +56,7 @@ it('sends an edited name and the standing instructions with the installation', a
 it('connects without a stored name when the field is emptied, leaving the agent\'s name to apply at join time', async () => {
   renderSetup()
   await userEvent.clear(screen.getByLabelText(/name in calls/i))
+  await next(); await next()
   await userEvent.click(screen.getByRole('button', { name: 'Connect' }))
   expect(state.create).toHaveBeenCalledWith({ agentSlug: 'agent', provider: 'recall', name: 'Assistant', config: {} })
 })
