@@ -32,7 +32,7 @@ if (existsSync('./dist/renderer')) {
   mountWebBuild(app, './dist/renderer')
 }
 
-let server: BoundServer['server']
+let server: BoundServer['server'] | undefined
 
 // Graceful shutdown handling
 let isShuttingDown = false
@@ -51,13 +51,22 @@ async function gracefulShutdown(signal: string) {
     console.error('Error stopping services:', error)
   }
 
+  // The signal came during boot: there is no server to close, and start()
+  // stops before it binds one. Leave now, or the process would stay up until
+  // the forced exit below while whoever sent the signal waits on it.
+  if (!server) {
+    console.log('Stopped before the server was bound.')
+    process.exit(0)
+    return
+  }
+
   // Close the server
-  server?.close(() => {
+  server.close(() => {
     console.log('Server closed.')
     process.exit(0)
   })
   // close() waits for keep-alive / streaming sockets; drop them so it can call back.
-  ;(server as { closeAllConnections?: () => void } | undefined)?.closeAllConnections?.()
+  ;(server as { closeAllConnections?: () => void }).closeAllConnections?.()
 
   // Force exit after timeout
   setTimeout(() => {
@@ -96,6 +105,10 @@ async function start() {
   // Then task dispatch: a request can schedule work as soon as the bind below lands.
   await initializeBackgroundWork(new LocalTaskManager())
   registerBackgroundWork()
+
+  // A shutdown signal during boot has already stopped the services: binding
+  // now would serve without them. gracefulShutdown ends the process.
+  if (isShuttingDown) return
 
   const defaultPort = parseInt(process.env.PORT || '47891', 10)
 
