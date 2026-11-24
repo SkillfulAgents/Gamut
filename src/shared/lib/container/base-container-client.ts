@@ -311,6 +311,12 @@ const DELETE_SESSION_TIMEOUT_MS = 10000
 // (inspect, stats). The container watch runs these on a few slots shared by
 // every agent, so a read that hangs must give its slot back.
 const RUNTIME_READ_TIMEOUT_MS = 30_000
+// A session stream can stall without closing (a runtime's port proxy stops
+// delivering, and neither end sees a FIN). The host pings it; a stream that
+// sends nothing, not even a pong, for the limit is ended so the close path
+// resubscribes. The guest's `ws` answers pings on its own.
+const SESSION_STREAM_PING_INTERVAL_MS = 15_000
+const SESSION_STREAM_SILENCE_LIMIT_MS = 45_000
 
 // Reads stderr only: an exec error's message repeats the command line, flags included.
 export function refusedVolumeFlags(error: { stderr?: unknown } | null | undefined, flags: string): boolean {
@@ -1914,11 +1920,34 @@ export abstract class BaseContainerClient extends EventEmitter implements Contai
       socket = ws
       this.wsReadyRejectors.set(ws, rejectReady)
 
+      let lastHeardAt = Date.now()
+      let watchdog: ReturnType<typeof setInterval> | undefined
+      const stopWatchdog = () => clearInterval(watchdog)
+
       ws.on('open', () => {
         console.log(`WebSocket connected for session ${sessionId}`)
+        lastHeardAt = Date.now()
+        watchdog = setInterval(() => {
+          // A deliberate close drops this socket's listeners, 'close' included.
+          if (ws.readyState !== WebSocket.OPEN) return stopWatchdog()
+          const silentMs = Date.now() - lastHeardAt
+          if (silentMs >= SESSION_STREAM_SILENCE_LIMIT_MS) {
+            console.warn(`WebSocket for session ${sessionId} silent for ${silentMs}ms, closing it`)
+            stopWatchdog()
+            ws.terminate()
+            return
+          }
+          ws.ping()
+        }, SESSION_STREAM_PING_INTERVAL_MS)
+        watchdog.unref?.()
+      })
+
+      ws.on('pong', () => {
+        lastHeardAt = Date.now()
       })
 
       ws.on('message', (data) => {
+        lastHeardAt = Date.now()
         try {
           const message = JSON.parse(data.toString())
           const streamMessage: StreamMessage = {
@@ -1963,6 +1992,7 @@ export abstract class BaseContainerClient extends EventEmitter implements Contai
       })
 
       ws.on('close', () => {
+        stopWatchdog()
         console.log(`WebSocket closed for session ${sessionId}`)
         rejectReady(new Error('Session stream closed before initialization'))
         this.wsConnections.delete(sessionId)
