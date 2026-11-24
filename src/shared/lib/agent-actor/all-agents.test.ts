@@ -86,6 +86,56 @@ describe('which agents run', () => {
   })
 })
 
+describe('an agent whose actor cannot be asked', () => {
+  let logged: ReturnType<typeof vi.spyOn>
+  beforeEach(() => {
+    logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+  })
+  afterEach(() => {
+    logged.mockRestore()
+  })
+
+  it('counts as not running, and the others still answer', async () => {
+    const unreachable = fakeActor('research-agent', 'running')
+    unreachable.container.status.mockRejectedValue(new Error('The agent could not be reached'))
+    hold(unreachable, fakeActor('writer-agent', 'running'), fakeActor('support-agent', 'stopped'))
+
+    expect(await hasRunningAgents()).toBe(true)
+    expect(await runningAgentSlugs()).toEqual(['writer-agent'])
+    expect(logged).toHaveBeenCalledWith(expect.stringContaining('research-agent'), expect.any(Error))
+  })
+
+  it('does not fail the question when it is the only agent', async () => {
+    const unreachable = fakeActor('research-agent', 'running')
+    unreachable.container.status.mockRejectedValue(new Error('The agent could not be reached'))
+    hold(unreachable)
+
+    expect(await hasRunningAgents()).toBe(false)
+    expect(await runningAgentSlugs()).toEqual([])
+  })
+
+  it('is left out of the agents holding drives, and the others are still named', async () => {
+    const unreachable = fakeActor('research-agent', 'running')
+    unreachable.container.holdsDrives.mockRejectedValue(new Error('The agent could not be reached'))
+    hold(unreachable, fakeActor('writer-agent', 'running'))
+
+    expect(await agentsHoldingDrives()).toEqual(['writer-agent'])
+    expect(logged).toHaveBeenCalledWith(expect.stringContaining('research-agent'), expect.any(Error))
+  })
+
+  it('does not keep the other running agents from being marked stale', async () => {
+    const unmarkable = fakeActor('research-agent', 'running')
+    unmarkable.container.invalidate.mockRejectedValue(new Error('The agent could not be reached'))
+    const writer = fakeActor('writer-agent', 'running')
+    hold(unmarkable, writer)
+
+    await expect(markRunningAgentsStale()).resolves.toBeUndefined()
+
+    expect(writer.container.invalidate).toHaveBeenCalledOnce()
+    expect(logged).toHaveBeenCalledWith(expect.stringContaining('research-agent'), expect.any(Error))
+  })
+})
+
 describe('agentsHoldingDrives', () => {
   it('names the agents whose actors say a drive change needs a restart, passing the option on', async () => {
     const running = fakeActor('a', 'running')
