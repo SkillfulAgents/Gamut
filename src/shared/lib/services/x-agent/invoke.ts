@@ -340,10 +340,14 @@ export async function invokeAgent(caller: XAgentCaller, input: InvokeInput): Pro
   const recordInvocation = async (sessionId: string) => {
     if (!callerSlug || !callerSessionId) return
     try {
-      await agentRegistry.get(callerSlug).sessions.recordInvocation(callerSessionId, {
+      const actor = agentRegistry.get(callerSlug)
+      await actor.sessions.recordInvocation(callerSessionId, {
         agentSlug: targetSlug, sessionId, prompt: prompt.slice(0, 300), calledAt: new Date().toISOString(),
         ...(input.callerToolUseId ? { toolUseId: input.callerToolUseId } : {}),
       })
+      if (targetSlug !== callerSlug) {
+        await actor.messages.broadcastEvent(callerSessionId, { type: 'agent_invoked' })
+      }
     } catch (error) {
       // Retrying an accepted invoke could duplicate the work. Its transcript still supplies the reference.
       captureException(error, { tags: { area: 'x-agent', op: 'record-invocation' } })

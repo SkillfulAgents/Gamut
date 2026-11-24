@@ -99,6 +99,7 @@ const fakeActor = {
     start: (...args: unknown[]) => mockStart(...args),
   },
   messages: {
+    broadcastEvent: vi.fn(async () => {}),
     findLastEntry: vi.fn(async () => undefined),
     deliver: (...args: unknown[]) => mockDeliver(...args),
     transcriptView: vi.fn(async () => ({ messages: [], total: 0, deliveredFiles: [] })),
@@ -189,6 +190,15 @@ describe('caller session invocation references', () => {
       agentSlug: TARGET, sessionId: expectedId, toolUseId: 'tool-123', prompt: 'Research the topic', calledAt: expect.any(String),
     })
     expect(fakeActor.sessions.recordInvocation.mock.invocationCallOrder[0]).toBeLessThan(mockWaitForIdle.mock.invocationCallOrder[0])
+    expect(fakeActor.messages.broadcastEvent).toHaveBeenCalledWith('calling-session', { type: 'agent_invoked' })
+    expect(fakeActor.messages.broadcastEvent.mock.invocationCallOrder[0]).toBeLessThan(mockWaitForIdle.mock.invocationCallOrder[0])
+  })
+
+  it('keeps self-invocations in history without asking the tray to open', async () => {
+    const result = await invokeAgent(caller, { slug: CALLER_AGENT, prompt: 'Start a worker', sync: false })
+    expect(result.ok).toBe(true)
+    expect(fakeActor.sessions.recordInvocation).toHaveBeenCalledOnce()
+    expect(fakeActor.messages.broadcastEvent).not.toHaveBeenCalled()
   })
 
   it('creates no reference when the continuation cannot be delivered', async () => {
@@ -196,6 +206,7 @@ describe('caller session invocation references', () => {
     const result = await invokeAgent(caller, { slug: TARGET, prompt: 'Continue', sessionId: SESSION_ID })
     expect(result.ok).toBe(false)
     expect(fakeActor.sessions.recordInvocation).not.toHaveBeenCalled()
+    expect(fakeActor.messages.broadcastEvent).not.toHaveBeenCalled()
   })
 })
 
