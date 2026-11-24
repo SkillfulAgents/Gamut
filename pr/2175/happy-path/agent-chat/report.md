@@ -1,0 +1,8 @@
+[TEST_PASS]
+[REASON] Opened agent QA-20261124-000229-et48, sent "Hello! What is 2+2?", and confirmed the reply contains "4".
+[STEP] 1. Navigated to http://localhost:47891 — the Gamut home page loaded with the sidebar listing both agents, including QA-20261124-000229-et48.
+[STEP] 2. Clicked QA-20261124-000229-et48 in the sidebar — its agent page opened (URL /agents/qa-20261124-000229-et48-s1u88vtq1f). Screenshot: step2-agent-selected.png.
+[STEP] 3. Verified agent status — the status indicator in the header reads "idle", which is an accepted status.
+[STEP] 4. Typed "Hello! What is 2+2?" into the message box and clicked Send — a new session "Basic Arithmetic Greeting Question" opened, the message appeared in the chat, and the activity indicator showed "Working...".
+[STEP] 5. Waited for "Working..." to disappear (up to 180s) — it cleared within the window. The status returned to "idle" and an assistant reply appeared.
+[STEP] 6. Verified the response mentions "4" — the reply reads "2 + 2 = 4." Screenshot taken: step6-response.png.
