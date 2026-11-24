@@ -9,7 +9,7 @@ import { useCallback, useEffect, useMemo } from 'react'
 import { useSession, useSetSessionMarkedUnread, useClearSessionUnread } from '@renderer/hooks/use-sessions'
 import { HttpError } from '@renderer/lib/api'
 import { SessionNotFound } from '@renderer/router/route-fallbacks'
-import { useNavigate, useSearch } from '@tanstack/react-router'
+import { useNavigate, useRouter, useSearch } from '@tanstack/react-router'
 import type { MessageTarget } from '@renderer/components/messages/locate-message'
 import { useMarkSessionNotificationsRead } from '@renderer/hooks/use-notifications'
 import { useAgentIntegration, useSessionAgentIntegrationId } from '@renderer/hooks/use-agent-integrations'
@@ -41,6 +41,7 @@ interface SessionViewProps {
 export function SessionView({ agentSlug, sessionId, onSessionCreated: handleSessionCreated }: SessionViewProps) {
   useRenderTracker('SessionView')
   const navigate = useNavigate()
+  const { history } = useRouter()
   const { data: session, error: sessionError } = useSession(sessionId, agentSlug)
   const { data: integrationId } = useSessionAgentIntegrationId(agentSlug, sessionId)
   const { data: integration } = useAgentIntegration(integrationId ?? null)
@@ -193,7 +194,8 @@ export function SessionView({ agentSlug, sessionId, onSessionCreated: handleSess
           back={{
             label: 'Back',
             onClick: () => {
-              void navigate({ to: '/agents/$slug/called-from-agents', params: { slug: agentSlug } })
+              if (history.canGoBack()) history.back()
+              else void navigate({ to: '/agents/$slug/called-from-agents', params: { slug: agentSlug }, replace: true })
             },
             testId: 'x-agent-session-back-button',
           }}

@@ -5,6 +5,7 @@ import { MessageList } from '@renderer/components/messages/message-list'
 import { WithoutSessionTray } from '@renderer/context/session-tray-context'
 import { CalledAgentAvatar, calledSessionState, calledStateLabel, type CalledSessionState } from '@renderer/components/agents/called-agent-avatar'
 import { AppLink } from '@renderer/components/ui/app-link'
+import { buttonVariants } from '@renderer/components/ui/button'
 import { useAgents, resolveRouteAgentId } from '@renderer/hooks/use-agents'
 import { useInvocationList } from '@renderer/hooks/use-invocations'
 import { sessionQuery } from '@renderer/hooks/query-options'
@@ -116,29 +117,51 @@ function AgentSessionGroup({ title, entries, onPick }: { title: string; entries:
   )
 }
 
-/** Laid out as a Subagents row: who, then what it was asked; the chevron on hover says it drills in. */
-function AgentSessionRow({ entry, onPick }: { entry: CalledSession; onPick: () => void }) {
+function InputNeededLink({ entry, compact = false }: { entry: CalledSession; compact?: boolean }) {
   return (
-    <button
-      type="button"
-      onClick={onPick}
-      title={entry.prompt || undefined}
-      data-testid="agent-sessions-list-row"
-      data-working={entry.state !== 'idle' || undefined}
-      className="group flex w-full items-start gap-2.5 rounded-item px-2 py-2 text-left transition-colors hover:bg-muted/60"
+    <AppLink
+      to="/agents/$slug/sessions/$sessionId"
+      params={{ slug: entry.call.slug, sessionId: entry.call.sessionId }}
+      aria-label={`Input Needed — open ${entry.agent?.name ?? entry.call.slug} session`}
+      className={buttonVariants({
+        variant: 'ghost',
+        size: compact ? 'xs' : 'default',
+        className: compact
+          ? 'mr-2 shrink-0 bg-orange-100 text-orange-800 hover:bg-orange-200 hover:text-orange-900 dark:bg-orange-950 dark:text-orange-300 dark:hover:bg-orange-900 dark:hover:text-orange-200'
+          : 'w-full bg-orange-700 text-white hover:bg-orange-800 hover:text-white dark:bg-orange-400 dark:text-neutral-950 dark:hover:bg-orange-300 dark:hover:text-neutral-950',
+      })}
     >
-      <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center">
-        <CalledAgentAvatar agent={entry.agent} state={entry.state} size={16} />
-      </span>
-      <span className="min-w-0 flex-1">
-        <span className="block truncate text-[13px]/5 text-foreground">{entry.agent?.name ?? entry.call.slug}</span>
-        {entry.prompt && <span className="block truncate text-xs text-muted-foreground">{entry.prompt}</span>}
-      </span>
-      <ChevronRight
-        aria-hidden
-        className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"
-      />
-    </button>
+      Input Needed <ArrowUpRight aria-hidden />
+    </AppLink>
+  )
+}
+
+function AgentSessionRow({ entry, onPick }: { entry: CalledSession; onPick: () => void }) {
+  const needsInput = entry.state === 'needs-input'
+  return (
+    <div className="flex items-center">
+      <button
+        type="button"
+        onClick={onPick}
+        title={entry.prompt || undefined}
+        data-testid="agent-sessions-list-row"
+        data-working={entry.state !== 'idle' || undefined}
+        className="group flex min-w-0 flex-1 items-start gap-2.5 rounded-item px-2 py-2 text-left transition-colors hover:bg-muted/60"
+      >
+        <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center">
+          <CalledAgentAvatar agent={entry.agent} state={entry.state} size={16} />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-[13px]/5 text-foreground">{entry.agent?.name ?? entry.call.slug}</span>
+          {entry.prompt && <span className="block truncate text-xs text-muted-foreground">{entry.prompt}</span>}
+        </span>
+        {!needsInput && <ChevronRight
+          aria-hidden
+          className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"
+        />}
+      </button>
+      {needsInput && <InputNeededLink entry={entry} compact />}
+    </div>
   )
 }
 
@@ -177,6 +200,11 @@ function AgentSessionDetail({ entry, onBack }: { entry: CalledSession; onBack: (
           </WithoutSessionTray>
         ) : <p className="px-4 py-2 text-xs text-muted-foreground">{entry.unavailable ? 'This session is unavailable or you do not have access.' : 'Loading conversation…'}</p>}
       </div>
+      {entry.state === 'needs-input' && (
+        <div className="shrink-0 border-t px-4 py-3">
+          <InputNeededLink entry={entry} />
+        </div>
+      )}
     </div>
   )
 }

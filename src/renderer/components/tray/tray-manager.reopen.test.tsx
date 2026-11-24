@@ -63,7 +63,10 @@ vi.mock('@shared/lib/tools/request-browser-input/use-browser-input-actions', () 
 const historyMessages: ApiMessage[] = []
 vi.mock('@renderer/hooks/use-messages', () => ({ useMessages: () => ({ data: historyMessages }) }))
 const mockApiFetch = vi.fn((_url: string) => Promise.resolve({ ok: true, json: () => Promise.resolve([]) }))
-vi.mock('@renderer/lib/api', () => ({ apiFetch: (url: string) => mockApiFetch(url) }))
+vi.mock('@renderer/lib/api', () => ({
+  apiFetch: (url: string) => mockApiFetch(url),
+  apiJson: async (url: string) => (await mockApiFetch(url)).json(),
+}))
 vi.mock('@shared/lib/tools/renderers', () => ({ getToolRenderer: () => undefined }))
 vi.mock('@renderer/components/file-preview/file-preview-tray-content', () => ({ FilePreviewTrayContent: () => null }))
 vi.mock('@renderer/components/workflow/workflow-tray-content', () => ({ WorkflowTrayContent: () => null }))
@@ -85,6 +88,7 @@ vi.mock('@renderer/components/ui/sidebar', () => ({ useSidebar: () => sidebar })
 
 import { TrayManager as Tray, type TrayManagerProps } from './tray-manager'
 import { SessionTrayProvider } from '@renderer/context/session-tray-context'
+import { receiveAgentInvocation } from '@renderer/hooks/use-invocations'
 
 function TrayManager(props: TrayManagerProps) {
   return <SessionTrayProvider sessionId={props.sessionId}><Tray {...props} /></SessionTrayProvider>
@@ -112,6 +116,27 @@ describe('TrayManager with the real browser tray', () => {
       unobserve() {}
     }
     vi.stubGlobal('ResizeObserver', RO)
+  })
+
+  it('opens Invoked agents for a new delivery in this session and respects hide until the next one', async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const notify = (session: string) => act(() => receiveAgentInvocation(client, session))
+    notify('caller')
+    render(
+      <QueryClientProvider client={client}>
+        <TrayManager agentSlug="a" sessionId="caller" browserActive={false} persistent />
+      </QueryClientProvider>,
+    )
+    notify('another-session')
+    expect(screen.queryByTestId('tray-drawer')).toBeNull()
+    notify('caller')
+    expect(await screen.findByTestId('agent-sessions-list')).toBeVisible()
+    await userEvent.click(screen.getByRole('button', { name: 'Hide panel' }))
+    notify('another-session')
+    expect(screen.getByTestId('tray-drawer')).toHaveClass('hidden')
+    notify('caller')
+    expect(screen.getByTestId('agent-sessions-list')).toBeVisible()
+    expect(screen.getAllByTestId('utility-tab')).toHaveLength(1)
   })
 
   it('survives full screen → hide panel → show panel with the real content', async () => {

@@ -12,6 +12,7 @@ import { useRequiredTray, useTrayState } from '@renderer/context/session-tray-co
 import { useHeaderTraySlot } from '@renderer/components/layout/content-shell'
 import { useSidebar } from '@renderer/components/ui/sidebar'
 import { useFilePreview } from '@renderer/context/file-preview-context'
+import { onAgentInvoked } from '@renderer/hooks/use-invocations'
 import { BrowserTrayContent, type BrowserPageActions, type BrowserPages } from '@renderer/components/browser/browser-tray-content'
 import { FilePreviewTrayContent } from '@renderer/components/file-preview/file-preview-tray-content'
 import { WorkflowTrayContent } from '@renderer/components/workflow/workflow-tray-content'
@@ -63,6 +64,15 @@ export function TrayManager({
     tray.syncBrowser(pages.tabs, viewed.current)
   }, [tray])
   useEffect(() => { tray.browserAvailable(browserActive) }, [tray, browserActive])
+  useEffect(() => {
+    if (!persistent) return
+    return onAgentInvoked(sessionId, () => {
+      const { selected, tabs, hidden } = tray.snapshot()
+      const front = tabs.find(tab => tab.key === selected)
+      if (!hidden && front?.kind === 'utility' && front.id === 'invoked-agents') return
+      tray.openUtility('invoked-agents', null)
+    })
+  }, [persistent, sessionId, tray])
   const frontTab = tabs.find(tab => tab.key === front)
   const targetId = frontTab?.kind === 'browser' ? frontTab.page?.targetId : null
   useEffect(() => {

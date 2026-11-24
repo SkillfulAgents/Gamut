@@ -1,4 +1,5 @@
 import { publishSubagentSnapshot } from './use-session-subagents'
+import { receiveAgentInvocation } from './use-invocations'
 
 import { invalidatePendingUserRequests } from '@renderer/lib/pending-request-cache'
 import { useState, useEffect, useCallback, useRef } from 'react'
@@ -1129,6 +1130,9 @@ function getOrCreateEventSource(
             }
           }, 5000))
         }
+      }
+      else if (data.type === 'agent_invoked') {
+        receiveAgentInvocation(queryClient, sessionId)
       }
       else if (data.type === 'messages_updated') {
         invalidateMessagesThrottled(queryClient, sessionId)
