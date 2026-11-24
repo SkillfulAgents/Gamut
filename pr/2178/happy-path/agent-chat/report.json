@@ -1,24 +1,24 @@
 {
   "storyId": "agent-chat",
   "passed": true,
-  "reason": "Opened agent QA-20261124-023915-pxwy, confirmed it was idle, sent \"Hello! What is 2+2?\", and verified the reply contains 4.",
+  "reason": "Sent \"Hello! What is 2+2?\" to agent QA-20261124-030114-hi8b and verified the reply contains \"4\".",
   "steps": [
-    "1. Navigated to http://localhost:47891 — the Gamut home page loaded with the sidebar listing QA-20261124-023915-pxwy (idle). Screenshot not taken for this step.",
-    "2. Clicked QA-20261124-023915-pxwy in the sidebar — the agent page opened at /agents/qa-20261124-023915-pxwy-k816e504up.",
-    "3. Verified agent status — the header status reads \"idle\", which satisfies the running-or-idle requirement. Screenshot saved as step3-agent-idle.png.",
-    "4. Sent \"Hello! What is 2+2?\" from the agent landing input — the session opened and the user message appeared in the message list.",
-    "5. Waited for a response — the reply \"2 + 2 = 4.\" was already in the list when checked, and the status had returned to idle. No activity indicator was visible at that point.",
-    "6. Verified the response mentions \"4\" — \"2 + 2 = 4.\" is shown as the assistant reply. Screenshot saved as step6-response.png."
+    "Step 1, navigated to http://localhost:47891 — Gamut home loaded with the sidebar listing QA-20261124-030114-hi8b under Your Agents. No errors.",
+    "Step 2, clicked QA-20261124-030114-hi8b in the sidebar — agent page opened at /agents/qa-20261124-030114-hi8b-nwjccwmbmq with its name in the header.",
+    "Step 3, verified agent status — header status reads \"idle\" and the sidebar shows Idle with a Stop Agent control. Screenshot taken.",
+    "Step 4, typed \"Hello! What is 2+2?\" in the message input and clicked Send — the view navigated to a new session titled \"Basic Arithmetic Question Check\" and the user message appeared in the list.",
+    "Step 5, waited for a response — the assistant reply \"2 + 2 = 4.\" appeared right after sending and the session showed idle with the input re-enabled. No wait timeout was hit.",
+    "Step 6, verified the response mentions \"4\" — \"2 + 2 = 4.\" is shown in the chat. Screenshot taken."
   ],
   "bugs": [],
-  "durationMs": 39602,
-  "sessionId": "f2abafe8-4a22-4559-8be4-0e846867fb5c",
+  "durationMs": 41559,
+  "sessionId": "6d95af76-70a8-42f8-9e87-8e94b6960263",
   "cost": {
-    "inputTokens": 8110,
-    "outputTokens": 4663,
-    "cacheCreationTokens": 106563,
-    "cacheReadTokens": 584713,
+    "inputTokens": 7811,
+    "outputTokens": 4512,
+    "cacheCreationTokens": 165601,
+    "cacheReadTokens": 496929,
     "model": "claude-haiku-5-5",
-    "totalCostUsd": 0.2231
+    "totalCostUsd": 0.287065
   }
 }
