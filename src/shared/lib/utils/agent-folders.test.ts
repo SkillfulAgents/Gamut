@@ -19,18 +19,8 @@ import {
   type AgentFolder,
   type FolderSection,
 } from './agent-folders'
-import type { ApiAgent } from '@renderer/hooks/use-agents'
-
-function makeAgent(slug: string): ApiAgent {
-  return {
-    avatar: { color: 'tonal-blue', shape: 'circle' } as const,
-    slug,
-    displaySlug: slug,
-    name: slug,
-    createdAt: new Date('2025-01-01'),
-    status: 'stopped',
-    containerPort: null,
-  }
+function makeAgent(slug: string) {
+  return { slug, name: slug, createdAt: new Date('2025-01-01') }
 }
 
 const a = makeAgent('a')

@@ -10,7 +10,7 @@ import * as os from 'node:os'
 import * as path from 'node:path'
 import { createTestDatabase, type TestDatabase } from '@shared/lib/db/testing/create-test-database'
 import { backgroundSettled } from '@shared/lib/background'
-import { agents } from '@shared/lib/db/schema'
+import { agents, userSettings } from '@shared/lib/db/schema'
 import { runtimeCapabilities } from '@shared/lib/facts/capabilities'
 import { declareServerCapabilities } from '@shared/lib/facts/server-facts'
 
@@ -375,6 +375,21 @@ describe('the tools', () => {
     })
     expect(byName.Brain).toMatchObject({ description: null, status: 'stopped', team_brain: true })
     expect(byName.Alpha.slug).toMatch(/alpha/)
+  })
+
+  it('list_agents gives the sidebar sections of the person calling, on the first page only', async () => {
+    await handle.db.insert(userSettings).values({
+      userId: 'local',
+      settings: JSON.stringify({ agentFolders: [{ id: 'f-sales', name: 'Sales' }], agentFolderAssignments: { alpha: 'f-sales' } }),
+      updatedAt: new Date(),
+    }).run()
+    const first = (await callTool('list_agents', {})).structuredContent
+    const slugOf = Object.fromEntries(first.agents.map((agent: { name: string; slug: string }) => [agent.name, agent.slug]))
+    expect(first.sections).toEqual([
+      { name: 'Your Agents', agents: [slugOf.Brain] },
+      { name: 'Sales', agents: [slugOf.Alpha] },
+    ])
+    expect((await callTool('list_agents', { offset: 1 })).structuredContent.sections).toBeUndefined()
   })
 
   it('list_sessions lists what the app lists, newest first, paged', async () => {

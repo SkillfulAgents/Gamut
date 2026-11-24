@@ -12,10 +12,10 @@
 import type { XAgentFileTransfer, XAgentPick, XAgentRuntime } from '@shared/lib/proxy/x-agent-review'
 import type { SessionMetadata } from '@shared/lib/types/agent'
 
-import { and, eq } from 'drizzle-orm'
+import { and, desc, eq, isNotNull } from 'drizzle-orm'
 import { alias } from 'drizzle-orm/sqlite-core'
 import { db } from '@shared/lib/db'
-import { agentAcl } from '@shared/lib/db/schema'
+import { agentAcl, messageAuthor } from '@shared/lib/db/schema'
 import { isAuthMode } from '@shared/lib/auth/mode'
 import { hasMinRole, type AgentRole } from '@shared/lib/types/agent'
 import { agentRegistry } from '@shared/lib/agent-actor'
@@ -257,6 +257,29 @@ export function callerHasRoleOnTarget(caller: XAgentCaller, targetSlug: string, 
 export function callerVisibleAgentSlugs(caller: XAgentCaller): Promise<Set<string> | null> {
   if (caller.kind === 'agent') return visibleAgentSlugs(caller.agentSlug)
   return userVisibleAgentSlugs(caller)
+}
+
+/**
+ * The person behind the call: the user calling directly, the local user
+ * without sign-in, else the person who wrote last in the calling session. A
+ * message only an agent wrote names no one, even when a person pays for it,
+ * so a run no person started has none. The session id comes from the
+ * container, so only a session of the agent that is running now names anyone.
+ */
+export async function personBehindCall(caller: XAgentCaller): Promise<string | undefined> {
+  if (!isAuthMode()) return 'local'
+  if (caller.kind === 'user') return caller.userId
+  if (!caller.sessionId) return undefined
+  if (!(await agentRegistry.get(caller.agentSlug).live()).activeSessionIds.includes(caller.sessionId)) return undefined
+  const [row] = await db.select({ userId: messageAuthor.userId }).from(messageAuthor)
+    .where(and(
+      eq(messageAuthor.agentSlug, caller.agentSlug),
+      eq(messageAuthor.sessionId, caller.sessionId),
+      isNotNull(messageAuthor.userId),
+    ))
+    .orderBy(desc(messageAuthor.createdAt), desc(messageAuthor.id))
+    .limit(1)
+  return row?.userId ?? undefined
 }
 
 /**

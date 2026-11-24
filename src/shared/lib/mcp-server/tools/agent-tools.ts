@@ -1,7 +1,7 @@
 /**
  * list_agents: the agents the person has a role on, through the x-agent
  * service with a user caller (its ACL filter), with the status the app's
- * agent list shows, and the resume the agents' own list_agents gives.
+ * agent list shows, and the resume and sidebar sections the agents' own list_agents gives.
  */
 import { z } from 'zod'
 import { listAgentsWithStatus } from '@shared/lib/services/agent-service'
@@ -16,7 +16,7 @@ const DESCRIPTION_MAX_CHARS = 1_000
 export const listAgents = defineTool({
   name: 'list_agents',
   title: 'List agents',
-  description: 'The Gamut agents you have a role on: slug (pass it to list_sessions and read_session), name, description, status, whether it is the Team Brain agent, and its resume: members, when it was created, whether a session is running or needs input, when it was last active, session counts, dashboards, and the services it has accounts for.',
+  description: 'The Gamut agents you have a role on: slug (pass it to list_sessions and read_session), name, description, status, whether it is the Team Brain agent, and its resume: members, when it was created, whether a session is running or needs input, when it was last active, session counts, dashboards, and the services it has accounts for. The first page also gives your sidebar sections: how you group these agents in the app\'s left nav.',
   scope: 'read',
   input: z.object({
     offset: z.number().int().min(0).optional().describe('Where to continue: the next_offset of the previous call. Default 0.'),
@@ -44,6 +44,7 @@ export const listAgents = defineTool({
       dashboards: z.array(z.string()),
       account_services: z.array(z.string()),
     })),
+    sections: z.array(z.object({ name: z.string(), agents: z.array(z.string()) })).optional(),
     total: z.number().int(),
     next_offset: z.number().int().nullable(),
   }),
@@ -72,10 +73,12 @@ export const listAgents = defineTool({
         account_services: agent.accountServices,
       }
     })
+    // Once, with the first page: later pages continue the agent list, and sections name agents by the same slugs.
+    const sections = offset === 0 ? visible.value.sections?.sections : undefined
     const page = agents.slice(offset, offset + AGENTS_PAGE_SIZE)
-    const fitting = countFitting(page, MAX_RESULT_CHARS - 1_000)
+    const fitting = countFitting(page, MAX_RESULT_CHARS - 1_000 - (sections ? JSON.stringify(sections).length : 0))
     const end = offset + fitting
-    return { agents: page.slice(0, fitting), total: agents.length, next_offset: end < agents.length ? end : null }
+    return { agents: page.slice(0, fitting), ...(sections && { sections }), total: agents.length, next_offset: end < agents.length ? end : null }
   },
 })
 

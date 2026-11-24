@@ -413,6 +413,7 @@ beforeEach(async () => {
   xAgentReviewRequests.length = 0
   vi.clearAllMocks()
   mockIsSessionActive.mockReturnValue(false)
+  mockActiveIds.mockReturnValue([])
   mockIsSessionAwaitingInput.mockReturnValue(false)
   mockWaitForIdle.mockResolvedValue('idle')
   mockSessionIsKnown.mockResolvedValue(true)
@@ -582,6 +583,101 @@ describe('/list', () => {
       accountServices: ['gmail', 'slack'],
     })
     expect(JSON.stringify(agent)).not.toContain('@test')
+  })
+
+  it('groups the agents under the sidebar sections of whoever wrote last in the calling session', async () => {
+    authModeEnabled = true
+    const { setPolicy } = await import('@shared/lib/services/x-agent-policy-service')
+    await setPolicy(CALLER_SLUG, 'list', null, 'allow')
+    await testDb.insert(schema.agentAcl).values(['agent-a', 'agent-b'].map((agentSlug) =>
+      ({ id: randomUUID(), userId: OWNER_USER_ID, agentSlug, role: 'user' as const, createdAt: new Date() })))
+    await testDb.insert(schema.messageAuthor).values([
+      { id: 'owner-message', sessionId: 'shared-session', agentSlug: CALLER_SLUG, userId: OWNER_USER_ID, createdAt: new Date('2026-01-01T00:00:00.000Z') },
+      { id: 'other-message', sessionId: 'shared-session', agentSlug: CALLER_SLUG, userId: OTHER_USER_ID, createdAt: new Date('2026-01-01T00:00:01.000Z') },
+    ])
+    await testDb.insert(schema.userSettings).values({
+      userId: OTHER_USER_ID,
+      settings: JSON.stringify({
+        agentFolders: [{ id: 'f-sales', name: 'Sales' }, { id: 'f-empty', name: 'Archive' }],
+        agentFolderAssignments: { 'agent-b': 'f-sales' },
+        agentListOrder: ['agent-folder::f-sales', 'agent-folder::root', 'agent-folder::f-empty'],
+      }),
+      updatedAt: new Date(),
+    })
+    mockListAgents.mockResolvedValue([
+      { slug: 'agent-a', frontmatter: { name: 'Agent A' } },
+      { slug: 'agent-b', frontmatter: { name: 'Agent B' } },
+      { slug: CALLER_SLUG, frontmatter: { name: 'Caller' } },
+    ])
+
+    mockActiveIds.mockReturnValue(['shared-session'])
+    const res = await authedFetch('/x-agent/list', { _callerSessionId: 'shared-session' })
+    expect(res.status).toBe(200)
+    expect((await res.json()).sections).toEqual({
+      personName: 'Other',
+      sections: [
+        { name: 'Sales', agents: ['agent-b'] },
+        { name: 'Your Agents', agents: ['agent-a'] },
+        { name: 'Archive', agents: [] },
+      ],
+    })
+  })
+
+  it('shows the local user\'s sections in every run when sign-in is off', async () => {
+    const { setPolicy } = await import('@shared/lib/services/x-agent-policy-service')
+    await setPolicy(CALLER_SLUG, 'list', null, 'allow')
+    await testDb.insert(schema.userSettings).values({
+      userId: 'local',
+      settings: JSON.stringify({ agentFolders: [{ id: 'f-ops', name: 'Ops' }], agentFolderAssignments: { 'agent-a': 'f-ops' } }),
+      updatedAt: new Date(),
+    })
+    mockListAgents.mockResolvedValue([{ slug: 'agent-a', frontmatter: { name: 'Agent A' } }])
+    const res = await authedFetch('/x-agent/list', {})
+    expect((await res.json()).sections).toEqual({
+      personName: null,
+      sections: [{ name: 'Your Agents', agents: [] }, { name: 'Ops', agents: ['agent-a'] }],
+    })
+  })
+
+  it('reads a person with no saved settings as the default layout without saving any', async () => {
+    authModeEnabled = true
+    const { setPolicy } = await import('@shared/lib/services/x-agent-policy-service')
+    await setPolicy(CALLER_SLUG, 'list', null, 'allow')
+    await testDb.insert(schema.agentAcl).values({ id: randomUUID(), userId: OWNER_USER_ID, agentSlug: 'agent-a', role: 'user', createdAt: new Date() })
+    await testDb.insert(schema.messageAuthor).values({ id: 'fresh-message', sessionId: 'fresh-session', agentSlug: CALLER_SLUG, userId: OTHER_USER_ID, createdAt: new Date() })
+    mockListAgents.mockResolvedValue([{ slug: 'agent-a', frontmatter: { name: 'Agent A' } }])
+    mockActiveIds.mockReturnValue(['fresh-session'])
+    const res = await authedFetch('/x-agent/list', { _callerSessionId: 'fresh-session' })
+    expect((await res.json()).sections).toEqual({ personName: 'Other', sections: [{ name: 'Your Agents', agents: ['agent-a'] }] })
+    expect(await testDb.select().from(schema.userSettings).where(eq(schema.userSettings.userId, OTHER_USER_ID)).all()).toEqual([])
+  })
+
+  it('has no sections when the session a person wrote in is not running now', async () => {
+    authModeEnabled = true
+    const { setPolicy } = await import('@shared/lib/services/x-agent-policy-service')
+    await setPolicy(CALLER_SLUG, 'list', null, 'allow')
+    await testDb.insert(schema.messageAuthor).values({ id: 'old-message', sessionId: 'old-session', agentSlug: CALLER_SLUG, userId: OWNER_USER_ID, createdAt: new Date() })
+    mockListAgents.mockResolvedValue([{ slug: 'agent-a', frontmatter: { name: 'Agent A' } }])
+    const res = await authedFetch('/x-agent/list', { _callerSessionId: 'old-session' })
+    expect(res.status).toBe(200)
+    expect((await res.json()).sections).toBeUndefined()
+  })
+
+  it('has no sections when only an agent wrote in the calling session, even with a person paying', async () => {
+    authModeEnabled = true
+    const { setPolicy } = await import('@shared/lib/services/x-agent-policy-service')
+    await setPolicy(CALLER_SLUG, 'list', null, 'allow')
+    // What invoke_agent records for a scheduled run's call: the payer is the calling agent's owner.
+    await testDb.insert(schema.messageAuthor).values({
+      id: 'invoked-message', sessionId: 'scheduled-run', agentSlug: CALLER_SLUG,
+      authorAgentSlug: 'scheduler-agent', billedUserId: OWNER_USER_ID, createdAt: new Date(),
+    })
+    await testDb.insert(schema.agentAcl).values({ id: randomUUID(), userId: OWNER_USER_ID, agentSlug: 'agent-a', role: 'user', createdAt: new Date() })
+    mockListAgents.mockResolvedValue([{ slug: 'agent-a', frontmatter: { name: 'Agent A' } }])
+    mockActiveIds.mockReturnValue(['scheduled-run'])
+    const res = await authedFetch('/x-agent/list', { _callerSessionId: 'scheduled-run' })
+    expect(res.status).toBe(200)
+    expect((await res.json()).sections).toBeUndefined()
   })
 })
 

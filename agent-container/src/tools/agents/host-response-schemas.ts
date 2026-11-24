@@ -25,9 +25,14 @@ export const listAgentsResultSchema = z.object({
     dashboards: z.array(z.string()),
     accountServices: z.array(z.string()),
   })),
+  sections: z.object({
+    personName: z.string().nullable(),
+    sections: z.array(z.object({ name: z.string(), agents: z.array(z.string()) })),
+  }).optional(),
 })
 
 export type ListedAgent = z.infer<typeof listAgentsResultSchema>['agents'][number]
+export type ListedSections = NonNullable<z.infer<typeof listAgentsResultSchema>['sections']>
 
 export const listAgentMembersResultSchema = z.object({
   truncated: z.boolean(),

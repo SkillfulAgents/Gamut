@@ -62,7 +62,7 @@ import {
   sectionsToSettings,
   uniqueFolderName,
   type FolderSection,
-} from '@renderer/lib/agent-folders'
+} from '@shared/lib/utils/agent-folders'
 
 interface AgentContextMenuProps {
   agent: ApiAgent
@@ -218,7 +218,7 @@ export function AgentContextMenu({
     updateSettings.mutate((current) => {
       const sections = buildSections(current)
       const currentFolders = sections.filter((s) => !s.isRoot).map((s) => s.folder)
-      const withFolder: FolderSection[] = [
+      const withFolder: FolderSection<ApiAgent>[] = [
         ...sections,
         { folder: { id, name: uniqueFolderName(currentFolders, name) }, isRoot: false, agents: [] },
       ]

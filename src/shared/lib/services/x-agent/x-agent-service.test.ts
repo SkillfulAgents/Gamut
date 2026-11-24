@@ -9,6 +9,7 @@ import * as schema from '../../db/schema'
 import type { AppDatabase } from '../../db/drivers/types'
 import { createTestDatabase, type TestDatabase } from '../../db/testing/create-test-database'
 import type { AgentRole } from '@shared/lib/types/agent'
+import { getDefaultUserSettings } from '@shared/lib/services/user-settings-service'
 
 // The configured sync wait is read when sync-wait.ts loads. Pin it to the
 // default (unset) before any import, whatever the shell sets, so the tests
@@ -120,7 +121,7 @@ vi.mock('@shared/lib/agent-actor', () => ({
 }))
 
 import { userXAgentCaller, agentXAgentCaller, type XAgentCaller } from './caller'
-import { getTargetSessions, getTargetTranscript, listVisibleAgents, openDeliveredFile, toListedAgent } from './operations'
+import { getTargetSessions, getTargetTranscript, listVisibleAgents, openDeliveredFile, toListedAgent, toListedSections } from './operations'
 import { invokeAgent } from './invoke'
 import { effectiveSyncWaitMs, readLastAssistantMessage, readLastAssistantReply } from './sync-wait'
 
@@ -527,5 +528,20 @@ describe('toListedAgent', () => {
     expect(agent.members[0]).toEqual({ name: 'Person 0', role: 'user', invited: true, kind: 'person' })
     expect(agent).toMatchObject({ memberCount: 27, needsInput: true, running: false, sessionCount: 2, automatedSessionCount: 1, dashboards: ['pipeline'] })
     expect(JSON.stringify(agent)).not.toContain('@test')
+  })
+})
+
+describe('toListedSections', () => {
+  it('files agents by their stored slug, lists them by their display slug, and keeps each heading on one line', () => {
+    const record = (slug: string, name: string) => ({ slug, name, avatar: { color: 'tonal-red', shape: 'squircle' } as const, createdAt: new Date(0), placement: { runtime: 'local' as const, workspaceHandle: null } })
+    const sections = toListedSections(
+      [record('abc123', 'Sales Desk'), record('def456', 'Research')],
+      ['sales-desk-abc123', 'research-def456'],
+      { name: 'Jeremy', settings: { ...getDefaultUserSettings(), agentFolders: [{ id: 'f1', name: 'Sales\n## Team' }], agentFolderAssignments: { abc123: 'f1' } } },
+    )
+    expect(sections).toEqual({
+      personName: 'Jeremy',
+      sections: [{ name: 'Your Agents', agents: ['research-def456'] }, { name: 'Sales ## Team', agents: ['sales-desk-abc123'] }],
+    })
   })
 })

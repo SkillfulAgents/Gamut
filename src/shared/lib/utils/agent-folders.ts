@@ -1,5 +1,3 @@
-import type { ApiAgent } from '@renderer/hooks/use-agents'
-
 /**
  * Left-nav agent folders.
  *
@@ -37,11 +35,16 @@ export interface AgentFolder {
   name: string
 }
 
+/** What a section needs of an agent: the sidebar files full agents, the host bare slugs. */
+export interface SectionAgent {
+  slug: string
+}
+
 /** One top-level block: a folder (the default one included) and its agents. */
-export interface FolderSection {
+export interface FolderSection<T extends SectionAgent = SectionAgent> {
   folder: AgentFolder
   isRoot: boolean
-  agents: ApiAgent[]
+  agents: T[]
 }
 
 /**
@@ -98,15 +101,15 @@ export function sanitizeFolders(folders: AgentFolder[] | undefined): AgentFolder
  * no place renders first, which — together with unassigned agents landing in
  * it — reproduces the pre-folders layout exactly on an untouched install.
  */
-export function buildFolderSections(
-  orderedAgents: ApiAgent[],
+export function buildFolderSections<T extends SectionAgent>(
+  orderedAgents: T[],
   folders: AgentFolder[] | undefined,
   assignments: Record<string, string> | undefined,
   listOrder: string[] | undefined
-): FolderSection[] {
+): FolderSection<T>[] {
   const userFolders = sanitizeFolders(folders)
-  const members = new Map<string, ApiAgent[]>(userFolders.map((f) => [f.id, []]))
-  const rootAgents: ApiAgent[] = []
+  const members = new Map<string, T[]>(userFolders.map((f) => [f.id, []]))
+  const rootAgents: T[] = []
 
   for (const agent of orderedAgents) {
     const folderId = assignments?.[agent.slug]
@@ -115,7 +118,7 @@ export function buildFolderSections(
     else rootAgents.push(agent)
   }
 
-  const sections: FolderSection[] = [
+  const sections: FolderSection<T>[] = [
     {
       folder: { id: ROOT_FOLDER_ID, name: ROOT_FOLDER_NAME },
       isRoot: true,
@@ -129,7 +132,7 @@ export function buildFolderSections(
   ]
 
   const rank = new Map((listOrder ?? []).map((key, index) => [key, index]))
-  const placeOf = (section: FolderSection) => {
+  const placeOf = (section: FolderSection<T>) => {
     const stored = rank.get(sortableIdForFolder(section.folder.id))
     if (stored !== undefined) return stored
     return section.isRoot ? -1 : rank.size + 1
@@ -239,11 +242,11 @@ function clamp(value: number, max: number): number {
   return Math.max(0, Math.min(value, max))
 }
 
-export function moveAgent(
-  sections: FolderSection[],
+export function moveAgent<T extends SectionAgent>(
+  sections: FolderSection<T>[],
   slug: string,
   target: AgentDropTarget
-): FolderSection[] {
+): FolderSection<T>[] {
   const from = locateAgent(sections, slug)
   if (!from) return sections
   const source = sections[from.sectionIndex]
@@ -274,11 +277,11 @@ export function moveAgent(
 }
 
 /** Move a folder (the default one included) to a top-level slot. */
-export function moveFolder(
-  sections: FolderSection[],
+export function moveFolder<T extends SectionAgent>(
+  sections: FolderSection<T>[],
   folderId: string,
   toIndex: number
-): FolderSection[] {
+): FolderSection<T>[] {
   const from = sections.findIndex((s) => s.folder.id === folderId)
   if (from === -1) return sections
   const to = clamp(toIndex, sections.length - 1)
@@ -291,7 +294,7 @@ export function moveFolder(
  * their relative order and lets the caller write the result in one update.
  * The default folder itself cannot be dissolved.
  */
-export function dissolveFolder(sections: FolderSection[], folderId: string): FolderSection[] {
+export function dissolveFolder<T extends SectionAgent>(sections: FolderSection<T>[], folderId: string): FolderSection<T>[] {
   if (folderId === ROOT_FOLDER_ID) return sections
   const index = sections.findIndex((s) => s.folder.id === folderId)
   if (index === -1) return sections
@@ -319,10 +322,10 @@ export type TreeOperation =
   | { kind: 'placeFolder'; folderId: string; index: number }
   | { kind: 'dissolveFolder'; folderId: string }
 
-export function applyTreeOperation(
-  sections: FolderSection[],
+export function applyTreeOperation<T extends SectionAgent>(
+  sections: FolderSection<T>[],
   operation: TreeOperation
-): FolderSection[] {
+): FolderSection<T>[] {
   switch (operation.kind) {
     case 'placeAgent':
       // Out-of-range indexes clamp/append; a slug or folder that vanished

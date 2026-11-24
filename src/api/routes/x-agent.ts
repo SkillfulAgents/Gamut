@@ -62,8 +62,8 @@ function getCallerSlug(c: { get: (k: 'callerSlug') => string }): string {
 // POST /api/x-agent/list - list agents visible to caller
 // ----------------------------------------------------------------------------
 
-xAgent.post('/list', async (c) => {
-  const result = await listVisibleAgents(agentXAgentCaller(getCallerSlug(c)))
+xAgent.post('/list', zValidator('json', z.object({ _callerSessionId: z.string().optional() })), async (c) => {
+  const result = await listVisibleAgents(agentXAgentCaller(getCallerSlug(c), c.req.valid('json')._callerSessionId))
   if (!result.ok) return c.json({ error: result.error }, result.status)
   return c.json(result.value)
 })

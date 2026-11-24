@@ -51,7 +51,7 @@ import { getDashboardLogsTool } from './tools/get-dashboard-logs'
 import { createWidgetTool } from './tools/create-widget'
 import { refreshWidgetTool } from './tools/refresh-widget'
 import { listWidgetsTool } from './tools/list-widgets'
-import { listAgentsTool } from './tools/agents/list-agents'
+import { makeListAgentsTool } from './tools/agents/list-agents'
 import { listAgentMembersTool } from './tools/agents/list-agent-members'
 import { createAgentTool } from './tools/agents/create-agent'
 import { makeInvokeAgentTool } from './tools/agents/invoke-agent'
@@ -170,7 +170,7 @@ export function createAgentsMcpServer(getCallerSessionId: () => string) {
     name: 'agents',
     version: '1.0.0',
     tools: [
-      listAgentsTool,
+      makeListAgentsTool(getCallerSessionId),
       listAgentMembersTool,
       createAgentTool,
       makeInvokeAgentTool(getCallerSessionId),

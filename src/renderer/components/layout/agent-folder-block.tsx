@@ -30,7 +30,7 @@ import {
   containerIdForFolder,
   sortableIdForFolder,
   type AgentFolder,
-} from '@renderer/lib/agent-folders'
+} from '@shared/lib/utils/agent-folders'
 
 /** The ghost avatar in an empty section: the dome (the palette's "Arch"). */
 const GHOST_SHAPE = orbShape('arch')
