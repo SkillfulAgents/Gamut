@@ -1,0 +1,24 @@
+{
+  "storyId": "agent-chat",
+  "passed": true,
+  "reason": "Opened agent QA-20261124-223501-eqf5, confirmed it was idle, sent \"Hello! What is 2+2?\", and verified the reply contains 4.",
+  "steps": [
+    "1. Navigated to http://localhost:47891 — Gamut home loaded with the sidebar listing QA-20261124-223502-sdsl and QA-20261124-223501-eqf5, both showing Idle.",
+    "2. Clicked QA-20261124-223501-eqf5 in the sidebar — the agent page at /agents/qa-20261124-223501-eqf5-ljf4kbo49h opened.",
+    "3. Checked agent status — the header status indicator reads \"idle\", which is an accepted state.",
+    "4. Typed \"Hello! What is 2+2?\" in the message input and clicked Send — the app navigated to a new session and the user message appeared in the message list.",
+    "5. Waited for a response — the assistant reply \"2 + 2 = 4.\" was already in the message list on the first check after sending, so no wait was needed.",
+    "6. Verified the response mentions \"4\" — the reply \"2 + 2 = 4.\" is shown. Screenshot taken (step6-response.png)."
+  ],
+  "bugs": [],
+  "durationMs": 30122,
+  "sessionId": "b72d6c90-4e6f-4ff4-9891-d6f78604b397",
+  "cost": {
+    "inputTokens": 7796,
+    "outputTokens": 3946,
+    "cacheCreationTokens": 143803,
+    "cacheReadTokens": 553081,
+    "model": "claude-haiku-5-5",
+    "totalCostUsd": 0.262588
+  }
+}
