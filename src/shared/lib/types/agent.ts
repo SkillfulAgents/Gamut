@@ -4,6 +4,7 @@
  * Type definitions for file-based agent storage
  */
 
+import type { SavedContext } from '../container/context-breakdown-schema'
 import type { RuntimeOptions } from '../container/runtime-options'
 import type { SlashCommandInfo } from '../container/types'
 import type { LlmProviderId } from '../llm-provider/provider-types'
@@ -124,6 +125,8 @@ export interface SessionMetadata extends RuntimeOptions {
   lastWake?: { taskId: string; executionAt: string }
   // Context window usage from the last completed turn
   lastUsage?: SessionUsage
+  /** Private details for the context panel; omitted from ordinary session responses. */
+  lastContext?: SavedContext
   // Available slash commands from the agent SDK
   slashCommands?: SlashCommandInfo[]
   // The inherited RuntimeOptions are the last ones the user used on this
@@ -134,7 +137,13 @@ export interface SessionMetadata extends RuntimeOptions {
   errorProviders?: Record<string, LlmProviderId>
   // X-Agent: present when this session was created by another agent invoking this one.
   // Such sessions are hidden as automated until promoted for human input.
+  invokedSessions?: import('@shared/lib/services/x-agent/invoked-session-schema').InvokedSession[]
   invokedByAgentSlug?: string
+  // MCP: present when a person started this session through Gamut's MCP
+  // server from another AI tool. Hidden as automated until promoted, like an
+  // x-agent invocation. `clientName` is what the client called itself in MCP
+  // `clientInfo`, null when its protocol era does not send it per request.
+  mcpInvocation?: { userId: string; clientName: string | null }
   // Widget repair: the platform opened this session because the artifact's
   // widget refresh script failed. Automated (hidden) like a cron run, and the
   // slug doubles as the per-widget dedupe key.
@@ -157,7 +166,7 @@ export interface SessionMetadataMap {
   [sessionId: string]: SessionMetadata
 }
 
-export type SessionOrigin = 'user' | 'scheduled' | 'webhook' | 'integration' | 'agent' | 'widget-repair'
+export type SessionOrigin = 'user' | 'scheduled' | 'webhook' | 'integration' | 'agent' | 'mcp' | 'widget-repair'
 
 /**
  * Session info derived from JSONL file + metadata

@@ -45,7 +45,18 @@ export interface CollapsedContentProps {
 /**
  * Configuration for a tool-specific renderer
  */
+export interface ToolHeaderProps extends ToolRendererProps {
+  toolUseId: string
+  sessionId?: string
+  isSessionActive?: boolean
+  expanded: boolean
+  toggleDetails: () => void
+}
+
 export interface ToolRenderer {
+  /** Tools with a primary destination can keep their details on a separate disclosure. */
+  Header?: React.ComponentType<ToolHeaderProps>
+
   /**
    * Human-friendly name to display instead of the raw tool name
    * e.g., "Request Secret" instead of "mcp__user-input__request_secret"

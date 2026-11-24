@@ -1,25 +1,10 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
-import { createElement, type ReactNode } from 'react'
 import { FileDownloadPill } from './file-download-pill'
 
-// Mock the file preview context
-vi.mock('@renderer/context/file-preview-context', () => ({
-  useFilePreview: () => ({
-    openFile: vi.fn(),
-    openTabs: [],
-    activeTabIndex: 0,
-    comments: new Map(),
-    isOpen: false,
-    closeTab: vi.fn(),
-    setActiveTab: vi.fn(),
-    close: vi.fn(),
-    addComment: vi.fn(),
-    removeComment: vi.fn(),
-    clearComments: vi.fn(),
-  }),
-  FilePreviewProvider: ({ children }: { children: ReactNode }) => children,
+vi.mock('@renderer/context/agent-file-opener-context', () => ({
+  useAgentFileOpener: () => ({ openFile: vi.fn() }),
 }))
 
 describe('FileDownloadPill', () => {

@@ -1,9 +1,9 @@
-import { useParams } from '@tanstack/react-router'
 import { TriangleAlert, ArrowUpRight } from 'lucide-react'
 import type { ApiInformational } from '@shared/lib/types/api'
 import { AppLink } from '@renderer/components/ui/app-link'
 
 interface InformationalItemProps {
+  agentSlug: string
   item: ApiInformational
 }
 
@@ -20,8 +20,7 @@ function isHookBlock(content: string): boolean {
  * message, so without this card the session reads as the agent silently
  * ignoring the user.
  */
-export function InformationalItem({ item }: InformationalItemProps) {
-  const params = useParams({ strict: false }) as { slug?: string }
+export function InformationalItem({ item, agentSlug }: InformationalItemProps) {
   const hookBlock = isHookBlock(item.content)
 
   return (
@@ -49,19 +48,15 @@ export function InformationalItem({ item }: InformationalItemProps) {
             <p className="mt-2 text-xs text-muted-foreground">
               A hook configured in this agent&apos;s workspace intercepted the message before the
               agent could see it.
-              {params.slug && (
-                <>
-                  {' '}
-                  <AppLink
-                    to="/agents/$slug"
-                    params={{ slug: params.slug }}
-                    className="inline-flex items-center gap-0.5 font-medium text-foreground hover:underline"
-                  >
-                    Review hooks
-                    <ArrowUpRight className="h-3 w-3" />
-                  </AppLink>
-                </>
-              )}
+              {' '}
+              <AppLink
+                to="/agents/$slug"
+                params={{ slug: agentSlug }}
+                className="inline-flex items-center gap-0.5 font-medium text-foreground hover:underline"
+              >
+                Review hooks
+                <ArrowUpRight className="h-3 w-3" />
+              </AppLink>
             </p>
           )}
         </div>

@@ -53,7 +53,7 @@ const delivery = () =>
   createSessionDelivery(SLUG, store(), sessions(), () => runtime as never, {
     sessionService: service,
     recordSessionActivity,
-    reviewManager: { denyAllForAgent } as never,
+    denyReviews: (sessionId) => denyAllForAgent(SLUG, sessionId),
     host: live.host.port,
   })
 const metadata = () => sessionService.getSessionMetadata(store(), SESSION)

@@ -38,7 +38,6 @@ import {
   type AgentLiveSummary,
   type AgentRecord,
 } from '@shared/lib/agent-actor'
-import { removeAgentWorkspace } from '@shared/lib/agent-actor/workspace-removal'
 
 // ============================================================================
 // Internal to API Type Conversion
@@ -333,6 +332,7 @@ async function writeNewAgent(
   try {
     await writeAgentWorkspace(record, body)
   } catch (error) {
+    await agentRegistry.get(slug).delete().catch(() => undefined)
     await agentCatalog.remove(slug).catch(() => undefined)
     throw error
   }
@@ -505,17 +505,21 @@ export async function deleteAgent(slug: string): Promise<boolean> {
   // case the container may still be running or be in an unknown stop state.
   //
   // We must NOT delete the host workspace in that situation. Re-throw as a
-  // typed error so the API/UI can surface an actionable failure; the catalog
-  // removal below never runs, so the workspace is preserved and the delete is
-  // retryable.
+  // typed error so the API/UI can surface an actionable failure; nothing
+  // below runs, so the workspace is preserved and the delete is retryable.
+  const actor = agentRegistry.get(slug)
   try {
-    await agentRegistry.get(slug).container.stop({ forDeletion: true })
+    await actor.container.stop({ forDeletion: true })
   } catch (error) {
     throw new AgentContainerStopError(slug, error)
   }
 
-  // Remove the agent only after the container has been confirmed stopped, then
-  // forget the handle and runtime the stop above created for it.
+  // Only after the container has been confirmed stopped. What the agent
+  // stored goes before its row: a removal that fails (a busy mount, a
+  // permission) leaves the agent listed, so the delete can be retried,
+  // instead of a workspace that nothing lists. Then forget the handle and
+  // runtime the stop above created for it.
+  await actor.delete()
   await agentCatalog.remove(slug)
   await agentRegistry.evict(slug)
 
@@ -524,10 +528,10 @@ export async function deleteAgent(slug: string): Promise<boolean> {
 
 /**
  * For a factory reset: stop every running agent through its actor, then
- * remove every agent's workspace through the workspace removal. Agents whose
- * containers this process does not hold are reached too. A failed stop is
- * logged and the reset goes on, as `containerHost.stopAll` does; a failed
- * removal fails the reset. The caller clears the tables after.
+ * have every agent delete what it stored. Agents whose containers this
+ * process does not hold are reached too. A failed stop is logged and the
+ * reset goes on, as `stopAllAgents` does; a failed removal fails the reset.
+ * The caller clears the tables after.
  */
 export async function stopAgentsAndRemoveWorkspaces(): Promise<void> {
   const slugs = await agentCatalog.list()
@@ -541,7 +545,7 @@ export async function stopAgentsAndRemoveWorkspaces(): Promise<void> {
       console.error(`Failed to stop container for agent ${slug}:`, error)
     }
   }))
-  await Promise.all(slugs.map((slug) => removeAgentWorkspace(slug)))
+  await Promise.all(slugs.map((slug) => agentRegistry.get(slug).delete()))
 }
 
 // ============================================================================

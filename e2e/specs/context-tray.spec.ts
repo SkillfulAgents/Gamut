@@ -1,0 +1,89 @@
+import { test, expect } from '@playwright/test'
+import { AppPage } from '../pages/app.page'
+import { AgentPage } from '../pages/agent.page'
+import { SessionPage } from '../pages/session.page'
+
+test('context is counted only when opened and can be refreshed and inspected', async ({ page }, testInfo) => {
+  const counts: string[] = []
+  page.on('request', request => {
+    if (request.method() === 'GET' && /\/sessions\/[^/]+\/context(?:\?|$)/.test(request.url())) counts.push(request.url())
+  })
+  const app = new AppPage(page)
+  await app.goto()
+  await app.waitForAgentsLoaded()
+  const agent = new AgentPage(page)
+  await agent.createAgent(`Context inspector ${testInfo.workerIndex}-${Date.now()}`)
+  const session = new SessionPage(page)
+  await session.sendMessage('Summarize the workspace')
+  await expect(session.getAssistantMessages().first()).toBeVisible()
+  await expect(session.getStopButton()).not.toBeVisible()
+  await page.getByTestId('tray-show').click()
+  await expect(page.getByTestId('tray-empty-context')).toBeVisible()
+  expect(counts).toEqual([])
+  await page.getByTestId('tray-empty-context').click()
+  await expect(page.getByTestId('context-percent')).toHaveText('56% used')
+  expect(counts).toHaveLength(1)
+  expect(counts[0]).toMatch(/\/context$/)
+  await page.getByRole('button', { name: /MCP tools/ }).click()
+  await expect(page.getByText('mcp__browser__navigate', { exact: true })).toBeVisible()
+  await page.getByRole('button', { name: 'Refresh', exact: true }).click()
+  await expect.poll(() => counts.length).toBe(2)
+  expect(counts[1]).toBe(counts[0] + '?refresh=true')
+  await page.getByTestId('tray-hide').click()
+  await session.sendMessage('Summarize the workspace again')
+  await expect(session.getAssistantMessages()).toHaveCount(2)
+  expect(counts).toHaveLength(2)
+})
+
+test('the composer meter opens, selects and restores the session’s Context tab', async ({ page }) => {
+  const app = new AppPage(page)
+  await app.goto()
+  await app.waitForAgentsLoaded()
+  const agent = new AgentPage(page)
+  await agent.createAgent(`Composer context ${Date.now()}`)
+  const session = new SessionPage(page)
+  const longPrompt = Array.from({ length: 80 }, (_, i) => `Checkpoint ${i} in the release checklist.`).join(' ')
+  await session.sendMessage(longPrompt)
+  await expect(session.getAssistantMessages().first()).toBeVisible()
+
+  // A sleeping session from an older image can carry only the last usage.
+  const usage = { totalTokens: 50_000, contextWindow: 200_000 }
+  await page.route(/\/sessions\/[^/]+\/context$/, route => route.fulfill({
+    json: { breakdown: null, source: 'saved-usage', usage },
+  }))
+  await page.route(/\/api\/agents\/[^/]+\/sessions\/[^/?]+(\?.*)?$/, async route => {
+    const response = await route.fetch()
+    const record = await response.json()
+    await route.fulfill({ response, json: { ...record, lastUsage: usage } })
+  })
+  await page.reload()
+  const meter = page.getByRole('button', { name: 'Open Context Usage, 25% used' })
+  const selected = page.getByRole('button', { name: 'Context', exact: true, pressed: true })
+  await meter.hover()
+  await expect(page.getByRole('tooltip')).toHaveText('25%')
+  await meter.click()
+  await expect(selected).toBeVisible()
+  await expect(page.getByTestId('context-percent')).toHaveText('25% used')
+
+  await expect(page.getByTestId('context-unavailable')).toContainText('Category details weren’t saved')
+  await page.getByTestId('tray-new-tab').click()
+  await meter.press('Enter')
+  await expect(selected).toBeVisible()
+  await expect(page.getByTestId('utility-tab')).toHaveCount(1)
+  await expect(page.getByTestId('new-tab')).toHaveCount(1)
+
+  await page.getByTestId('tray-hide').click()
+  await expect(selected).toBeHidden()
+  await meter.press('Space')
+  await expect(selected).toBeVisible()
+  await expect(page.getByTestId('utility-tab')).toHaveCount(1)
+
+  await page.getByTestId('tray-hide').click()
+  await page.setViewportSize({ width: 390, height: 844 })
+  await meter.click()
+  const close = page.getByRole('button', { name: 'Close panel' })
+  await expect(close).toBeInViewport({ ratio: 1 })
+  await expect(page.getByTestId('context-percent')).toBeInViewport({ ratio: 1 })
+  await close.click()
+  await expect(meter).toBeInViewport({ ratio: 1 })
+})

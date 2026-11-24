@@ -231,6 +231,7 @@ const mockCancelQueuedMessage = vi.fn()
 const mockKeepAlive = vi.fn()
 const mockEnsureRunning = vi.fn()
 const mockInterruptSession = vi.fn()
+const mockGetContextBreakdown = vi.fn()
 const mockStopTask = vi.fn()
 const mockForkSession = vi.fn()
 const mockClientDeleteSession = vi.fn(async (..._args: unknown[]) => true)
@@ -251,6 +252,7 @@ vi.mock('@shared/lib/container/container-host', async () => {
       sendMessage: (...args: unknown[]) => mockSendMessage(...args),
       cancelQueuedMessage: (...args: unknown[]) => mockCancelQueuedMessage(...args),
       interruptSession: (...args: unknown[]) => mockInterruptSession(...args),
+      getContextBreakdown: (sessionId: string) => mockGetContextBreakdown(sessionId),
       stopTask: (...args: unknown[]) => mockStopTask(...args),
       forkSession: (...args: unknown[]) => mockForkSession(...args),
       releaseSession: async () => true,
@@ -720,18 +722,21 @@ vi.mock('@shared/lib/error-reporting', () => ({
   captureMessage: vi.fn(),
 }))
 
-const mockGetPendingReviewsForAgent = vi.fn((_slug: string) => [] as any[])
-const mockSubmitDecision = vi.fn((..._args: unknown[]) => false)
-vi.mock('@shared/lib/proxy/review-manager', () => ({
-  reviewManager: {
-    getPendingReviewsForAgent: (slug: string) => mockGetPendingReviewsForAgent(slug),
-    denyAllForAgent: vi.fn(),
-    submitDecision: (...args: unknown[]) => mockSubmitDecision(...args),
-    resolveMatchingPending: vi.fn(),
-    resolveMatchingPendingByLabel: vi.fn(),
-    resolveMatchingXAgentByOperation: vi.fn(),
-  },
-}))
+// The agent's reviews: what is pending, and whether a decision was taken. The
+// mocks are told which agent's reviews were asked.
+const mockPendingReviews = vi.fn((_slug: string) => [] as any[])
+const mockSubmitReview = vi.fn((..._args: unknown[]) => false)
+vi.mock('@shared/lib/proxy/agent-reviews', async (importOriginal) => {
+  const { agentReviewsWith } = await import('@shared/lib/agent-actor/testing/agent-store-mocks')
+  return agentReviewsWith(await importOriginal<typeof import('@shared/lib/proxy/agent-reviews')>(), (agentSlug) => ({
+    pending: () => mockPendingReviews(agentSlug),
+    denyAll: vi.fn(),
+    submit: (...args) => mockSubmitReview(agentSlug, ...args),
+    resolveMatching: vi.fn(),
+    resolveMatchingByLabel: vi.fn(),
+    resolveMatchingXAgent: vi.fn(),
+  }))
+})
 
 vi.mock('@shared/lib/services/agent-template-service', () => ({
   exportAgentTemplate: vi.fn(),
@@ -972,10 +977,10 @@ function unreadPreviews(sessionsByAgent: Map<string, Set<string>>): Map<string, 
 import { markSessionUnread, clearSessionUnread, getSessionIdsMarkedUnread, getSessionIdsMarkedUnreadByAgents, deleteSessionUnreadMarks } from '@shared/lib/services/session-unread-service'
 import { unlinkTodosFromSessions } from '@shared/lib/services/todo-service'
 import { globalFeed } from '@shared/lib/notifications/global-feed'
-import { userInputRequestManager } from '@shared/lib/tools/requests/request-manager'
+import { userInputRequestManager } from '@shared/lib/agent-actor/testing/routers/request-manager'
 import { AgentInputRequests } from '@shared/lib/tools/requests/agent-input-requests'
 import { mutateSettings } from '@shared/lib/config/settings'
-import { computerUsePermissionManager } from '@shared/lib/computer-use/permission-manager'
+import { computerUsePermissionManager } from '@shared/lib/agent-actor/testing/routers/permission-manager'
 import { localHostPort } from '@shared/lib/host/local-host-port'
 import { listUserSecrets, setSecret, updateSecret, deleteSecret, getSecret, getSecretEnvVars } from '@shared/lib/services/secrets-service'
 import { keyToEnvVar } from '@shared/lib/utils/secrets'
@@ -7962,7 +7967,7 @@ describe('GET /api/agents (enriched summary)', () => {
     mockLiveSessions.activeIds.mockReturnValue([])
     mockLiveSessions.hasActive.mockReturnValue(false)
     mockLiveSessions.hasAwaitingInput.mockReturnValue(false)
-    mockGetPendingReviewsForAgent.mockReturnValue([])
+    mockPendingReviews.mockReturnValue([])
     vi.mocked(getSessionMessagesPage).mockResolvedValue({
       messages: [],
       nextCursor: null,
@@ -8875,7 +8880,7 @@ describe('GET /api/agents (enriched summary)', () => {
     mockLiveSessions.activeIds.mockReturnValue(['sess-active'])
     mockLiveSessions.isAwaitingInput.mockReturnValue(false)
     // Agent has pending proxy reviews
-    mockGetPendingReviewsForAgent.mockReturnValue([
+    mockPendingReviews.mockReturnValue([
       { id: 'review-1', agentSlug: 'agent-1', accountId: 'acc-1', toolkit: 'gmail', method: 'GET', targetPath: '/messages', matchedScopes: ['gmail.readonly'], scopeDescriptions: {} },
     ])
 
@@ -8896,7 +8901,7 @@ describe('GET /api/agents (enriched summary)', () => {
     // Session is NOT active — reviews were triggered by a non-session flow (e.g. dashboard startup)
     mockLiveSessions.isActive.mockReturnValue(false)
     mockLiveSessions.isAwaitingInput.mockReturnValue(false)
-    mockGetPendingReviewsForAgent.mockReturnValue([
+    mockPendingReviews.mockReturnValue([
       { id: 'review-1', agentSlug: 'agent-1', accountId: 'acc-1', toolkit: 'gmail', method: 'GET', targetPath: '/messages', matchedScopes: ['gmail.readonly'], scopeDescriptions: {} },
     ])
 
@@ -9121,6 +9126,29 @@ describe('artifact proxy — subPath uses the raw display-slug URL', () => {
     expect(init.headers).not.toHaveProperty('if-none-match')
   })
 
+  it('forwards a request body without the caller content-length', async () => {
+    mockContainerFetch.mockResolvedValue(
+      new Response('{"ok":true}', { headers: { 'content-type': 'application/json' } }),
+    )
+    const body = JSON.stringify({ action: 'reply', text: 'hello' })
+
+    const res = await app.request(
+      'http://localhost/api/agents/abc1234567/artifacts/dash/api/respond',
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'content-length': String(body.length) },
+        body,
+      },
+    )
+
+    expect(res.status).toBe(200)
+    const init = mockContainerFetch.mock.calls[0]?.[1] as RequestInit
+    expect(init.method).toBe('POST')
+    expect(init.headers).toHaveProperty('content-type', 'application/json')
+    expect(init.headers).not.toHaveProperty('content-length')
+    expect(new TextDecoder().decode(init.body as ArrayBuffer)).toBe(body)
+  })
+
   it('canonicalizes display-slug document navigations to match the dashboard router base', async () => {
     const res = await app.request(
       'http://localhost/api/agents/my-dash-abc1234567/artifacts/dash/s/deck?present=1',
@@ -9149,20 +9177,20 @@ describe('POST /api/agents/:id/proxy-review/:reviewId (agent rule requests)', ()
 
   beforeEach(() => {
     mockIsAuthMode.mockReturnValue(false)
-    mockSubmitDecision.mockReturnValue(true)
+    mockSubmitReview.mockReturnValue(true)
     vi.mocked(logAuditEvent).mockClear()
   })
 
   afterEach(() => {
-    mockSubmitDecision.mockReturnValue(false)
-    mockGetPendingReviewsForAgent.mockReturnValue([])
+    mockSubmitReview.mockReturnValue(false)
+    mockPendingReviews.mockReturnValue([])
   })
 
   it.each([
     { decision: 'allow', action: 'approved', ruleProposal: proposal, request: 'create' },
     { decision: 'deny', action: 'rejected', ruleProposal: { ...proposal, deletesRuleId: 'rule-9' }, request: 'delete' },
   ])('audits who decided ($action, $request)', async ({ decision, action, ruleProposal, request }) => {
-    mockGetPendingReviewsForAgent.mockReturnValue([{ id: 'review-1', agentSlug: 'my-agent', accountId: 'acct-1', toolkit: 'gmail', method: 'RULE', targetPath: 'proxy-rules', matchedScopes: [], scopeDescriptions: {}, ruleProposal }])
+    mockPendingReviews.mockReturnValue([{ id: 'review-1', agentSlug: 'my-agent', accountId: 'acct-1', toolkit: 'gmail', method: 'RULE', targetPath: 'proxy-rules', matchedScopes: [], scopeDescriptions: {}, ruleProposal }])
     const res = await postJson(app, '/api/agents/my-agent/proxy-review/review-1', { decision })
     expect(res.status).toBe(200)
     expect(logAuditEvent).toHaveBeenCalledWith({
@@ -9175,15 +9203,15 @@ describe('POST /api/agents/:id/proxy-review/:reviewId (agent rule requests)', ()
   })
 
   it('does not audit ordinary proxy reviews as rule decisions', async () => {
-    mockGetPendingReviewsForAgent.mockReturnValue([{ id: 'review-1', agentSlug: 'my-agent', accountId: 'acct-1', toolkit: 'gmail', method: 'POST', targetPath: 'x', matchedScopes: [], scopeDescriptions: {} }])
+    mockPendingReviews.mockReturnValue([{ id: 'review-1', agentSlug: 'my-agent', accountId: 'acct-1', toolkit: 'gmail', method: 'POST', targetPath: 'x', matchedScopes: [], scopeDescriptions: {} }])
     expect((await postJson(app, '/api/agents/my-agent/proxy-review/review-1', { decision: 'allow' })).status).toBe(200)
     expect(vi.mocked(logAuditEvent).mock.calls.some(([event]) => event.object === 'proxy_rule')).toBe(false)
   })
 
   it('passes the reason typed with a deny to the review', async () => {
-    mockGetPendingReviewsForAgent.mockReturnValue([{ id: 'review-1', agentSlug: 'my-agent', accountId: 'acct-1', toolkit: 'gmail', method: 'POST', targetPath: 'x', matchedScopes: [], scopeDescriptions: {} }])
+    mockPendingReviews.mockReturnValue([{ id: 'review-1', agentSlug: 'my-agent', accountId: 'acct-1', toolkit: 'gmail', method: 'POST', targetPath: 'x', matchedScopes: [], scopeDescriptions: {} }])
     expect((await postJson(app, '/api/agents/my-agent/proxy-review/review-1', { decision: 'deny', reason: '  Use the shared folder  ' })).status).toBe(200)
-    expect(mockSubmitDecision).toHaveBeenCalledWith('my-agent', 'review-1', 'deny', { reason: 'Use the shared folder' })
+    expect(mockSubmitReview).toHaveBeenCalledWith('my-agent', 'review-1', 'deny', { reason: 'Use the shared folder' })
   })
 
   describe('a model picked on an agent-to-agent card', () => {
@@ -9208,10 +9236,10 @@ describe('POST /api/agents/:id/proxy-review/:reviewId (agent rule requests)', ()
     afterEach(() => { spies.splice(0).forEach((spy) => spy.mockRestore()) })
 
     it('rides with the allow, on the card\'s connection whatever the post names', async () => {
-      mockGetPendingReviewsForAgent.mockReturnValue([invokeCard(runtime)])
+      mockPendingReviews.mockReturnValue([invokeCard(runtime)])
       const res = await postJson(app, '/api/agents/my-agent/proxy-review/review-1', { decision: 'allow', pick: { model: 'opus', effort: 'max', llmProviderId: 'someone-elses' } })
       expect(res.status).toBe(200)
-      expect(mockSubmitDecision).toHaveBeenCalledWith('my-agent', 'review-1', 'allow', { pick: { model: 'opus', llmProviderId: 'platform', effort: 'max' } })
+      expect(mockSubmitReview).toHaveBeenCalledWith('my-agent', 'review-1', 'allow', { pick: { model: 'opus', llmProviderId: 'platform', effort: 'max' } })
     })
 
     it.each([
@@ -9219,11 +9247,11 @@ describe('POST /api/agents/:id/proxy-review/:reviewId (agent rule requests)', ()
       { name: 'the card\'s connection has no such model', card: invokeCard(runtime), model: 'not-a-model' },
       { name: 'the target moved to another connection while the card waited', card: invokeCard(runtime), model: 'opus', moved: true },
     ])('is refused, and the card stays open, when $name', async ({ card, model, moved }) => {
-      mockSubmitDecision.mockClear()
+      mockSubmitReview.mockClear()
       if (moved) targetConnection = 'another'
-      mockGetPendingReviewsForAgent.mockReturnValue([card])
+      mockPendingReviews.mockReturnValue([card])
       expect((await postJson(app, '/api/agents/my-agent/proxy-review/review-1', { decision: 'allow', pick: { model } })).status).toBe(409)
-      expect(mockSubmitDecision).not.toHaveBeenCalled()
+      expect(mockSubmitReview).not.toHaveBeenCalled()
     })
   })
 })
@@ -9237,7 +9265,7 @@ describe('POST /api/agents/:id/proxy-review/:reviewId/always', () => {
     mockDbOnConflictDoUpdate.mockReset()
     mockDbSelectFrom.mockReset()
     mockCaptureException.mockReset()
-    mockGetPendingReviewsForAgent.mockReturnValue([])
+    mockPendingReviews.mockReturnValue([])
     // Default account/MCP lookup: a row owned by the test user. Both branches
     // read it to prove the FOREIGN KEY target exists; the API-scope branch
     // also validates the scope against its toolkit and, in auth mode, both
@@ -9254,7 +9282,7 @@ describe('POST /api/agents/:id/proxy-review/:reviewId/always', () => {
   })
 
   it('rejects persistent allow for a create review', async () => {
-    mockGetPendingReviewsForAgent.mockReturnValueOnce([{
+    mockPendingReviews.mockReturnValueOnce([{
       id: 'review-1', agentSlug: 'my-agent', accountId: 'target', toolkit: 'agents',
       method: 'create', targetPath: 'agents:create:target', matchedScopes: ['create:target'],
       xAgent: { targetAgentSlug: 'target', targetAgentName: 'Target', operation: 'create' },
@@ -9269,7 +9297,7 @@ describe('POST /api/agents/:id/proxy-review/:reviewId/always', () => {
   })
 
   it('rejects a scope or label allow on an unnamed API review', async () => {
-    mockGetPendingReviewsForAgent.mockReturnValue([{
+    mockPendingReviews.mockReturnValue([{
       id: 'review-1', agentSlug: 'my-agent', accountId: 'acc-1', toolkit: 'linear', method: 'POST',
       targetPath: '/graphql', matchedScopes: ['read', 'write'], endpointAmbiguous: true,
     }])
@@ -9518,7 +9546,7 @@ describe('POST /api/agents/:id/proxy-review/:reviewId/always', () => {
   // The pending review is stamped with its type at creation and wins over
   // whatever the client claims.
   it('routes to mcpToolPolicies when the pending review is stamped mcp, even if the client says api', async () => {
-    mockGetPendingReviewsForAgent.mockReturnValue([{
+    mockPendingReviews.mockReturnValue([{
       id: 'review-1', agentSlug: 'my-agent', accountId: 'mcp-railway', reviewType: 'mcp',
       toolkit: 'Railway', method: 'POST', targetPath: 'subscriptions/listen',
       matchedScopes: [], scopeDescriptions: {},
@@ -9540,7 +9568,7 @@ describe('POST /api/agents/:id/proxy-review/:reviewId/always', () => {
   })
 
   it('routes to apiScopePolicies when the pending review is stamped api, even if the client says mcp', async () => {
-    mockGetPendingReviewsForAgent.mockReturnValue([{
+    mockPendingReviews.mockReturnValue([{
       id: 'review-1', agentSlug: 'my-agent', accountId: 'account-123', reviewType: 'api',
       toolkit: 'gmail', method: 'GET', targetPath: 'gmail/v1/users/me/messages',
       matchedScopes: ['gmail.readonly'], scopeDescriptions: {},
@@ -9562,7 +9590,7 @@ describe('POST /api/agents/:id/proxy-review/:reviewId/always', () => {
 
   it('falls back to the client-declared type for a pending review without a stamp', async () => {
     // Envelopes registered before the stamp existed carry no reviewType.
-    mockGetPendingReviewsForAgent.mockReturnValue([{
+    mockPendingReviews.mockReturnValue([{
       id: 'review-1', agentSlug: 'my-agent', accountId: 'mcp-server-123',
       toolkit: 'linear', method: 'POST', targetPath: 'tools/call: list_issues',
       matchedScopes: ['list_issues'], scopeDescriptions: {},
@@ -12017,6 +12045,41 @@ describe('cross-agent session scoping', () => {
     })
   })
 
+  describe('GET /sessions/:sessionId/context', () => {
+    it('counts a session on the requested agent', async () => {
+      mockGetContextBreakdown.mockResolvedValue({ breakdown: null })
+      const res = await app.request(url(OWN_SESSION, '/context'))
+      expect(res.status).toBe(200)
+      expect(await res.json()).toEqual({ breakdown: null })
+      expect(mockGetContextBreakdown).toHaveBeenCalledWith(OWN_SESSION)
+    })
+
+    it('checks session ownership before asking the runtime', async () => {
+      const res = await app.request(url(VICTIM_SESSION, '/context'))
+      expect(res.status).toBe(404)
+      expect(mockGetContextBreakdown).not.toHaveBeenCalled()
+    })
+
+    it('leaves a stopped agent asleep', async () => {
+      mockGetCachedInfo.mockReturnValue({ status: 'stopped', port: 0 })
+      const res = await app.request(url(OWN_SESSION, '/context'))
+      expect(res.status).toBe(200)
+      expect(await res.json()).toEqual({ breakdown: null })
+      expect(mockGetContextBreakdown).not.toHaveBeenCalled()
+    })
+
+    it('does not run a count for a meeting participant', async () => {
+      mockMeetingParticipant.value = { meetingId: 'm-1', agentSlug: ATTACKER, sessionId: OWN_SESSION, userId: 'u-1' }
+      try {
+        const res = await app.request(url(OWN_SESSION, '/context'))
+        expect(res.status).toBe(403)
+        expect(mockGetContextBreakdown).not.toHaveBeenCalled()
+      } finally {
+        mockMeetingParticipant.value = null
+      }
+    })
+  })
+
   describe('POST /sessions/:sessionId/tasks/:taskId/stop', () => {
     beforeEach(async () => {
       mockStopTask.mockResolvedValue(true)
@@ -12686,6 +12749,7 @@ describe('sign-in request routes (request_login)', () => {
         owner: null, site: 'github.com', origin: 'https://github.com', username: 'octocat', values: { password: 'saved-secret' },
       })
       expect(vault.grantAccount).toHaveBeenCalledWith({ accountId: 'acc-1', agentSlug: 'test-agent', grantedBy: null })
+      expect(vault.grantAccount.mock.invocationCallOrder[0]).toBeLessThan(mockContainerFetch.mock.invocationCallOrder[0])
       expect(vault.recordAccountUse).toHaveBeenCalledWith({ agentSlug: 'test-agent', accountId: 'acc-1', sessionId: 'sess-1', userId: null, password: false, by: 'user' })
       // The agent is told the login was saved, by account.
       expect(containerCalls()[0].body.account).toEqual({ username: 'octocat', site: 'github.com', source: 'user', saved: true, held: [] })
@@ -12705,24 +12769,35 @@ describe('sign-in request routes (request_login)', () => {
       const res = await postJson(app, `${BASE}/fill-login-credential`, { toolUseId: 'tool-login', credentialId: 'opaque', save: true })
       expect(res.status).toBe(200)
       expect(await res.json()).toMatchObject({ filled: 2, saveError: 'The account could not be saved' })
+      expect(containerCalls()[0].body.account.saved).toBe(false)
       expect(vault.grantAccount).not.toHaveBeenCalled()
     })
 
-    it('saves the login for the agent\'s next try when the browser closed first and the user chose to save it', async () => {
+    it.each(['closed', 'unreachable'])('saves a password-manager login for the next try when the browser is %s', async (browser) => {
       parkLogin('tool-login', { message: 'Sign in.', fields: [], login: CONTEXT })
       mockCredentialRetrieve.mockResolvedValueOnce({
         credential: { username: 'octocat', password: 'saved-secret' },
         expectedOrigin: 'https://github.com',
       })
-      vault.saveAccount.mockResolvedValueOnce({ account: { id: 'acc-1', username: 'octocat', site: 'github.com' }, created: true })
+      vault.saveAccount.mockResolvedValueOnce({
+        account: { id: 'acc-1', username: 'octocat', site: 'github.com', label: null, parts: ['password'], signInMethods: {} }, created: true,
+      })
       mockContainerFetch
-        .mockResolvedValueOnce(new Response(JSON.stringify({ error: 'The browser that showed this sign-in form was closed', reason: 'browser_closed' }), { status: 409 }))
+        .mockResolvedValueOnce(browser === 'closed'
+          ? Response.json({ error: 'The browser that showed this sign-in form was closed', reason: 'browser_closed' }, { status: 409 })
+          : Response.json({ error: 'The browser is unavailable' }, { status: 502 }))
         .mockResolvedValueOnce(new Response('{}', { status: 200 }))
       const { heldLoginFor } = await import('@shared/lib/browser-vault/held-values')
       const res = await postJson(app, `${BASE}/fill-login-credential`, { toolUseId: 'tool-login', credentialId: 'opaque', save: true })
-      expect(await res.json()).toEqual({ success: true, browserClosed: true, kept: { how: 'saved', username: 'octocat' } })
       const [, answer] = containerCalls()
-      expect(JSON.parse(answer.body.value)).toEqual({ type: 'browser_closed', site: 'github.com', kept: { how: 'saved', username: 'octocat' } })
+      if (browser === 'closed') {
+        expect(await res.json()).toEqual({ success: true, browserClosed: true, kept: { how: 'saved', username: 'octocat' } })
+        expect(JSON.parse(answer.body.value)).toEqual({ type: 'browser_closed', site: 'github.com', kept: { how: 'saved', username: 'octocat' } })
+      } else {
+        expect(await res.json()).toMatchObject({ fillUnconfirmed: true, saved: { username: 'octocat', site: 'github.com' } })
+        expect(JSON.parse(answer.body.value)).toMatchObject({ type: 'accounts', fillUnconfirmed: true, accounts: [{ username: 'octocat' }] })
+      }
+      expect(JSON.stringify(answer)).not.toContain('saved-secret')
       expect(vault.grantAccount).toHaveBeenCalledWith({ accountId: 'acc-1', agentSlug: 'test-agent', grantedBy: null })
       expect(await heldLoginFor('test-agent', 'sess-1', 'github.com')).toBeNull()
     })
@@ -12939,9 +13014,9 @@ describe('sign-in requests with the vault (request_login)', () => {
     expect(userInputRequestManager.getOpenRequest('test-agent', 'tool-login')).not.toBeNull()
   })
 
-  it('saves the account the form went in with, grants it, and holds the next step\'s password', async () => {
+  it('saves and grants the next page\'s password before filling the email page', async () => {
     parkLogin()
-    vault.saveAccount.mockResolvedValueOnce({ account: account({ parts: [] }), created: true })
+    vault.saveAccount.mockResolvedValueOnce({ account: account(), created: true })
     mockContainerFetch.mockResolvedValueOnce(filled())
 
     const res = await postJson(app, `${BASE}/fill-login`, {
@@ -12951,9 +13026,9 @@ describe('sign-in requests with the vault (request_login)', () => {
     const body = await res.json()
     expect(body).toMatchObject({ success: true, saved: { username: 'octocat', site: 'github.com' } })
     expect(JSON.stringify(body)).not.toContain('next-step-pw')
-    // The username is the account itself: no part to seal from this step.
-    expect(vault.saveAccount).toHaveBeenCalledWith({ owner: null, site: 'github.com', origin: 'https://github.com', username: 'octocat', values: {} })
+    expect(vault.saveAccount).toHaveBeenCalledExactlyOnceWith({ owner: null, site: 'github.com', origin: 'https://github.com', username: 'octocat', values: { password: 'next-step-pw' } })
     expect(vault.grantAccount).toHaveBeenCalledWith({ accountId: 'acc-1', agentSlug: 'test-agent', grantedBy: null })
+    expect(vault.grantAccount.mock.invocationCallOrder[0]).toBeLessThan(mockContainerFetch.mock.invocationCallOrder[0])
     // The held password never goes to the container now.
     expect(containerCalls()).toEqual([{
       path: '/browser/login/fill',
@@ -12971,7 +13046,7 @@ describe('sign-in requests with the vault (request_login)', () => {
       values: { password: 'next-step-pw' },
       ids: { password: expect.any(String) },
       origin: 'https://github.com',
-      save: { owner: null, origin: 'https://github.com' },
+      save: null,
     })
     expect(await recentSignInIdentity('test-agent', 'sess-1', 'github.com')).toBe('octocat')
   })
@@ -13285,14 +13360,59 @@ describe('sign-in requests with the vault (request_login)', () => {
     expect(sessionWatch.beginSignInStep).toHaveBeenCalledWith('test-agent', { site: 'github.com', username: 'someone-else', accountId: 'acc-1' })
   })
 
-  it('saves and grants nothing for a fill the page never got', async () => {
+  it.each([
+    ['the original form expired', () => Promise.resolve(Response.json({ error: 'Form gone', reason: 'form_unavailable' }, { status: 409 }))],
+    ['an older container lost the form', () => Promise.resolve(Response.json({ error: 'This sign-in request is no longer open' }, { status: 409 }))],
+    ['the browser stopped responding', () => Promise.resolve(Response.json({ error: 'The sign-in form could not be filled' }, { status: 500 }))],
+    ['the fill reply was lost', () => Promise.reject(new Error('Connection closed'))],
+  ] as const)('gives the waiting agent the saved account when %s', async (_, fail) => {
     parkLogin()
-    mockContainerFetch.mockResolvedValueOnce(new Response(JSON.stringify({ error: 'This sign-in request is no longer open' }), { status: 409 }))
-    const res = await postJson(app, `${BASE}/fill-login`, { toolUseId: 'tool-login', origin: 'https://github.com', values: ['octocat'], save: true })
-    expect(res.status).toBe(409)
-    expect(vault.saveAccount).not.toHaveBeenCalled()
-    expect(vault.grantAccount).not.toHaveBeenCalled()
+    vault.saveAccount.mockResolvedValueOnce({ account: account(), created: true })
+    mockContainerFetch.mockImplementationOnce(fail).mockResolvedValueOnce(Response.json({ success: true }))
+    const res = await postJson(app, `${BASE}/fill-login`, { toolUseId: 'tool-login', origin: 'https://github.com', values: ['octocat'], heldValues: ['next-pw'], save: true })
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ success: true, fillUnconfirmed: true, saved: { site: 'github.com', username: 'octocat' } })
+    expect(vault.saveAccount).toHaveBeenCalledWith(expect.objectContaining({ username: 'octocat', values: { password: 'next-pw' } }))
+    expect(vault.grantAccount).toHaveBeenCalledWith({ accountId: 'acc-1', agentSlug: 'test-agent', grantedBy: null })
+    expect(vault.recordAccountUse).not.toHaveBeenCalled()
     expect(sessionWatch.watchSignIn).not.toHaveBeenCalled()
+    const [, answer] = containerCalls()
+    expect(answer.path).toBe('/inputs/tool-login/resolve')
+    expect(JSON.parse(answer.body.value)).toMatchObject({ type: 'accounts', fillUnconfirmed: true, accounts: [{ username: 'octocat', parts: ['password'] }] })
+    expect(JSON.stringify(answer)).not.toContain('next-pw')
+    expect(mockLiveSessions.completeRequest).toHaveBeenCalledWith('test-agent', 'sess-1', 'tool-login', 'answered')
+  })
+
+  it('reports the save even if the agent cannot receive the retry instruction', async () => {
+    parkLogin()
+    vault.saveAccount.mockResolvedValueOnce({ account: account(), created: true })
+    mockContainerFetch.mockRejectedValue(new Error('Container unavailable'))
+    const res = await postJson(app, `${BASE}/fill-login`, { toolUseId: 'tool-login', origin: 'https://github.com', values: ['octocat'], heldValues: ['next-pw'], save: true })
+    expect(res.status).toBe(502)
+    expect(await res.json()).toMatchObject({ error: expect.stringContaining('Your account was saved') })
+    expect(mockLiveSessions.completeRequest).not.toHaveBeenCalled()
+    expect(userInputRequestManager.getOpenRequest('test-agent', 'tool-login')).not.toBeNull()
+  })
+
+  it('distinguishes a saved account from one the agent can use when its grant fails', async () => {
+    parkLogin()
+    vault.saveAccount.mockResolvedValueOnce({ account: account(), created: true })
+    vault.grantAccount.mockRejectedValueOnce(new Error('Grant unavailable'))
+    mockContainerFetch.mockResolvedValueOnce(filled())
+    const res = await postJson(app, `${BASE}/fill-login`, { toolUseId: 'tool-login', origin: 'https://github.com', values: ['octocat'], heldValues: ['next-pw'], save: true })
+    expect(await res.json()).toMatchObject({ success: true, saveError: expect.stringContaining('saved to your vault') })
+    expect(containerCalls()[0].body.account).toMatchObject({ saved: false })
+  })
+
+  it('keeps a competing fill open even when the card already saved the password', async () => {
+    parkLogin()
+    vault.saveAccount.mockResolvedValueOnce({ account: account(), created: true })
+    mockContainerFetch.mockResolvedValueOnce(Response.json({ error: 'This sign-in request is already being filled' }, { status: 409 }))
+    const res = await postJson(app, `${BASE}/fill-login`, { toolUseId: 'tool-login', origin: 'https://github.com', values: ['octocat'], heldValues: ['next-pw'], save: true })
+    expect(res.status).toBe(409)
+    expect(await res.json()).toEqual({ error: 'Your account was saved. This sign-in request is already being filled' })
+    expect(containerCalls().map(({ path }) => path)).toEqual(['/browser/login/fill'])
+    expect(mockLiveSessions.completeRequest).not.toHaveBeenCalled()
   })
 
   it('reports an account it could not save, the values having gone in', async () => {
@@ -13300,10 +13420,11 @@ describe('sign-in requests with the vault (request_login)', () => {
     mockContainerFetch.mockResolvedValueOnce(filled())
     vault.saveAccount.mockRejectedValueOnce(new Error('disk full'))
     const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
-    const res = await postJson(app, `${BASE}/fill-login`, { toolUseId: 'tool-login', origin: 'https://github.com', values: ['octocat'], save: true })
+    const res = await postJson(app, `${BASE}/fill-login`, { toolUseId: 'tool-login', origin: 'https://github.com', values: ['octocat'], heldValues: ['next-pw'], save: true })
     errors.mockRestore()
     expect(res.status).toBe(200)
     expect(await res.json()).toMatchObject({ success: true, saveError: 'The account could not be saved' })
+    expect(containerCalls()[0].body.account).toMatchObject({ saved: false, held: ['Password'] })
     expect(vault.grantAccount).not.toHaveBeenCalled()
   })
 
@@ -13350,7 +13471,7 @@ describe('sign-in requests with the vault (request_login)', () => {
     const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
     const res = await postJson(app, `${BASE}/fill-login`, { toolUseId: 'tool-login', origin: 'https://github.com', values: ['octocat'], heldValues: ['next-pw'], save: true })
     errors.mockRestore()
-    expect(await res.json()).toEqual({ success: true, browserClosed: true, kept: { how: 'held', username: 'octocat' } })
+    expect(await res.json()).toEqual({ success: true, browserClosed: true, kept: { how: 'held', username: 'octocat' }, saveError: 'The account could not be saved' })
     const { heldLoginFor } = await import('@shared/lib/browser-vault/held-values')
     expect((await heldLoginFor('test-agent', 'sess-1', 'github.com'))?.values).toEqual({ password: 'next-pw' })
   })
@@ -13370,6 +13491,20 @@ describe('sign-in requests with the vault (request_login)', () => {
     expect(JSON.stringify(containerCalls()[1])).not.toContain('saved-pw')
     const { heldLoginFor } = await import('@shared/lib/browser-vault/held-values')
     expect(await heldLoginFor('test-agent', 'sess-1', 'github.com')).toBeNull()
+  })
+
+  it('keeps a submitted password for this sign-in alone when saving is off', async () => {
+    parkLogin()
+    mockContainerFetch.mockResolvedValueOnce(filled())
+    const res = await postJson(app, `${BASE}/fill-login`, {
+      toolUseId: 'tool-login', origin: 'https://github.com', values: ['octocat'], heldValues: ['next-pw'], save: false,
+    })
+    expect(res.status).toBe(200)
+    expect(vault.saveAccount).not.toHaveBeenCalled()
+    expect(vault.grantAccount).not.toHaveBeenCalled()
+    const { heldLoginFor } = await import('@shared/lib/browser-vault/held-values')
+    expect(await heldLoginFor('test-agent', 'sess-1', 'github.com')).toMatchObject({ values: { password: 'next-pw' }, save: null })
+    expect(await heldLoginFor('another-agent', 'sess-1', 'github.com')).toBeNull()
   })
 
   it('holds the next step\'s value only once its step went into the page', async () => {

@@ -187,7 +187,7 @@ describe('GlobalNotificationHandler — pending-request SSE pathway', () => {
     expect(queryClient.getQueryData(['agents', 'launch-0123456789'])).toBeUndefined()
   })
 
-  it('user_request_created/resolved invalidate the unified store', () => {
+  it('user_request_created/resolved invalidate the unified store', async () => {
     const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries')
 
     render(
@@ -220,8 +220,10 @@ describe('GlobalNotificationHandler — pending-request SSE pathway', () => {
       scope: { agentSlug: 'my-agent' },
     })
 
-    const keys = invalidateSpy.mock.calls.map((call) => (call[0] as { queryKey?: unknown[] }).queryKey?.[0])
-    expect(keys.filter((k) => k === 'pending-user-requests')).toHaveLength(2)
+    await vi.waitFor(() => {
+      const keys = invalidateSpy.mock.calls.map((call) => (call[0] as { queryKey?: unknown[] }).queryKey?.[0])
+      expect(keys.filter((k) => k === 'pending-user-requests')).toHaveLength(2)
+    })
   })
 
   // SECURITY: focus-aware gate — when an actionable session_waiting fires

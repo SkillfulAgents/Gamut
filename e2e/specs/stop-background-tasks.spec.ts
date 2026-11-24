@@ -72,6 +72,22 @@ test.describe('Stop with background tasks', () => {
     await proveStoppedTaskStayedDead()
   })
 
+  test('opens the running command from the working indicator and stops it from its tray', async ({ page }) => {
+    await sessionPage.sendMessage('run background slowly')
+    await page.getByTestId('background-task-open').click()
+    const detail = page.getByTestId('background-task-detail')
+    await expect(detail.getByTestId('background-task-status')).toHaveText('Running')
+    await expect(detail).toContainText('sleep 10 && echo done')
+    await detail.getByTestId('background-task-stop').click()
+    await expect(detail.getByTestId('background-task-status')).toHaveText('Done')
+    await detail.getByTestId('background-task-back').click()
+    await expect(page.getByTestId('background-tasks-done')).toContainText('sleep 10 && echo done')
+    await page.getByTestId('background-task-list-row').click()
+    await expect(detail.getByTestId('background-task-stop')).toHaveCount(0)
+    await page.getByTestId('tray-new-tab').click()
+    await expect(page.getByTestId('tray-empty-background')).toHaveAccessibleName('Background tasks 1')
+  })
+
   test('Stop while waiting on a background task asks before ending it', async ({ page }) => {
     test.slow()
     await sessionPage.sendMessage('run background slowly')

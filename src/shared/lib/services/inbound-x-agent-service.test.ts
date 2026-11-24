@@ -16,6 +16,28 @@ function agent(slug: string, name: string): ApiAgent {
 }
 
 describe('buildInboundXAgentDetails', () => {
+  it('lists sessions started through MCP with their client, each to the person who started it (and admins)', async () => {
+    const metadata = {
+      mine: { mcpInvocation: { userId: 'alice', clientName: 'Claude Code' }, createdAt: '2026-08-21T10:00:00.000Z' },
+      theirs: { mcpInvocation: { userId: 'bob', clientName: null }, createdAt: '2026-08-20T10:00:00.000Z' },
+      call: { invokedByAgentSlug: 'caller-a', createdAt: '2026-08-19T10:00:00.000Z' },
+    }
+    const base = { targetSlug: 'target', metadata, agents: [agent('target', 'Target'), agent('caller-a', 'Alpha')], aclRows: [], evaluatePolicy: () => 'review' as const }
+
+    const local = await buildInboundXAgentDetails({ ...base, authMode: false })
+    expect(local.sessions).toEqual([
+      { id: 'mine', createdAt: '2026-08-21T10:00:00.000Z', mcp: { clientName: 'Claude Code' } },
+      { id: 'theirs', createdAt: '2026-08-20T10:00:00.000Z', mcp: { clientName: null } },
+      { id: 'call', createdAt: '2026-08-19T10:00:00.000Z', triggeredBy: { slug: 'caller-a', name: 'Alpha' } },
+    ])
+    expect(inboundXAgentDetailsSchema.parse(local)).toEqual(local)
+
+    const alice = await buildInboundXAgentDetails({ ...base, authMode: true, viewerUserId: 'alice' })
+    expect(alice.sessions.map((session) => session.id)).toEqual(['mine', 'call'])
+    const admin = await buildInboundXAgentDetails({ ...base, authMode: true, viewerUserId: 'root', viewerCanAccessAll: true })
+    expect(admin.sessions.map((session) => session.id)).toEqual(['mine', 'theirs', 'call'])
+  })
+
   it('sorts call history newest-first and excludes self and blocked callers', async () => {
     const result = (await buildInboundXAgentDetails({
       targetSlug: 'target',

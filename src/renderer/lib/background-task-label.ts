@@ -9,6 +9,8 @@ import type { ApiMessageOrBoundary, ApiToolCall } from '@shared/lib/types/api'
 
 export interface BackgroundTaskRef {
   taskId: string
+  /** SDK task that owns this background command. */
+  parentTaskId?: string
   startedAt: number
   isWorkflow?: boolean
   isSubagent?: boolean
@@ -35,7 +37,7 @@ export interface LabeledBackgroundTask extends BackgroundTaskRef, BackgroundTask
 // "Command running in background with ID: bg_abc123. Output is being…"
 const BACKGROUND_ID_PATTERN = /background with ID:\s*([A-Za-z0-9_-]+)/i
 
-function resultText(result: unknown): string {
+export function backgroundToolResultText(result: unknown): string {
   if (typeof result === 'string') return result
   if (Array.isArray(result)) {
     return result
@@ -48,6 +50,11 @@ function resultText(result: unknown): string {
     return (result as { text: string }).text
   }
   return ''
+}
+
+/** Bash gained a structured id after these launch messages were already in saved transcripts. */
+export function backgroundCommandId(call: ApiToolCall): string | undefined {
+  return call.backgroundTaskId ?? BACKGROUND_ID_PATTERN.exec(backgroundToolResultText(call.result))?.[1]
 }
 
 // A task with no launching call in this transcript — a subagent launched it,
@@ -77,7 +84,7 @@ export function labelBackgroundTasks(
       if (call.name === 'Bash') {
         // The API carries the id the runtime assigned; the result text is the
         // fallback for transcripts shaped before it did.
-        const taskId = call.backgroundTaskId ?? BACKGROUND_ID_PATTERN.exec(resultText(call.result))?.[1]
+        const taskId = backgroundCommandId(call)
         if (!taskId) continue
         const command = typeof call.input.command === 'string' ? call.input.command : null
         byTaskId.set(taskId, { title: 'Background command', detail: command })

@@ -238,6 +238,23 @@ describe('request_login tool', () => {
     inputManager.resolve('login-closed-2', JSON.stringify({ type: 'browser_closed', site: 'github.com' }))
     expect(await again).toMatchObject({ isError: true, content: [{ text: expect.stringContaining('Nothing the user entered is kept.') }] })
   })
+
+  it('resumes a waiting sign-in with the saved account when the browser gave no confirmation', async () => {
+    vi.stubGlobal('fetch', respond(200, prepared))
+    inputManager.setCurrentToolUseId('login-disconnected')
+    const done = handlerFor()(args)
+    await vi.waitFor(() => expect(inputManager.hasPending('login-disconnected')).toBe(true))
+    inputManager.resolve('login-disconnected', JSON.stringify({
+      type: 'accounts', site: 'github.com', accounts: [{ username: 'octocat', label: null, parts: ['password'], via: null }],
+      named: true, fillUnconfirmed: true,
+    }))
+    const result = await done
+    expect(result.isError).toBeUndefined()
+    expect(result.content[0].text).toContain('The browser did not confirm the fill.')
+    expect(result.content[0].text).toContain('Check whether the browser is already signed in')
+    expect(result.content[0].text).toContain('If the sign-in page is gone, reopen it')
+    expect(result.content[0].text).toContain('call request_login with username "octocat"')
+  })
 })
 
 describe('formatLoginResolution when the browser closed first', () => {
@@ -492,6 +509,21 @@ describe('formatLoginResolution', () => {
       '@e6 "Password" (password): the write into @e6 was sent and returned no answer (timed out).',
       'Nothing was clicked or pressed.',
     ].join('\n'))
+  })
+
+  it('tells the agent how to reuse a saved password when the page lost its fields', () => {
+    const cases: Partial<LoginFillReport>[] = [
+      { outcomes: [field('@e6', 'failed', { problem: 'the field is no longer in the document' })] },
+      { outcomes: [field('@e6', 'filled')], pageActivity: { kind: 'gone' } },
+    ]
+    for (const report of cases) {
+      const result = formatLoginResolution({
+        ...base, ...report,
+        account: { username: 'octocat', site: 'example.com', source: 'user', saved: true, held: [] },
+      })
+      expect(result.content[0].text).toContain('The user saved this to their vault as account octocat')
+      expect(result.content[0].text).toContain('call request_login with username "octocat" to use the saved account')
+    }
   })
 
   it('names fields the page changed, code boxes, empty fields, what was seen before the submit, and a failed click', () => {

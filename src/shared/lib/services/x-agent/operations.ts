@@ -14,6 +14,8 @@ import {
   XAgentAttachmentError,
 } from '@shared/lib/services/x-agent-attachment-service'
 import type { TranscriptView } from '@shared/lib/services/x-agent-transcript-view'
+import { isHiddenAutomatedSession } from '@shared/lib/services/session-visibility'
+import type { SessionMetadata } from '@shared/lib/types/agent'
 import {
   callerHasRoleOnTarget,
   callerVisibleAgentSlugs,
@@ -87,9 +89,24 @@ export interface ListedSession {
 
 export async function getTargetSessions(
   caller: XAgentCaller,
-  input: { slug: string; limit: number; offset: number },
+  input: {
+    slug: string
+    limit: number
+    offset: number
+    /**
+     * List what the app's own session list shows: automated sessions (scheduled,
+     * webhook, called from other agents, …) only once promoted to interactive.
+     * The agent route lists every session.
+     */
+    excludeAutomated?: boolean
+    /**
+     * With `excludeAutomated`: hidden sessions this caller may still see
+     * listed (the MCP server: the ones the person started through it).
+     */
+    alsoIncludeHidden?: (metadata: SessionMetadata) => boolean
+  },
 ): Promise<XAgentResult<{ sessions: ListedSession[]; total: number; offset: number; limit: number }>> {
-  const { slug: rawTargetSlug, limit, offset } = input
+  const { slug: rawTargetSlug, limit, offset, excludeAutomated, alsoIncludeHidden } = input
 
   // Resolve the model-supplied display slug to the agent and rebind, so every
   // downstream ACL / policy / fs use below keys on the id, not the prefix.
@@ -107,7 +124,16 @@ export async function getTargetSessions(
   if (!policy.allowed) return fail(403, policy.reason ?? 'Forbidden')
 
   const actor = agentRegistry.get(targetSlug)
-  const allSessions = await actor.sessions.list()
+  let allSessions = excludeAutomated && !alsoIncludeHidden
+    ? await actor.sessions.list({ excludeAutomated: true })
+    : await actor.sessions.list()
+  if (excludeAutomated && alsoIncludeHidden) {
+    const metadata = await actor.sessions.readMetadata()
+    allSessions = allSessions.filter((session) => {
+      const meta = metadata[session.id]
+      return !isHiddenAutomatedSession(meta) || (!!meta && alsoIncludeHidden(meta))
+    })
+  }
   const page = allSessions.slice(offset, offset + limit)
   const active = new Set((await actor.live()).activeSessionIds)
   return ok({

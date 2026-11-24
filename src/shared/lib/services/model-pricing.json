@@ -493,6 +493,18 @@
       "fast": 1.5
     }
   },
+  "kimi-k3.1-pro": {
+    "input": 2,
+    "output": 10,
+    "cacheCreation": 2,
+    "cacheRead": 0.2
+  },
+  "minimax-m3.1-flash": {
+    "input": 0.15,
+    "output": 0.6,
+    "cacheCreation": 0.15,
+    "cacheRead": 0.015
+  },
   "muse-spark-1.1": {
     "input": 1.25,
     "output": 4.25,

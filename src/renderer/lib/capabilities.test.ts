@@ -13,6 +13,7 @@ import {
   keepsMacAwake,
   listsRecentFiles,
   offersComputerUseSettings,
+  offersMcpReachChoice,
   offersPrivateSkillsets,
   signsInWithApple,
   signsInWithAuthSession,
@@ -173,5 +174,21 @@ describe('what the App Sandbox leaves out', () => {
     } finally {
       vi.unstubAllGlobals()
     }
+  })
+})
+
+describe('offersMcpReachChoice', () => {
+  it('is offered when the API runs inside the desktop app, whatever the window', () => {
+    for (const distribution of ['direct', 'mac-app-store', 'windows-store'] as const) {
+      _setFactsForTest({ client: { shell: 'electron', os: 'darwin', distribution: 'direct' }, server: declared({ os: 'darwin', distribution }) })
+      expect(offersMcpReachChoice(), distribution).toBe(true)
+    }
+  })
+
+  it('is not offered by a web deployment, or a server that has not said', () => {
+    _setFactsForTest({ client: { shell: 'browser', os: null, distribution: null }, server: declared({ os: 'linux', distribution: 'deployment' }) })
+    expect(offersMcpReachChoice()).toBe(false)
+    _setFactsForTest({ client: { shell: 'electron', os: 'darwin', distribution: 'direct' }, server: null })
+    expect(offersMcpReachChoice()).toBe(false)
   })
 })

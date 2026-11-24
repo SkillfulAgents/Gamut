@@ -1,3 +1,4 @@
+import { invalidatePendingUserRequests } from '@renderer/lib/pending-request-cache'
 import { readPlatformNotifications } from '@renderer/lib/platform-notification-read-cache'
 import { notificationChangeSchema } from '@shared/lib/notifications/notification-change-schema'
 import { readNotifications, noteNotificationChange, invalidateNotificationCaches, notificationClientId } from '@renderer/lib/notification-read-cache'
@@ -224,7 +225,7 @@ export function GlobalNotificationHandler() {
         if (!res.ok && res.status !== 404) {
           console.error('[notification-action] Failed to submit proxy review decision:', res.status)
         }
-        queryClient.invalidateQueries({ queryKey: ['pending-user-requests'] })
+        void invalidatePendingUserRequests(queryClient)
       })
       .catch((err) => {
         console.error('[notification-action] Error submitting proxy review decision:', err)
@@ -591,7 +592,7 @@ export function GlobalNotificationHandler() {
             // path for agent-scoped reviews (they have no session stream) and
             // the cross-tab/cross-session sync for everything else; the
             // store's interval refetch is the safety net for a missed event.
-            queryClient.invalidateQueries({ queryKey: ['pending-user-requests'] })
+            void invalidatePendingUserRequests(queryClient)
             break
 
           case 'agent_status_changed': {

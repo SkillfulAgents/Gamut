@@ -50,11 +50,6 @@ vi.mock('@shared/lib/container/container-host', async () => {
   }
 })
 
-vi.mock('@shared/lib/proxy/review-manager', () => ({
-  reviewManager: {
-    getPendingReviewsForAgent: mockGetPendingReviewsForAgent,
-  },
-}))
 
 let testDb: ReturnType<typeof drizzle>
 let sqlite: InstanceType<typeof Database>

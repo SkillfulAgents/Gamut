@@ -1,11 +1,11 @@
 import { useState, type ReactNode } from 'react'
 import {
-  BookmarkMinus,
-  BookmarkPlus,
   ClipboardCopy,
   Download,
   FolderSearch,
   Pencil,
+  Pin,
+  PinOff,
   Trash2,
 } from 'lucide-react'
 import { useQueryClient } from '@tanstack/react-query'
@@ -112,7 +112,7 @@ export function FolderEntryContextMenu({
   const [newName, setNewName] = useState(entry.name)
   const [isRenaming, setIsRenaming] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
-  // Bookmark, rename, delete and reveal act on the workspace, which a drive folder is not part of.
+  // Pin, rename, delete and reveal act on the workspace, which a drive folder is not part of.
   const canManage = canAdminAgent(folder.agentSlug) && !isMountPath(folder.rootPath)
   const isDirectory = entry.type === 'directory'
   const entryKind = isDirectory ? 'directory' : 'file'
@@ -174,9 +174,9 @@ export function FolderEntryContextMenu({
             : { name: entry.name, file: entry.path },
         ]
       await updateBookmarks.mutateAsync(updated)
-      toast.success(isBookmarked ? `Removed bookmark for “${entry.name}”` : `Bookmarked “${entry.name}”`)
+      toast.success(isBookmarked ? `Unpinned “${entry.name}”` : `Pinned “${entry.name}”`)
     } catch (error) {
-      toast.error(isBookmarked ? 'Could not remove bookmark' : 'Could not add bookmark', {
+      toast.error(isBookmarked ? 'Could not unpin' : 'Could not pin', {
         description: error instanceof Error ? error.message : undefined,
       })
     }
@@ -236,7 +236,7 @@ export function FolderEntryContextMenu({
         try {
           await updateBookmarks.mutateAsync(updatedBookmarks)
         } catch {
-          toast.error('Renamed successfully, but related bookmarks could not be updated')
+          toast.error('Renamed successfully, but its pin could not be updated')
         }
       }
       toast.success(`Renamed to “${trimmedName}”`)
@@ -273,7 +273,7 @@ export function FolderEntryContextMenu({
         try {
           await updateBookmarks.mutateAsync(updatedBookmarks)
         } catch {
-          toast.error('Deleted successfully, but related bookmarks could not be removed')
+          toast.error('Deleted successfully, but its pin could not be removed')
         }
       }
       toast.success(`Deleted “${entry.name}”`)
@@ -316,11 +316,11 @@ export function FolderEntryContextMenu({
                 data-testid={`folder-${entryKind}-bookmark`}
               >
                 {isBookmarked ? (
-                  <BookmarkMinus className="mr-2 h-3.5 w-3.5" />
+                  <PinOff className="mr-2 h-3.5 w-3.5" />
                 ) : (
-                  <BookmarkPlus className="mr-2 h-3.5 w-3.5" />
+                  <Pin className="mr-2 h-3.5 w-3.5" />
                 )}
-                {isBookmarked ? 'Remove bookmark' : 'Bookmark'}
+                {isBookmarked ? 'Unpin' : 'Pin'}
               </ContextMenuItem>
               {electronRevealAvailable && (
                 <ContextMenuItem onClick={handleReveal} data-testid={`folder-${entryKind}-reveal`}>

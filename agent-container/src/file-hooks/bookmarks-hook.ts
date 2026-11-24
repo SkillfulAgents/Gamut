@@ -4,15 +4,15 @@ import { bookmarksSchema } from './bookmarks-schema'
 const BOOKMARKS_PATH = '/workspace/bookmarks.json'
 const MAX_RECOMMENDED_BOOKMARKS = 5
 
-const READ_HINT = `This is the agent bookmarks file. Bookmarks are surfaced to the user on the agent homepage for quick access.
+const READ_HINT = `This is the agent's pins file. Each entry is shown to the user in the "Pinned Items" panel on the agent homepage for quick access; call them pins when you talk to the user.
 
 Format: a JSON array of objects, each with:
-- "name" (string, required): Display name for the bookmark
+- "name" (string, required): Display name for the pin
 - "link" (string, optional): An https:// URL (for web links)
 - "file" (string, optional): A workspace file path (same paths as deliver_file, e.g. "/workspace/reports/daily.csv")
 - "folder" (string, optional): A workspace folder path (e.g. "/workspace/reports")
 
-Each bookmark must have exactly one of "link", "file", or "folder".
+Each pin must have exactly one of "link", "file", or "folder".
 
 Example:
 [
@@ -21,7 +21,7 @@ Example:
   { "name": "Reports", "folder": "/workspace/reports" }
 ]
 
-Keep bookmarks to important, frequently-accessed resources (max ${MAX_RECOMMENDED_BOOKMARKS} recommended). Remove bookmarks that are no longer relevant.`
+Keep pins to important, frequently-accessed resources (max ${MAX_RECOMMENDED_BOOKMARKS} recommended). Remove pins that are no longer relevant. Anyone who can see this agent can browse a pinned folder.`
 
 export class BookmarksFileHook extends FileHook {
   pattern(): string {
@@ -62,7 +62,7 @@ export class BookmarksFileHook extends FileHook {
 
     if (result.data.length > MAX_RECOMMENDED_BOOKMARKS) {
       return {
-        warning: `bookmarks.json has ${result.data.length} bookmarks (recommended max is ${MAX_RECOMMENDED_BOOKMARKS}). Consider removing less important ones to keep the list focused.`,
+        warning: `bookmarks.json has ${result.data.length} pins (recommended max is ${MAX_RECOMMENDED_BOOKMARKS}). Consider removing less important ones to keep the list focused.`,
       }
     }
 

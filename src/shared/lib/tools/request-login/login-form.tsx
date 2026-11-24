@@ -21,7 +21,7 @@ import {
 } from './login-request'
 import { loginRequestKey, recallLoginValues, setLoginRequestState } from './login-request-store'
 import { AccountChooser, AddSignInMethodBox, OtherWaysToSignIn, providerChoices, SaveForLater, SignInViaPanel, SignInWithProviders } from './login-vault-sections'
-import { browserClosedState, LoginContextUnavailable, useLoginContext, useLoginRequestActions, useLoginVaultInfo } from './use-login-request'
+import { interruptedFillState, LoginContextUnavailable, useLoginContext, useLoginRequestActions, useLoginVaultInfo } from './use-login-request'
 
 interface LoginFormProps {
   agentSlug: string
@@ -553,10 +553,9 @@ export function LoginForm({
               setLoginRequestState(key, { status: 'settled' })
               return
             }
-            // The browser had closed: the login is held for the agent's next try.
-            const closed = browserClosedState(body)
-            if (closed) {
-              setLoginRequestState(key, closed)
+            const interrupted = interruptedFillState(body)
+            if (interrupted) {
+              setLoginRequestState(key, interrupted)
               return
             }
             const parsed = loginFillResultSchema.safeParse(body)

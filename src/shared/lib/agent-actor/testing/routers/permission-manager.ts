@@ -1,0 +1,80 @@
+/**
+ * The router in front of every agent's computer-use permissions, for tests:
+ * the app reaches them through the agent's actor (`inputs.computerUse`).
+ *
+ * The grants and the active app live in each agent's actor
+ * (`AgentComputerUse`); this singleton dispatches a call that arrives with a
+ * slug to the store of that agent's actor, which it finds in the registry.
+ * The agent's own live sessions and its container runtime call its store
+ * directly. A read for an agent that has no actor finds nothing in memory; a
+ * check reads the agent's persisted grants from settings through its store.
+ */
+import { AgentStores, type AgentStoreDirectory } from './store-directory'
+import { AgentComputerUse } from '@shared/lib/computer-use/agent-permissions'
+import type { ComputerUsePermissionLevel, PermissionGrant, PermissionGrantType } from '@shared/lib/computer-use/types'
+
+export class ComputerUsePermissionManager {
+  private readonly agents = new AgentStores<AgentComputerUse>('computer-use permissions', (state) => state.computerUse)
+
+  /** Tests only: read the agents' stores from `directory` in place of the registry's actors. */
+  attachAgents(directory: AgentStoreDirectory<AgentComputerUse> | null): void {
+    this.agents.replaceWith(directory)
+  }
+
+  /** `AgentComputerUse.check` */
+  async checkPermission(
+    agentSlug: string,
+    level: ComputerUsePermissionLevel,
+    appName?: string,
+  ): Promise<'granted' | 'prompt_needed'> {
+    return this.agents.get(agentSlug).check(level, appName)
+  }
+
+  /** `AgentComputerUse.grant` */
+  async grantPermission(
+    agentSlug: string,
+    level: ComputerUsePermissionLevel,
+    grantType: PermissionGrantType,
+    appName?: string,
+  ): Promise<void> {
+    await this.agents.get(agentSlug).grant(level, grantType, appName)
+  }
+
+  /** `AgentComputerUse.consumeOnce` */
+  consumeOnceGrant(agentSlug: string, level: ComputerUsePermissionLevel, appName?: string): void {
+    this.agents.peek(agentSlug)?.consumeOnce(level, appName)
+  }
+
+  /** `AgentComputerUse.revokeAll` */
+  async revokeAllForAgent(agentSlug: string): Promise<void> {
+    await this.agents.get(agentSlug).revokeAll()
+  }
+
+  /** `AgentComputerUse.revoke` */
+  async revokeGrant(agentSlug: string, level: ComputerUsePermissionLevel, appName?: string): Promise<void> {
+    await this.agents.get(agentSlug).revoke(level, appName)
+  }
+
+  /** `AgentComputerUse.activeGrants` */
+  async getGrantsForAgent(agentSlug: string): Promise<PermissionGrant[]> {
+    return this.agents.get(agentSlug).activeGrants()
+  }
+
+  /** `AgentComputerUse.setActiveApp` */
+  setActiveApp(agentSlug: string, sessionId: string, appName: string): boolean {
+    return this.agents.get(agentSlug).setActiveApp(sessionId, appName)
+  }
+
+  /** `AgentComputerUse.clearActiveApp`: every session's of the agent. */
+  clearActiveApp(agentSlug: string): void {
+    this.agents.peek(agentSlug)?.clearActiveApp()
+  }
+
+  /** `AgentComputerUse.activeApp` */
+  getActiveApp(agentSlug: string, sessionId: string): string | undefined {
+    return this.agents.peek(agentSlug)?.activeApp(sessionId)
+  }
+}
+
+/** Singleton instance */
+export const computerUsePermissionManager = new ComputerUsePermissionManager()

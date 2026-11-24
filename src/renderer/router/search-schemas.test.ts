@@ -91,6 +91,7 @@ describe('settingsTabSchema', () => {
   it('includes the volume and global guidance settings routes', () => {
     expect(SETTINGS_TABS).toContain('volumes')
     expect(settingsTabSchema.safeParse('global-guidance').success).toBe(true)
+    expect(settingsTabSchema.safeParse('mcp-server').success).toBe(true)
     expect(settingsTabSchema.safeParse('capabilities').success).toBe(true)
   })
 })

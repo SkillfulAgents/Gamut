@@ -353,8 +353,19 @@ export const meetingParticipantRoute = createRoute({
   component: MeetingParticipantRoute,
 })
 
+// ── MCP CONSENT: where the MCP authorization server sends a person ───────────
+// Sibling of the app shell, no chrome. The auth gate signs a signed-out person
+// in first (password or SSO) and returns them to this URL, signed query and all.
+const McpConsentRoute = lazyRouteComponent(() => import('@renderer/components/oauth/mcp-consent-page'), 'McpConsentPage')
+export const mcpConsentRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: 'oauth/consent',
+  component: McpConsentRoute,
+})
+
 export const routeTree = rootRoute.addChildren([
   meetingParticipantRoute,
+  mcpConsentRoute,
   appShellRoute.addChildren([
     homeRoute,
     notificationsRoute,

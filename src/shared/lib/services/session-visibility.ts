@@ -6,13 +6,14 @@ export function sessionOrigin(meta: SessionMetadata | null | undefined): Session
   if (meta?.isWebhookExecution) return 'webhook'
   if (isAgentIntegrationSession(meta)) return 'integration'
   if (meta?.invokedByAgentSlug) return 'agent'
+  if (meta?.mcpInvocation) return 'mcp'
   if (meta?.isWidgetRepair) return 'widget-repair'
   return 'user'
 }
 
 /**
  * True when a session is automated (scheduled / webhook / agent integration /
- * x-agent invocation / widget repair) and has not been promoted to
+ * x-agent invocation / MCP invocation / widget repair) and has not been promoted to
  * interactive. These sessions
  * are excluded from every user-facing session list (`excludeAutomated`), so
  * per-session signals derived elsewhere — unread-notification flags, badge

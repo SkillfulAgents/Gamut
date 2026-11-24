@@ -23,6 +23,7 @@ import { z } from 'zod';
 
 const backgroundTaskSchema = z.object({
   task_id: z.string(),
+  parent_task_id: z.string().optional().catch(undefined),
   task_type: z.string().optional().catch(undefined),
   description: z.string().optional().catch(undefined),
   // SDK >= 0.3.284: housekeeping tasks and live-update watchers, which "hosts
@@ -39,7 +40,7 @@ const backgroundTasksChangedSchema = z.object({
 
 export interface BackgroundTasksSnapshot {
   taskIds: Set<string>;
-  tasks: Array<{ task_id: string; task_type?: string; description?: string; ambient?: boolean; subagent_type?: string }>;
+  tasks: Array<z.infer<typeof backgroundTaskSchema>>;
 }
 
 /**

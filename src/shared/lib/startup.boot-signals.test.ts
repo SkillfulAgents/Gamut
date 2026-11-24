@@ -30,7 +30,7 @@ const REPO_ROOT = path.resolve(__dirname, '..', '..', '..')
 const SERVER_ENTRY = path.join(REPO_ROOT, 'dist', 'web', 'server.mjs')
 
 const EXPECTED_MARKERS = [
-  '[ContainerHost] Initialized',
+  '[Agents] Initialized',
   '[TaskScheduler] Scheduler started',
   '[AgentIntegrationManager] Started',
   '[SessionAutoDeleteMonitor] Monitor started',

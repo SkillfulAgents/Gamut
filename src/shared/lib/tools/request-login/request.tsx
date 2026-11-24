@@ -25,6 +25,7 @@ interface LoginRequestItemProps {
 
 const STATUS_LABELS = {
   filled: 'Sent to the page',
+  fill_unconfirmed: 'Saved for the agent',
   via: 'Signs in with another account',
   way: 'Way picked',
   manual: 'Signed in on the page',
@@ -59,7 +60,7 @@ export function LoginRequestItem({
   const context = useLoginContext(agentSlug, sessionId, toolUseId, !readOnly)
   const origin = context.data?.origin ?? null
   const done = state.status === 'filled' || state.status === 'via' || state.status === 'way' || state.status === 'manual' || state.status === 'declined' ||
-    state.status === 'settled' || state.status === 'browser_closed' || state.status === 'session'
+    state.status === 'settled' || state.status === 'browser_closed' || state.status === 'fill_unconfirmed' || state.status === 'session'
   // Here, not in the form: the shell swaps the form for its completed row in
   // the same render that settles the request, so the form never sees it.
   const onCompleteRef = useRef(onComplete)
@@ -70,15 +71,27 @@ export function LoginRequestItem({
   // The card leaves the stack as the request settles, so what went wrong in
   // the page is said where it outlives the card.
   const result = state.status === 'filled' ? state.result : null
+  const saveError = state.status === 'browser_closed' ? state.saveError : result?.saveError
+  useEffect(() => {
+    if (saveError) toast.error(saveError)
+  }, [saveError])
   useEffect(() => {
     if (!result) return
-    if (result.saveError) toast.error('The account was not saved', { description: result.saveError })
     if (result.filled === 0 || result.problems.length > 0) {
-      toast.warning(result.filled === 0 ? 'Nothing was filled on the page' : 'Not everything went into the page', {
-        description: result.problems.join(' ') || 'The agent has been told what the page showed.',
+      const problems = result.problems.join(' ') || 'The agent has been told what the page showed.'
+      const title = result.filled > 0 ? 'Not everything went into the page'
+        : result.outcomes?.includes('unconfirmed') ? 'The browser did not confirm the fill' : 'Nothing was filled on the page'
+      toast.warning(title, {
+        description: result.saved ? `${result.saved.username} is saved. ${problems}` : problems,
       })
     }
   }, [result])
+  const unconfirmedAccount = state.status === 'fill_unconfirmed' ? state.username : null
+  useEffect(() => {
+    if (unconfirmedAccount) toast.success(`${unconfirmedAccount} is saved`, {
+      description: 'The browser did not confirm the fill. The agent was asked to check the page and reopen it if needed.',
+    })
+  }, [unconfirmedAccount])
   const wayProblems = state.status === 'way' ? state.problems : null
   useEffect(() => {
     if (wayProblems?.length) toast.warning('The way was not clicked', { description: `${wayProblems.join(' ')} The agent has been told.` })

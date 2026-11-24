@@ -32,6 +32,7 @@ import { builtinHints, createHintHookMatchers } from './hints';
 import { promptDate } from './prompt-date';
 import { mountedDrives, mountedVolumeIndexes, type VolumeIndex } from './volume-mounts';
 import { prepareResumeDiagnostics } from './resume-diagnostics';
+import { contextBreakdownSchema, type ContextBreakdown } from './context-breakdown-schema';
 import { ContextUsageReporter, contextUsageChange } from './context-usage-reporter';
 
 /**
@@ -745,7 +746,7 @@ export class ClaudeCodeProcess extends EventEmitter {
   private cliCommands?: readonly SlashCommand[];
   private runnableCommandNames?: readonly string[];
   private readonly contextUsage = new ContextUsageReporter(
-    async () => this.queryInstance?.getContextUsage({ detail: 'summary' }),
+    async detail => this.queryInstance?.getContextUsage({ detail }),
     (frame) => this.emit('message', frame),
   );
 
@@ -1175,6 +1176,13 @@ export class ClaudeCodeProcess extends EventEmitter {
         // `disableBundledSkills` (below) removes — without it the tool is dead
         // weight in every session's tool list.
         'ReportFindings',
+        // CLI 2.1.330's built-in easel plugin: a chart tool for the model
+        // (mcp__easel__chart) that draws in Claude Code's own transcript, not
+        // ours. It loads only behind a server-side flag, which
+        // CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC (env below) keeps us from
+        // fetching; this server-wide rule keeps its tools out if a later CLI
+        // turns it on by default.
+        'mcp__easel',
         // Suppress native WebSearch only when a host vendor is active; it's replaced by mcp__web__web_search.
         ...(this.webSearchProvider ? ['WebSearch'] : []),
         // Same for native WebFetch → mcp__web__web_fetch when a host fetch vendor is active.
@@ -2517,6 +2525,7 @@ export class ClaudeCodeProcess extends EventEmitter {
     }
     return [
       ...this.lastTurnInformationals,
+      ...(this.contextUsage.settledFrame ? [this.contextUsage.settledFrame] : []),
       this.lastResultMessage,
       {
         type: 'system',
@@ -2667,6 +2676,19 @@ export class ClaudeCodeProcess extends EventEmitter {
       state: 'discarded',
       session_id: this.claudeSessionId || this.sessionId,
     });
+  }
+
+  /**
+   * An explicit refresh from the Context tab uses the same full SDK count as
+   * the automatic settled snapshot. Discard a result if its context moved.
+   */
+  async contextBreakdown(): Promise<{ breakdown: ContextBreakdown | null; revision?: string }> {
+    const query = this.queryInstance;
+    if (this.stopping || !query) return { breakdown: null };
+    const revision = this.contextUsage.revision;
+    const usage = await query.getContextUsage({ detail: 'full' });
+    if (!usage || this.queryInstance !== query || this.contextUsage.revision !== revision) return { breakdown: null };
+    return { breakdown: contextBreakdownSchema.parse(usage), revision };
   }
 
   /**

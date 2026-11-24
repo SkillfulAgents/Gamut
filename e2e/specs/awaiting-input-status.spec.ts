@@ -3,6 +3,7 @@ import { AgentPage } from '../pages/agent.page'
 import { SessionPage } from '../pages/session.page'
 import {
   createAgent,
+  createSession,
   findSessionWithUserMessage,
   getAgentItem,
   gotoAgentHome,
@@ -103,6 +104,60 @@ test.describe('Awaiting Input Status', () => {
     // Session should complete
     await sessionPage.waitForInputEnabled(15000)
     await agentPage.waitForStatus('idle', 15000)
+  })
+
+  test('invoked-session input links follow the waiting session and clear live after answering', async ({ page, request }, testInfo) => {
+    const sibling = await createSession(request, agent, 'File the summary')
+    const child = await sendScenarioMessage(page, request, testInfo, 'ask question')
+    await sessionPage.waitForQuestionRequest()
+    const caller = await createAgent(request, uniqueName(testInfo, 'Caller'))
+    const parent = await createSession(request, caller, 'Coordinate the review')
+    const parentPath = `/agents/${caller.slug}/sessions/${parent.id}`
+    const childPath = `/agents/${agent.slug}/sessions/${child.id}`
+
+    // Seed the invocation relationship on each side. The sessions, pending
+    // question, answer, and status events run through the normal host.
+    await page.route(`**/api${parentPath}/invocations?*`, route => route.fulfill({ json: [
+      { agentSlug: agent.slug, sessionId: child.id, prompt: 'Choose a database', calledAt: '2026-01-02' },
+      { agentSlug: agent.slug, sessionId: sibling.id, prompt: 'File the summary', calledAt: '2026-01-01' },
+    ] }))
+    await page.route(`**/api${childPath}`, async route => {
+      const response = await route.fetch()
+      await route.fulfill({ response, json: { ...await response.json(), invokedByAgentSlug: caller.slug } })
+    })
+    await page.goto(parentPath)
+    await page.getByTestId('tray-show').click()
+    await page.getByTestId('tray-empty-invoked-agents').click()
+    const tray = page.getByTestId('agent-sessions-tray')
+    const inputLink = tray.getByRole('link', { name: /Input Needed/ })
+    await expect(tray.getByTestId('agent-sessions-done')).toContainText('File the summary')
+    await expect(inputLink).toHaveCount(1)
+    await expect(inputLink).toHaveAttribute('href', childPath)
+    await inputLink.click()
+    await expect(page).toHaveURL(url => url.pathname === childPath)
+    await sessionPage.waitForQuestionRequest()
+    const back = page.getByTestId('x-agent-session-back-button')
+    await back.click()
+    await expect(page).toHaveURL(url => url.pathname === parentPath)
+    const row = tray.getByTestId('agent-sessions-list-row').filter({ hasText: 'Choose a database' })
+    await row.click()
+    await expect(tray.getByTestId('agent-call-status')).toHaveText('Waiting for input')
+    await expect(inputLink).toBeInViewport({ ratio: 1 })
+    await inputLink.click()
+    await expect(page).toHaveURL(url => url.pathname === childPath)
+    await back.click()
+    await expect(page).toHaveURL(url => url.pathname === parentPath)
+    await expect(tray.getByTestId('agent-call-status')).toHaveText('Waiting for input')
+    const childPage = await page.context().newPage()
+    await childPage.goto(childPath)
+    const childSession = new SessionPage(childPage)
+    await childSession.waitForQuestionRequest()
+    await childSession.answerQuestion('PostgreSQL')
+    await expect(inputLink).toHaveCount(0)
+    await expect(tray.getByTestId('agent-call-status')).toHaveText('Idle')
+    await tray.getByTestId('agent-call-back').click()
+    await expect(tray.getByTestId('agent-sessions-done')).toContainText('Choose a database')
+    await expect(inputLink).toHaveCount(0)
   })
 
   test('parallel requests: status stays awaiting_input until all resolved', async ({ page, request }, testInfo) => {

@@ -142,6 +142,13 @@ export type LoginWayResult = z.infer<typeof loginWayResultSchema>
 export const loginBrowserClosedSchema = z.object({
   browserClosed: z.literal(true),
   kept: z.object({ how: z.enum(['saved', 'picked', 'vault', 'held']), username: z.string().nullable() }).optional(),
+  saveError: z.string().optional(),
+})
+
+/** The host saved the account and told the agent to retry after an unconfirmed fill. */
+export const loginFillUnconfirmedSchema = z.object({
+  fillUnconfirmed: z.literal(true),
+  saved: z.object({ site: z.string(), username: z.string() }),
 })
 
 /** The account picked in the form signed in with its saved session instead: nothing was filled. `restored` false: tried, and it did not. */

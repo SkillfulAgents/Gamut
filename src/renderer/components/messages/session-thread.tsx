@@ -1,3 +1,4 @@
+import { SessionBackgroundTasksProvider } from '@renderer/context/session-background-tasks-context'
 import { useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { cn } from '@shared/lib/utils'
 import { MessageList } from '@renderer/components/messages/message-list'
@@ -17,7 +18,7 @@ interface SessionThreadProps {
    *  enough live-edge clearance to keep the newest content readable. */
   overlayFooter?: boolean
   /** Whether the browser tray tab is available (interactive session view only). */
-  browserActive?: boolean
+  browserActive?: boolean | null
   /** Read-only mirror (chat-integration replay): suppress message edit/delete actions. */
   readOnly?: boolean
   // MessageList passthrough — supplied by the interactive session view, omitted when read-only.
@@ -37,7 +38,15 @@ interface SessionThreadProps {
  * always sit together under the same FilePreviewProvider, which each caller
  * supplies above this component.
  */
-export function SessionThread({
+export function SessionThread(props: SessionThreadProps) {
+  return (
+    <SessionBackgroundTasksProvider sessionId={props.sessionId} agentSlug={props.agentSlug}>
+      <SessionThreadContent {...props} />
+    </SessionBackgroundTasksProvider>
+  )
+}
+
+function SessionThreadContent({
   sessionId,
   agentSlug,
   footer,
@@ -120,7 +129,7 @@ export function SessionThread({
         </div>
       </div>
       {/* Side tray (browser, file preview) */}
-      {sessionId && <TrayManager agentSlug={agentSlug} sessionId={sessionId} browserActive={browserActive} />}
+      {sessionId && <TrayManager agentSlug={agentSlug} sessionId={sessionId} browserActive={browserActive} persistent />}
     </div>
   )
 }

@@ -18,7 +18,7 @@ vi.mock('@renderer/hooks/use-elapsed-timer', () => ({
 
 const mockOpenWorkflow = vi.fn()
 vi.mock('@renderer/context/workflow-context', () => ({
-  useWorkflow: () => ({ openWorkflow: mockOpenWorkflow }),
+  useOpenWorkflow: () => mockOpenWorkflow,
 }))
 
 function makeActive(overrides: Partial<SubagentInfo>): SubagentInfo {

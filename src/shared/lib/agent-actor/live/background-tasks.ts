@@ -29,6 +29,7 @@ export interface BackgroundTaskInfo {
   description?: string
   /** A subagent task's type from the level set (SDK >= 0.3.293). */
   subagentType?: string
+  parentTaskId?: string
   /**
    * The SDK's `ambient` flag (>= 0.3.284): a housekeeping task or live-update
    * watcher. Live work for settling, but never a row: the SDK says hosts
@@ -51,6 +52,7 @@ export interface ActiveBackgroundTaskSnapshot {
   taskType?: string
   description?: string
   subagentType?: string
+  parentTaskId?: string
 }
 
 /** Where the tracker reports what clients and the session must hear. */
@@ -80,6 +82,7 @@ function snapshotOf(taskId: string, info: BackgroundTaskInfo): ActiveBackgroundT
     taskType: info.taskType,
     description: info.description,
     subagentType: info.subagentType,
+    parentTaskId: info.parentTaskId,
   }
 }
 
@@ -226,6 +229,7 @@ export class BackgroundTasks {
     for (const task of levelSet.tasks) {
       this.upsert(task.task_id, {
         taskType: task.task_type,
+        parentTaskId: task.parent_task_id,
         description: task.description,
         subagentType: task.subagent_type,
         isSubagent: task.task_type === 'local_agent' ? true : undefined,

@@ -1,17 +1,18 @@
 /**
- * The container host: what is not per-agent about running containers on this
- * machine. Runtime readiness and image pulls, waking every agent's actor at
- * startup so the containers still running from before are seen, stop-all,
- * shutdown, and the fallout of a force-stop that kills the shared VM.
+ * The container host: this machine's container layer, and what is not
+ * per-agent about it. Runtime readiness and image pulls, the runner setting,
+ * and the fallout of a force-stop that kills the shared VM.
  *
- * Each agent's actor holds its own `ContainerRuntime`, which the host makes
- * (`createRuntime`), and watches its own container (`ContainerWatch`). What
- * the host does across agents it asks of the actors' runtimes, through
- * `AgentRuntimes`. Only the actor package imports this module: everything
- * else asks the actor for its agent and imports `containerHost` from
- * `@shared/lib/agent-actor` for the host-level calls.
+ * It knows nothing about agents. A local agent's actor asks it for a
+ * `ContainerRuntime` (`createRuntime`) and holds it; the host keeps track of
+ * the runtimes it made only to tell them of what happens to the machine
+ * under all of them: the runner changed, the shared VM was killed. Whether an
+ * agent runs, and stopping it, is asked of the agent's actor (see
+ * `all-agents.ts` for the questions asked of every agent at once). Only the
+ * actor package imports this module: everything else imports
+ * `containerHost` from `@shared/lib/agent-actor` for the host-level calls.
  */
-import { autoSleepTimeoutMsFrom, ContainerRuntime, type RuntimeAgent, type RuntimeHost } from './container-runtime'
+import { ContainerRuntime, type RuntimeAgent, type RuntimeHost } from './container-runtime'
 import {
   checkAllRunnersAvailability,
   checkImageExists,
@@ -32,43 +33,16 @@ import {
 import { ensureLimaReady } from './lima-container-client'
 import type { ImagePullProgress, RuntimeReadiness } from './types'
 import { globalFeed } from '@shared/lib/notifications/global-feed'
-import { WEBHOOK_RELAY_CHANGED_EVENT, watchWebhookRelay, type WebhookRelayService } from '@shared/lib/webhook-relay'
+import { WEBHOOK_RELAY_CHANGED_EVENT, getWebhookRelay, watchWebhookRelay, type WebhookRelayService } from '@shared/lib/webhook-relay'
 import { getSettings, mutateSettings } from '@shared/lib/config/settings'
 import path from 'path'
 import { getAgentWorkspaceDir, getAgentsDataDir } from '@shared/lib/config/data-dir'
 import { captureException, captureMessage, addErrorBreadcrumb } from '@shared/lib/error-reporting'
 import { background } from '@shared/lib/background'
 
-/**
- * The agents' runtimes, which their actors hold: the way the host asks every
- * agent on the machine. Attached by the agent registry.
- */
-export interface AgentRuntimes {
-  /** Wake the agent's actor, made if none is held, and wait for its first read of its container. */
-  wake(slug: string): Promise<void>
-  /** The runtimes the held actors have made. */
-  held(): ContainerRuntime[]
-  /** Forget the agent's runtime: its actor makes a new one on its next use. Does not stop the container. */
-  drop(slug: string): void
-}
-
 export class ContainerHost {
-  /** The agents' runtimes, attached by the agent registry when it is created. */
-  private agents: AgentRuntimes | null = null
-
-  /** Give the host the way to the agents' runtimes. Called once by the agent registry. */
-  attachAgentRuntimes(access: AgentRuntimes | null): void {
-    this.agents = access
-  }
-
-  private heldRuntimes(): ContainerRuntime[] {
-    return this.agents?.held() ?? []
-  }
-
-  /** The auto-sleep timeout in the settings, in ms; zero or less disables. */
-  async autoSleepTimeoutMs(): Promise<number> {
-    return autoSleepTimeoutMsFrom(await getSettings())
-  }
+  /** The runtimes this host made and that were not dropped since. */
+  private readonly runtimes = new Set<ContainerRuntime>()
 
   /** Optional callback invoked before a container is stopped (e.g. to close host browser) */
   onBeforeContainerStop: ((agentId: string) => Promise<void>) | null = null
@@ -87,12 +61,15 @@ export class ContainerHost {
         return self.onBeforeContainerStop
       },
       afterForceStop: (slug: string) => self.afterForceStop(slug),
+      disposed: (runtime: ContainerRuntime) => void self.runtimes.delete(runtime),
     }
   })()
 
   /** A runtime for the agent whose actor hands over `agent`, for this machine's runner. Never does I/O. */
   createRuntime(slug: string, agent: RuntimeAgent): ContainerRuntime {
-    return new ContainerRuntime(slug, this.hooks, agent)
+    const runtime = new ContainerRuntime(slug, this.hooks, agent, getWebhookRelay().kind !== 'unavailable')
+    this.runtimes.add(runtime)
+    return runtime
   }
 
   /**
@@ -113,108 +90,27 @@ export class ContainerHost {
     return path.join(getAgentsDataDir(), slug)
   }
 
-  // Forget every runtime (e.g., when the container runner setting changes).
-  // Does NOT stop running containers — call stopAll() first if needed.
+  // The runner setting changed (or everything was stopped): every runtime is
+  // forgotten, and each agent's actor makes a new one on its next use.
+  // Does NOT stop running containers — stop them first if needed.
   //
   // A runtime whose container is starting is kept: the start records its
   // outcome on the runtime it began on, and dropping that runtime would leave
-  // the container it brings up running but unknown to the host, so nothing
+  // the container it brings up running but unknown to its agent, so nothing
   // would count it as running or stop it on quit. Only its client is dropped,
   // so the next one is built for the runner configured now.
   clearRuntimes(): void {
-    for (const runtime of this.heldRuntimes()) {
+    for (const runtime of [...this.runtimes]) {
       if (runtime.isStarting()) runtime.resetClient()
-      else this.agents?.drop(runtime.slug)
+      else runtime.drop()
     }
   }
 
-  // Check if any agents have running containers (uses cached status)
-  hasRunningAgents(): boolean {
-    return this.runningRuntimes().length > 0
-  }
-
-  // Get list of running agent slugs (uses cached status)
-  getRunningAgentIds(): string[] {
-    return this.runningRuntimes().map((runtime) => runtime.slug)
-  }
-
-  private runningRuntimes(): ContainerRuntime[] {
-    return this.heldRuntimes().filter((runtime) => runtime.getCachedInfo().status === 'running')
-  }
-
-  /** Agents a drive change reaches only through a restart, and with `orStarting` every start not yet at its drive read too. */
-  getAgentIdsHoldingDrives(options?: { orStarting?: boolean }): string[] {
-    return this.heldRuntimes().filter((runtime) => runtime.holdsDrives() || (options?.orStarting && runtime.isStarting())).map((runtime) => runtime.slug)
-  }
-
-  /** Record every running agent as stale. */
-  markAgentsStale(): void {
-    for (const runtime of this.runningRuntimes()) runtime.markStale()
-  }
-
-  /** Record as stale every running agent whose webhook tools no longer match availability. */
-  reconcileWebhookRelay(available: boolean): void {
-    for (const runtime of this.runningRuntimes()) runtime.reconcileWebhookRelay(available)
-  }
-
-  /**
-   * Publishes the webhook relay's status to clients, and keeps running
-   * agents' webhook tools in step with it (their env says whether webhooks
-   * can be received).
-   */
+  /** Publishes the webhook relay's status to clients. */
   watchWebhookRelay(relay: WebhookRelayService): () => void {
     return watchWebhookRelay(relay, {
       broadcast: (status) => globalFeed.publish({ type: WEBHOOK_RELAY_CHANGED_EVENT, status }),
-      reconcileAgents: (available) => this.reconcileWebhookRelay(available),
     })
-  }
-
-  /**
-   * Wake every agent's actor once at startup, and wait for each to read its
-   * container: actors are made on first use, so without this an agent nobody
-   * opens would never see a container still running from before this launch.
-   * From then on each actor watches its own.
-   */
-  async initializeAgents(agentSlugs: string[]): Promise<void> {
-    console.log(`[ContainerHost] Initializing ${agentSlugs.length} agents...`)
-    const agents = this.agents
-    if (agents) await Promise.all(agentSlugs.map((slug) => agents.wake(slug)))
-    console.log(`[ContainerHost] Initialized ${agentSlugs.length} agents`)
-  }
-
-  // Stop all containers (with per-container timeout to prevent blocking shutdown)
-  async stopAll(): Promise<void> {
-    // Only stop containers that are actually running (based on cached status)
-    // to avoid spawning unnecessary CLI processes during shutdown
-    const running = this.runningRuntimes()
-    if (running.length > 0) {
-      // Timeout must accommodate the full escalation chain:
-      // Volume preparation (20s), then the existing stop/kill/force chain (25s).
-      const STOP_TIMEOUT_MS = 50000
-      const stopPromises = running.map(async (runtime) => {
-        const slug = runtime.slug
-        try {
-          await Promise.race([
-            runtime.stopContainer(),
-            new Promise<never>((_, reject) =>
-              setTimeout(() => reject(new Error('Container stop timed out')), STOP_TIMEOUT_MS)
-            ),
-          ])
-        } catch (error) {
-          console.error(`Failed to stop container for agent ${slug}:`, error)
-        }
-      })
-      await Promise.all(stopPromises)
-    }
-    this.clearRuntimes()
-  }
-
-  // Synchronous stop - used for exit handlers where async isn't available
-  stopAllSync(): void {
-    for (const runtime of this.heldRuntimes()) {
-      runtime.stopSync()
-    }
-    this.clearRuntimes()
   }
 
   /**
@@ -224,8 +120,8 @@ export class ContainerHost {
    * 3. Re-check runtime readiness so the VM restarts in the background
    */
   private afterForceStop(slug: string): void {
-    for (const other of this.runningRuntimes()) {
-      if (other.slug === slug) continue
+    for (const other of this.runtimes) {
+      if (other.slug === slug || other.getCachedInfo().status !== 'running') continue
       other.markAsStopped()
       other.sessions().markAllInactive({ settleRecovering: true })
       globalFeed.publish({

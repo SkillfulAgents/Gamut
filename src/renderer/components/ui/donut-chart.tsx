@@ -46,7 +46,7 @@ export function DonutChart({
   const strokeWidth = size === 'sm' ? 3 : 2.5
 
   const chart = (
-    <div
+    <span
       className={`relative ${buttonSize} flex items-center justify-center ${animated ? 'animate-pulse' : ''}`}
     >
       <svg className={`${svgSize} -rotate-90`} viewBox="0 0 28 28">
@@ -71,7 +71,7 @@ export function DonutChart({
           {percent}
         </span>
       )}
-    </div>
+    </span>
   )
 
   if (!tooltip) return chart

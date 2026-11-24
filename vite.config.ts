@@ -50,9 +50,11 @@ export default defineConfig({
         clientsClaim: true,
         // Everything the UI is made of; hdr-*.mp4 stay network-only (decorative).
         globPatterns: ['**/*.{js,css,html,svg,png,ico,webmanifest,woff2}'],
-        // Offline deep links get the app shell; /api and /auth (SSO launcher) must hit the network.
+        // Offline deep links get the app shell; /api, /auth (SSO launcher), /mcp,
+        // the MCP OAuth discovery documents (/.well-known) and the consent page
+        // (/oauth, served with frame-ancestors 'none') must hit the network.
         navigateFallback: 'index.html',
-        navigateFallbackDenylist: [/^\/api\//, /^\/auth\//],
+        navigateFallbackDenylist: [/^\/api\//, /^\/auth\//, /^\/mcp(?:$|[/?])/, /^\/\.well-known\//, /^\/oauth(?:\/|$)/i],
         // Vendor chunk exceeds workbox's 2MB default before compression.
         maximumFileSizeToCacheInBytes: 8 * 1024 * 1024,
         inlineWorkboxRuntime: true, // single sw.js file, nothing extra at the dist root
@@ -89,6 +91,8 @@ export default defineConfig({
         const backgroundWorkModule = path.resolve(__dirname, 'src/shared/lib/background-work/index.ts')
         const localTaskManagerModule = path.resolve(__dirname, 'src/shared/lib/background-work/local-task-manager.ts')
         const startupModule = path.resolve(__dirname, 'src/shared/lib/startup.ts')
+        const registryModule = path.resolve(__dirname, 'src/shared/lib/agent-actor/registry.ts')
+        const localAgentsModule = path.resolve(__dirname, 'src/shared/lib/agent-actor/local-agent-registry.ts')
         const ensureBooted = async () => {
           const { isDatabaseOpen, openDatabase } = await server.ssrLoadModule(dbModule)
           if (!isDatabaseOpen()) {
@@ -98,6 +102,19 @@ export default defineConfig({
           // Checked and installed in one step: a local AppState installs synchronously.
           if (!isAppStateInitialized()) {
             await initializeLocalAppState()
+          }
+          // Then the agents, as the web server does. Checked against the code that
+          // makes the actors, not only for a registry: an edit can re-evaluate the
+          // registry module, which leaves it with none, or only the actors' code,
+          // which would leave the registry making them from the old code. Either
+          // way the current code makes them from here on. The agents' state
+          // outlives the edit, and each agent that had any gets its actor again at
+          // once, so what it holds is seen without waiting for a use.
+          const { agentRegistry, isAgentRegistryInitialized, reinstallAgentRegistry } = await server.ssrLoadModule(registryModule)
+          const { agentStatesSurvivingReloads, createLocalAgentActor } = await server.ssrLoadModule(localAgentsModule)
+          if (!isAgentRegistryInitialized(createLocalAgentActor)) {
+            reinstallAgentRegistry(createLocalAgentActor)
+            for (const slug of agentStatesSurvivingReloads.keys()) agentRegistry.get(slug)
           }
           // Then key custody, as the web server does: the vault seals through it.
           // Concurrent requests share one install (ensureKeyManager).
@@ -113,8 +130,16 @@ export default defineConfig({
           const { registerBackgroundWork } = await server.ssrLoadModule(startupModule)
           registerBackgroundWork()
         }
+        // The dev server's half of web-build.ts's consent-page headers.
         server.middlewares.use((req, res, next) => {
-          if (!req.url?.startsWith('/api')) return next()
+          if (/^\/oauth(?:\/|$|\?)/i.test(req.url ?? '')) {
+            res.setHeader('Content-Security-Policy', "frame-ancestors 'none'")
+            res.setHeader('X-Frame-Options', 'DENY')
+          }
+          next()
+        })
+        server.middlewares.use((req, res, next) => {
+          if (!req.url?.startsWith('/api') && !/^\/mcp(?:$|[/?])/.test(req.url ?? '') && !req.url?.startsWith('/.well-known/')) return next()
           ensureBooted().then(
             () => next(),
             (error) => {
@@ -165,7 +190,10 @@ export default defineConfig({
     },
     devServer({
       entry: 'src/api/index.ts',
-      exclude: [/^(?!\/api).*/], // Only handle /api/* routes
+      // Only handle /api/* routes, the MCP endpoint (/mcp, outside /api) and
+      // its OAuth discovery documents (/.well-known/*, at the root as RFC 8414
+      // and RFC 9728 place them).
+      exclude: [/^(?!\/api|\/mcp(?:$|[/?])|\/\.well-known\/).*/],
     }),
   ],
   resolve: {

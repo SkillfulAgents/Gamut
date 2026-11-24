@@ -7,7 +7,9 @@ export {
   type StartErrorCode,
   type StartFailure,
 } from './delivery-errors'
-export { agentRegistry } from './registry'
+export { agentRegistry, initializeAgentRegistry } from './registry'
+export { createLocalAgentActor } from './local-agent-registry'
+export { agentsHoldingDrives, hasRunningAgents, markRunningAgentsStale, runningAgentSlugs, stopAllAgents, wakeAgents } from './all-agents'
 export { containerHost, type ContainerHost } from './host'
 export { agentCatalog } from './agent-catalog'
 export { identityFromInstructions } from './agent-directories'

@@ -1,191 +1,112 @@
 /**
- * The alarm that puts an idle container to sleep.
+ * The alarm that puts an idle container to sleep. Each agent's actor owns
+ * one, and everything about auto-sleep is in it: nothing outside the actor
+ * reads the timeout, keeps a timer or decides.
  *
- * Every mark on the container's activity clock (its start, a keep-alive, a
- * session write) re-arms one timer for the auto-sleep timeout counted from
- * that mark. When it fires, the container is either busy (a session active
- * or awaiting input), in which case the alarm waits another full window; or
- * quiet but marked more recently than the timeout, in which case it waits the
- * remainder; or idle past the timeout, in which case it sleeps.
+ * Activity (the container's start, a keep-alive, a session write) only moves
+ * the container's clock; it never touches the alarm. The alarm waits for one
+ * wake-up, set when the container comes up. When the wake-up comes it reads
+ * the auto-sleep timeout and the clock, and decides:
  *
- * Each agent's actor owns its alarm, in every deployment; only what the alarm
- * waits with differs (`IdleTimer`). The container runtime reports the marks
- * and the container's starts and stops to it, and nothing
- * central has to poll. The timeout is a setting, read fresh for every arm and
- * again at every fire, so a change made anywhere applies no later than the
- * next fire, a change made here applies when the registry re-arms the held
- * alarms (with one read for all of them), and zero disables.
+ * - nothing to sleep (the container is not running, or auto-sleep is off):
+ *   it stops waiting;
+ * - busy (a session active or awaiting input): it waits another full timeout;
+ * - active within the timeout: it waits until one timeout after that activity;
+ * - otherwise it sleeps the container.
  *
- * Reading the timeout is asynchronous. The marks themselves are recorded by
- * the caller before it schedules, synchronously and in order. The arm that
- * follows reads the timeout, then the clock, so it counts from every mark
- * made up to the moment it lands; a burst of marks while that read is out
- * shares it rather than reading once per mark. A fire, a cancel or a re-arm
- * with a timeout read after a settings change detaches the read in flight, so
- * a read started before them never re-arms over what they decided.
+ * So activity pushes the sleep back without anything being reset: the
+ * wake-up that finds it waits for the rest.
+ *
+ * The wake-up is the actor's own (`wakeAt`). `LocalAgentActor` uses a timer
+ * of its process; an actor that outlives its process uses a wake-up that does
+ * too, and runs `fire()` when it goes off. A wake-up may come early: the
+ * decision is made from the clock, not from having been woken.
+ *
+ * The timeout is a setting, read at every decision and never kept. A change
+ * applies at the alarm's next wake-up, which can be as far off as the old
+ * timeout. An alarm that found auto-sleep off waits for nothing, and reads
+ * the setting again when the container is next reported up (its next start,
+ * or the actor's next status check).
  *
  * A sleep that does not complete (stop and kill timed out with force-stop
- * disabled, which is the only escalation this alarm never takes) leaves the
- * clock marked; the alarm then retries a minute later, as the old sweep did.
- * So does a timeout read that failed with nothing armed.
+ * disabled, which is the only escalation this alarm never takes) is tried
+ * again a minute later. So is a timeout read that failed.
  */
 import { background } from '../background'
+import type { AppSettings } from '@shared/lib/config/settings'
 
+/** The auto-sleep timeout in `settings`, in ms; zero or less disables. */
+export function autoSleepTimeoutMsFrom(settings: Pick<AppSettings, 'app'>): number {
+  return (settings.app?.autoSleepTimeoutMinutes ?? 30) * 60_000
+}
+
+/** What the alarm reads and does, all of it the actor's own. */
 export interface IdleAlarmDeps {
   /**
    * How long the container may be idle before it sleeps, in ms; zero or less
-   * disables. Read for every arm (one read shared by the marks made while it
-   * is out) and at every fire, never kept between them.
+   * disables. Read at every decision, never kept between them.
    */
   timeoutMs(): Promise<number>
   /**
-   * The clock: when the container was last busy, or undefined when there is
-   * nothing to sleep — no mark since it stopped, or a container that is not
-   * running. Undefined never arms and never retries.
+   * The clock: when the container was last active, or undefined when there is
+   * nothing to sleep (a container that is not running, or is on its way up
+   * or down).
    */
   lastActivityAt(): number | undefined
   /** Whether the container is busy right now: a session active or awaiting input. */
   isBusy(): boolean
   /**
-   * Put the container to sleep, idle past `timeoutMs` (the timeout this
-   * decision read). A completed stop resets the clock; one that does not
-   * leaves it marked.
+   * Put the container to sleep, idle for `timeoutMs` (the timeout this
+   * decision read). A completed stop leaves nothing on the clock; one that
+   * does not leaves it marked.
    */
   sleep(timeoutMs: number): Promise<void>
+  /**
+   * Have `fire()` run at `at` (epoch ms), in place of any wake-up set before.
+   * It may run early.
+   */
+  wakeAt(at: number): void
+  /** Drop the wake-up, if one is set. */
+  cancelWake(): void
   /** The clock to read time from; `Date.now` unless a test says otherwise. */
   now?(): number
-  /**
-   * What the alarm waits with, read once at its first arm; this process's
-   * timer unless the deployment gives one that outlives the process (see
-   * `IdleTimer`).
-   */
-  timer?(): IdleTimer
 }
 
-/**
- * What an idle alarm waits with. `set` replaces what was set before; `clear`
- * drops it. A timer may go off earlier than asked: every fire checks the clock
- * again and arms for the rest. A deployment whose process can end while the
- * container runs keeps the wait somewhere that outlives the process, and when
- * it goes off there, runs the alarm's `fire()` on the new process.
- */
-export interface IdleTimer {
-  set(ms: number, fire: () => void): void
-  clear(): void
-}
-
-/** How long a sleep that did not complete waits before the alarm tries again. */
+/** How long the alarm waits before it tries again a sleep that did not complete, or a timeout it could not read. */
 export const IDLE_ALARM_RETRY_MS = 60_000
 
-/**
- * The longest delay Node's `setTimeout` honours (2^31 - 1 ms, about 24.8
- * days); anything longer is silently run after 1 ms with an overflow warning.
- * A longer wait is armed in legs of this length, and every fire rechecks the
- * deadline before doing anything.
- */
-export const MAX_TIMER_MS = 2_147_483_647
-
-/**
- * Whether a container whose idle clock reads `idleSince` (see
- * `ContainerOps.idleSince`) has been idle for longer than `timeoutMs` at
- * `now`. A `null` clock — busy, or nothing recorded yet — is never idle.
- */
-export function idleLongerThan(idleSince: number | null, timeoutMs: number, now: number): boolean {
-  return idleSince !== null && now - idleSince > timeoutMs
-}
-
-/** This process's timer: a wait longer than `MAX_TIMER_MS` goes off at that, and an armed timer never keeps the process alive. */
-export function processIdleTimer(): IdleTimer {
-  let timer: NodeJS.Timeout | null = null
-  const clear = () => {
-    if (timer) clearTimeout(timer)
-    timer = null
-  }
-  return {
-    set(ms, fire) {
-      clear()
-      timer = setTimeout(() => {
-        timer = null
-        fire()
-      }, Math.min(ms, MAX_TIMER_MS))
-      timer.unref?.()
-    },
-    clear,
-  }
-}
-
 export class IdleAlarm {
+  /** A wake-up is set, or the one that was set is being decided on. */
   private armed = false
-  private waiting: IdleTimer | undefined
-  private firing = false
+  private deciding: Promise<void> | null = null
+  /** A decision was asked for while one was being made: make another after it. */
+  private again = false
   /**
-   * Bumped by every schedule, re-arm, fire and cancel. A fire's decision
-   * applies only while its number is still the latest: anything begun after
-   * its read started (a newer mark's schedule, a re-arm, a stop's cancel)
-   * decides instead.
+   * Counts the disarms. A decision that was waiting (for the timeout, or for
+   * the sleep) while one happened stops there: the container it was deciding
+   * for went down, and its actor may be gone.
    */
-  private generation = 0
-  /**
-   * The schedules' timeout read in flight, if any. A schedule while it is out
-   * joins it instead of starting another read; it arms only if it is still
-   * this read when it lands. A fire, a re-arm or a cancel detaches it.
-   */
-  private pendingRead: object | null = null
+  private disarms = 0
 
   constructor(private readonly deps: IdleAlarmDeps) {}
 
   /**
-   * Arm for the timeout counted from the last mark: called after every mark.
-   * Disabled, or nothing on the clock, means no alarm. A mark already older
-   * than the timeout fires at once.
-   *
-   * Returns before the alarm is armed: the timeout is read in the background
-   * (tracked by `background()`), and the clock is read after it, so the arm
-   * counts from every mark made up to then. A schedule while that read is out
-   * starts no other: the one read arms from the latest mark when it lands.
-   * Whatever was armed before stays armed until the read lands, so a read
-   * that fails loses no alarm.
+   * The container is up: wait for it to go idle, unless the alarm is waiting
+   * already. Returns before the wake-up is set, since the timeout is read
+   * first. Called for a start, and for every status read that finds the
+   * container running, which costs nothing while the alarm is armed.
    */
-  schedule(): void {
-    // A fire still reading no longer decides: this mark is newer.
-    this.generation++
-    if (this.pendingRead) return
-    const read = {}
-    this.pendingRead = read
-    background(this.arm(read), { name: 'idle-alarm.arm' })
+  arm(): void {
+    if (this.armed) return
+    background(this.fire(), { name: 'idle-alarm.arm' })
   }
 
-  /**
-   * Arm now from a timeout the caller read: the registry re-arming every alarm
-   * after the timeout setting changed, with one read made after the change
-   * (or the value the change committed). A schedule's read in flight, which
-   * may have started before the change, is detached and arms nothing.
-   */
-  rearm(timeoutMs: number): void {
-    this.generation++
-    this.pendingRead = null
-    this.armFrom(timeoutMs)
-  }
-
-  /**
-   * Arm unless an alarm is armed already or a schedule's read is on its way:
-   * a status sync that finds the container running. An armed alarm is right
-   * as it is (every mark re-armed it, and its fire reads the timeout again),
-   * so a periodic sync costs nothing. `timeoutMs`, read once by the caller for
-   * a sweep over many containers, arms without a read of its own; the fire
-   * still reads afresh before it puts anything to sleep.
-   */
-  ensureArmed(timeoutMs?: number): void {
-    if (this.armed || this.pendingRead) return
-    if (timeoutMs === undefined) this.schedule()
-    else this.rearm(timeoutMs)
-  }
-
-  /** Disarm: the container stopped, or the runtime was dropped. A read in flight no longer arms. */
-  cancel(): void {
-    this.generation++
-    this.pendingRead = null
-    this.clearTimer()
+  /** The container is down, or its runtime was dropped: there is nothing to wait for. */
+  disarm(): void {
+    this.disarms++
+    if (!this.armed) return
+    this.armed = false
+    this.deps.cancelWake()
   }
 
   isArmed(): boolean {
@@ -193,99 +114,65 @@ export class IdleAlarm {
   }
 
   /**
-   * Decide now: sleep if idle past the timeout, otherwise re-arm. What the
-   * timer runs, and public so a caller can run it without waiting for one.
-   * The timeout is read again here, and the clock and the busy state after
-   * it, so the decision is never made on a timeout older than this fire.
+   * Decide now: sleep the container if it has been idle for the timeout,
+   * otherwise wait for when it would be. What the wake-up runs. Decisions
+   * never overlap: one asked for while another is being made is made after it.
    */
-  async fire(): Promise<void> {
-    if (this.firing) return
-    this.firing = true
+  fire(): Promise<void> {
+    this.again = true
+    return (this.deciding ??= this.run())
+  }
+
+  private async run(): Promise<void> {
     try {
-      this.clearTimer()
-      const generation = ++this.generation
-      // This fire reads for itself; a schedule's read started before it no longer arms.
-      this.pendingRead = null
-      const timeoutMs = await this.readTimeout(() => generation === this.generation)
-      // A mark, a re-arm or a stop since this fire began decides instead.
-      if (timeoutMs === null || generation !== this.generation) return
-      if (timeoutMs <= 0) return
-      const last = this.deps.lastActivityAt()
-      if (last === undefined) return
-      const idleSince = this.deps.isBusy() ? null : last
-      if (!idleLongerThan(idleSince, timeoutMs, this.now())) {
-        // Busy: a full window from now. Quiet but recent: the remainder.
-        this.armIn(idleSince === null ? timeoutMs : last + timeoutMs - this.now())
-        return
+      while (this.again) {
+        this.again = false
+        await this.decide()
       }
-      try {
-        await this.deps.sleep(timeoutMs)
-      } catch (error) {
-        console.error('[IdleAlarm] Sleep failed; will retry:', error)
-      }
-      // A completed stop reset the clock. Anything still on it means the
-      // container is up (the stop did not complete, or a mark landed during
-      // it and the mark's own re-arm was lost to the reset): try again soon.
-      if (this.deps.lastActivityAt() !== undefined && !this.armed) this.armIn(IDLE_ALARM_RETRY_MS)
-    } finally {
-      this.firing = false
-    }
-  }
-
-  /**
-   * What `schedule` starts: read the timeout, then arm from the clock, unless
-   * a fire, a re-arm or a cancel detached this read meanwhile.
-   */
-  private async arm(read: object): Promise<void> {
-    const current = () => this.pendingRead === read
-    const timeoutMs = await this.readTimeout(current)
-    if (!current()) return
-    this.pendingRead = null
-    if (timeoutMs === null) return
-    this.armFrom(timeoutMs)
-  }
-
-  /** Arm for `timeoutMs` counted from the clock as it stands now. The new wait replaces the old one; nothing to wait for clears it. */
-  private armFrom(timeoutMs: number): void {
-    const last = timeoutMs > 0 ? this.deps.lastActivityAt() : undefined
-    if (last === undefined) return this.clearTimer()
-    this.armIn(Math.max(0, last + timeoutMs - this.now()))
-  }
-
-  /**
-   * The timeout, or null when the read failed. A failed read leaves whatever
-   * is armed in place; with nothing armed for a container still on the clock,
-   * and nothing newer deciding (`current`), it retries a minute later rather
-   * than leave the container awake for good.
-   */
-  private async readTimeout(current: () => boolean): Promise<number | null> {
-    try {
-      return await this.deps.timeoutMs()
     } catch (error) {
-      console.error('[IdleAlarm] Could not read the auto-sleep timeout; will retry:', error)
-      if (current() && !this.armed && this.deps.lastActivityAt() !== undefined) {
-        this.armIn(IDLE_ALARM_RETRY_MS)
-      }
-      return null
+      // Not left armed with no wake-up set: the next `arm()` decides again.
+      this.disarm()
+      throw error
+    } finally {
+      this.deciding = null
     }
   }
 
-  private clearTimer(): void {
-    if (!this.armed) return
-    this.armed = false
-    this.timer().clear()
+  private async decide(): Promise<void> {
+    const disarms = this.disarms
+    let timeoutMs: number
+    try {
+      timeoutMs = await this.deps.timeoutMs()
+    } catch (error) {
+      if (disarms !== this.disarms) return
+      console.error('[IdleAlarm] Could not read the auto-sleep timeout; will retry:', error)
+      // Rather than leave a running container awake for good.
+      if (this.deps.lastActivityAt() === undefined) this.disarm()
+      else this.waitUntil(this.now() + IDLE_ALARM_RETRY_MS)
+      return
+    }
+    if (disarms !== this.disarms) return
+    const last = this.deps.lastActivityAt()
+    if (last === undefined || timeoutMs <= 0) return this.disarm()
+    const now = this.now()
+    // Busy: a full timeout from now. Otherwise one timeout after the last activity.
+    const sleepAt = this.deps.isBusy() ? now + timeoutMs : last + timeoutMs
+    if (now < sleepAt) return this.waitUntil(sleepAt)
+    try {
+      await this.deps.sleep(timeoutMs)
+    } catch (error) {
+      console.error('[IdleAlarm] Sleep failed; will retry:', error)
+    }
+    // A completed stop disarmed on its way down. Anything still on the clock
+    // means the container is up (the stop did not complete): try again soon.
+    if (disarms !== this.disarms) return
+    if (this.deps.lastActivityAt() === undefined) this.disarm()
+    else this.waitUntil(this.now() + IDLE_ALARM_RETRY_MS)
   }
 
-  private armIn(ms: number): void {
+  private waitUntil(at: number): void {
     this.armed = true
-    this.timer().set(ms, () => {
-      this.armed = false
-      background(this.fire(), { name: 'idle-alarm.sleep-if-idle' })
-    })
-  }
-
-  private timer(): IdleTimer {
-    return (this.waiting ??= this.deps.timer?.() ?? processIdleTimer())
+    this.deps.wakeAt(at)
   }
 
   private now(): number {

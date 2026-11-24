@@ -66,6 +66,10 @@ function RootLayoutContent() {
   const search = useRouterState({
     select: (s) => s.location.search as Record<string, unknown>,
   })
+  // The MCP consent page stands alone: a person signing in there for the first
+  // time is connecting a client, not setting up, so the wizard waits, and the
+  // signup handoff does not read the OAuth query's `prompt` as its own.
+  const standalone = useRouterState({ select: (s) => /^\/oauth\/consent\/?$/i.test(s.location.pathname) })
   const { prompt, template_slug } = lenient(homeSearchSchema)(search)
   const hasAutoOpened = useRef(false)
   // Latched from the URL on first sighting so stripping the params cannot
@@ -122,7 +126,7 @@ function RootLayoutContent() {
   }, [user])
 
   useEffect(() => {
-    if (hasAutoOpened.current) return
+    if (hasAutoOpened.current || standalone) return
     if (!userSettings || !globalSettings) return
 
     if (userSettings.setupCompleted) return
@@ -141,7 +145,7 @@ function RootLayoutContent() {
       setWizardAgentOnly(true)
       openWizard()
     }
-  }, [userSettings, globalSettings, isAuthMode, isAdmin, openWizard])
+  }, [userSettings, globalSettings, isAuthMode, isAdmin, openWizard, standalone])
 
   return (
     <DialogProvider onOpenWizard={openWizard}>
@@ -179,8 +183,10 @@ function RootLayoutContent() {
             ) : null}
             {/* Above the wizard ternary: the wizard replaces the outlet, so a
                 consumer inside the outlet may never commit an effect. */}
-            <SignupHandoffConsumer />
-            {wizardOpen ? (
+            {/* Not on the consent page: an OAuth request carries `prompt=consent`,
+                which is not the signup handoff's `?prompt=` and must not be read as one. */}
+            {!standalone && <SignupHandoffConsumer />}
+            {wizardOpen && !standalone ? (
               <Suspense fallback={null}>
                 <GettingStartedWizard agentOnly={wizardAgentOnly} onClose={() => setWizardOpen(false)} />
               </Suspense>

@@ -1,7 +1,7 @@
 import { resolveGlobalSelection } from '@shared/lib/llm-provider/connections'
 import { Hono } from 'hono'
 import { Authenticated } from '../middleware/auth'
-import { containerHost } from '@shared/lib/agent-actor'
+import { containerHost, hasRunningAgents } from '@shared/lib/agent-actor'
 import { APP_VERSION } from '@shared/lib/config/version'
 import { activeLlmProviderFrom } from '@shared/lib/llm-provider'
 import { getSettings } from '@shared/lib/config/settings'
@@ -18,7 +18,7 @@ runtimeStatus.get('/', async (c) => {
   const root = await resolveGlobalSelection(undefined, settings)
   return c.json({
     runtimeReadiness: containerHost.getReadiness(),
-    hasRunningAgents: containerHost.hasRunningAgents(),
+    hasRunningAgents: await hasRunningAgents(),
     apiKeyConfigured: (root?.provider ?? activeLlmProviderFrom(settings)).apiKeyStatusFrom(settings).isConfigured,
     servicesInitError: getServicesInitError(),
     appVersion: APP_VERSION,

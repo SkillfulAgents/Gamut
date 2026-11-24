@@ -92,12 +92,14 @@ const fakeActor = {
     isKnown: vi.fn(async () => true),
     attach: vi.fn(async () => {}),
     metadata: vi.fn(async () => null),
+    recordInvocation: vi.fn(async (..._args: unknown[]) => {}),
     list: vi.fn(async () => [{ id: SESSION_ID, name: 'A session', createdAt: new Date(0), lastActivityAt: new Date(0) }]),
     live: vi.fn(async () => ({ isActive: mockIsActive(), isAwaitingInput: false })),
     waitForIdle: (...args: unknown[]) => mockWaitForIdle(...args),
     start: (...args: unknown[]) => mockStart(...args),
   },
   messages: {
+    broadcastEvent: vi.fn(async () => {}),
     findLastEntry: vi.fn(async () => undefined),
     deliver: (...args: unknown[]) => mockDeliver(...args),
     transcriptView: vi.fn(async () => ({ messages: [], total: 0, deliveredFiles: [] })),
@@ -115,7 +117,7 @@ vi.mock('@shared/lib/agent-actor', () => ({
 import { userXAgentCaller, agentXAgentCaller, type XAgentCaller } from './caller'
 import { getTargetSessions, getTargetTranscript, listVisibleAgents, openDeliveredFile } from './operations'
 import { invokeAgent } from './invoke'
-import { effectiveSyncWaitMs } from './sync-wait'
+import { effectiveSyncWaitMs, readLastAssistantMessage, readLastAssistantReply } from './sync-wait'
 
 async function seedRole(userId: string, agentSlug: string, role: AgentRole) {
   await testDb.insert(schema.agentAcl).values({ id: randomUUID(), userId, agentSlug, role, createdAt: new Date() })
@@ -173,6 +175,39 @@ beforeEach(async () => {
 
 afterEach(async () => {
   await handle.close()
+})
+
+describe('caller session invocation references', () => {
+  const caller = agentXAgentCaller(CALLER_AGENT, 'calling-session')
+
+  it.each([
+    [undefined, NEW_SESSION_ID],
+    [SESSION_ID, SESSION_ID],
+  ])('records an accepted call to %s before waiting for its reply', async (sessionId, expectedId) => {
+    const result = await invokeAgent(caller, { slug: TARGET, prompt: 'Research the topic', sessionId, sync: true, callerToolUseId: 'tool-123' })
+    expect(result.ok).toBe(true)
+    expect(fakeActor.sessions.recordInvocation).toHaveBeenCalledWith('calling-session', {
+      agentSlug: TARGET, sessionId: expectedId, toolUseId: 'tool-123', prompt: 'Research the topic', calledAt: expect.any(String),
+    })
+    expect(fakeActor.sessions.recordInvocation.mock.invocationCallOrder[0]).toBeLessThan(mockWaitForIdle.mock.invocationCallOrder[0])
+    expect(fakeActor.messages.broadcastEvent).toHaveBeenCalledWith('calling-session', { type: 'agent_invoked' })
+    expect(fakeActor.messages.broadcastEvent.mock.invocationCallOrder[0]).toBeLessThan(mockWaitForIdle.mock.invocationCallOrder[0])
+  })
+
+  it('keeps self-invocations in history without asking the tray to open', async () => {
+    const result = await invokeAgent(caller, { slug: CALLER_AGENT, prompt: 'Start a worker', sync: false })
+    expect(result.ok).toBe(true)
+    expect(fakeActor.sessions.recordInvocation).toHaveBeenCalledOnce()
+    expect(fakeActor.messages.broadcastEvent).not.toHaveBeenCalled()
+  })
+
+  it('creates no reference when the continuation cannot be delivered', async () => {
+    mockDeliver.mockRejectedValueOnce(new Error('Container unavailable'))
+    const result = await invokeAgent(caller, { slug: TARGET, prompt: 'Continue', sessionId: SESSION_ID })
+    expect(result.ok).toBe(false)
+    expect(fakeActor.sessions.recordInvocation).not.toHaveBeenCalled()
+    expect(fakeActor.messages.broadcastEvent).not.toHaveBeenCalled()
+  })
 })
 
 describe('the sync wait a caller asks for', () => {
@@ -379,6 +414,21 @@ describe('a user caller starting a new session', () => {
     expect(lastStart().metadata).toEqual({ starred: true, createdByUserId: USER_ID })
   })
 
+  it('a message to an existing session carries none of the caller\'s metadata: the session keeps its own origin', async () => {
+    const caller = userXAgentCaller({ userId: USER_ID, sessionName: 'From MCP', sessionMetadata: { mcpInvocation: { userId: USER_ID, clientName: 'Codex' } } })
+    mockStart.mockClear()
+    mockDeliver.mockClear()
+    const result = await invokeAgent(caller, { slug: TARGET, prompt: 'hi', sessionId: SESSION_ID })
+    expect(result).toEqual({ ok: true, value: { sessionId: SESSION_ID, status: 'running' } })
+    expect(mockStart).not.toHaveBeenCalled()
+    expect(mockDeliver).toHaveBeenCalledTimes(1)
+    const request = mockDeliver.mock.calls[0][0] as Record<string, unknown>
+    // No metadata written, no promotion, no rename: only the message goes.
+    expect(request.metadataUpdates).toBeUndefined()
+    expect(request.promote).toBeUndefined()
+    expect(JSON.stringify(request)).not.toContain('mcpInvocation')
+  })
+
   it('drops them even when the service has no creator to record', async () => {
     authModeEnabled = false
     const caller = userXAgentCaller({ userId: 'local', sessionMetadata: { invokedByAgentSlug: CALLER_AGENT, createdByUserId: 'someone-else' } })
@@ -416,5 +466,38 @@ describe('the promoted note under a configured sub-second wait', () => {
     mockWaitForIdle.mockResolvedValueOnce('timeout')
     const created = await invoke(caller, { slug: TARGET, prompt: 'hi', sync: true, syncWaitMs: 400 })
     expect(created).toEqual({ ok: true, value: { sessionId: NEW_SESSION_ID, status: 'running', error: routeNote('400ms') } })
+  })
+})
+
+describe('the last assistant reply after a boundary', () => {
+  const findLastEntry = fakeActor.messages.findLastEntry as unknown as ReturnType<typeof vi.fn>
+  const assistant = (uuid: string, content: unknown, extra: Record<string, unknown> = {}) => ({ type: 'assistant', uuid, message: { content }, ...extra })
+
+  afterEach(() => {
+    findLastEntry.mockReset()
+    findLastEntry.mockImplementation(async () => undefined)
+  })
+
+  it('reads up to the given attempts at the given interval while the boundary is still last, then gives up', async () => {
+    findLastEntry.mockImplementation(async () => assistant('old', 'previous answer'))
+    const started = Date.now()
+    expect(await readLastAssistantReply(TARGET, SESSION_ID, { boundaryUuid: 'old', attempts: 3, intervalMs: 20 })).toBeNull()
+    expect(findLastEntry).toHaveBeenCalledTimes(3)
+    expect(Date.now() - started).toBeGreaterThanOrEqual(35)
+  })
+
+  it('answers the newer entry with its uuid, spoken text and API-error flag', async () => {
+    findLastEntry
+      .mockImplementationOnce(async () => assistant('old', 'previous answer'))
+      .mockImplementationOnce(async () => assistant('new', [{ type: 'text', text: 'Overloaded' }, { type: 'tool_use', name: 'Read', id: 't', input: {} }], { isApiErrorMessage: true }))
+    expect(await readLastAssistantReply(TARGET, SESSION_ID, { boundaryUuid: 'old', attempts: 3, intervalMs: 5 })).toEqual({
+      uuid: 'new', role: 'assistant', content: 'Overloaded\n[tool_use: Read]', spoken: 'Overloaded', toolName: 'Read', isApiErrorMessage: true,
+    })
+  })
+
+  it('counts a system entry as the reply unless told not to, as the x-agent read always has', async () => {
+    findLastEntry.mockImplementation(async () => ({ type: 'system', uuid: 'sys', subtype: 'compact_boundary' }))
+    expect(await readLastAssistantMessage(TARGET, SESSION_ID)).toEqual({ role: 'system', content: '[context compacted]' })
+    expect(await readLastAssistantReply(TARGET, SESSION_ID, { attempts: 1, includeSystem: false })).toBeNull()
   })
 })

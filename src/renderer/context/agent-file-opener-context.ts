@@ -1,4 +1,4 @@
-import { createContext } from 'react'
+import { createContext, useContext } from 'react'
 
 /**
  * Opens an agent's file or folder in the side panel. Separate from
@@ -6,8 +6,12 @@ import { createContext } from 'react'
  * link that only opens files does not re-render with the panel.
  */
 export interface AgentFileOpener {
-  openFile: (filePath: string, agentSlug: string) => void
+  openFile: (filePath: string, agentSlug: string, description?: string) => void
   openFolder: (folderPath: string, agentSlug: string) => void
 }
 
 export const AgentFileOpenerContext = createContext<AgentFileOpener | null>(null)
+
+export function useAgentFileOpener() {
+  return useContext(AgentFileOpenerContext)
+}

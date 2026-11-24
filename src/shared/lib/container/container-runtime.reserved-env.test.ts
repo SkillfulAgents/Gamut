@@ -138,10 +138,10 @@ vi.mock('@shared/lib/composio/client', () => ({
   isPlatformComposioActive: () => false, isPlatformComposioActiveFrom: () => false,
 }))
 
-const relayState = vi.hoisted(() => ({ available: false }))
+const relayState = vi.hoisted(() => ({ kind: 'unavailable' as string, available: false }))
 vi.mock('@shared/lib/webhook-relay', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@shared/lib/webhook-relay')>()),
-  getWebhookRelay: () => ({ snapshot: () => ({ available: relayState.available }) }),
+  getWebhookRelay: () => ({ kind: relayState.kind, snapshot: () => ({ available: relayState.available }) }),
 }))
 
 vi.mock('@shared/lib/services/timezone-resolver', () => ({
@@ -180,6 +180,7 @@ describe('ContainerRuntime.ensureRunning — customEnvVars cannot override reser
     mockGetAppPort.mockReturnValue(3000)
 
     agents.runtime('test-agent').updateCachedStatus('stopped', null)
+    relayState.kind = 'unavailable'
     relayState.available = false
     accountProviderState.name = 'composio'
     mockStart.mockResolvedValue(undefined)
@@ -294,64 +295,37 @@ describe('ContainerRuntime webhook relay env', () => {
     agents.runtime('test-agent').updateCachedStatus('stopped', null)
   })
 
-  async function start(available: boolean) {
-    relayState.available = available
+  /** A new agent on a host with the given relay, started. */
+  async function start(kind: string) {
+    relayState.kind = kind
+    agents.drop('test-agent')
+    agents.runtime('test-agent').updateCachedStatus('stopped', null)
     await agents.runtime('test-agent').ensureRunning()
     return mockStart.mock.calls.at(-1)![0].envVars as Record<string, string>
   }
 
-  it('sets WEBHOOK_RELAY_AVAILABLE only while the relay can receive webhooks', async () => {
-    expect((await start(true)).WEBHOOK_RELAY_AVAILABLE).toBe('true')
+  it('sets WEBHOOK_RELAY_AVAILABLE for any configured relay, even while it is offline', async () => {
+    relayState.available = false
+    expect((await start('platform')).WEBHOOK_RELAY_AVAILABLE).toBe('true')
+    expect((await start('custom')).WEBHOOK_RELAY_AVAILABLE).toBe('true')
 
-    agents.runtime('test-agent').updateCachedStatus('stopped', null)
     // Also covers the custom-env clobber: the key is reserved.
     mockGetSettings.mockReturnValue({
       container: { agentImage: 'test-image', containerRunner: 'docker' },
       app: {},
       customEnvVars: { WEBHOOK_RELAY_AVAILABLE: 'true' },
     })
-    expect((await start(false)).WEBHOOK_RELAY_AVAILABLE).toBe('false')
+    expect((await start('unavailable')).WEBHOOK_RELAY_AVAILABLE).toBe('false')
   })
 
-  it('goes stale when availability moves while the container is still starting', async () => {
-    // The watcher only sees running agents, so a start in flight checks itself.
-    mockStart.mockImplementationOnce(async () => { relayState.available = true })
-
-    await start(false)
-
-    expect(agents.runtime('test-agent').isStale()).toBe(true)
-  })
-
-  it('goes stale when availability moves away from what its env was built with', async () => {
-    await start(false)
+  it('keeps the value the agent was created with until a restart', async () => {
+    await start('platform')
     const runtime = agents.runtime('test-agent')
 
-    containerHost.reconcileWebhookRelay(false)
-    expect(runtime.isStale()).toBe(false)
-
-    containerHost.reconcileWebhookRelay(true)
-    expect(runtime.isStale()).toBe(true)
-  })
-
-  it('assumes a container it did not start matches, until availability moves', () => {
-    const runtime = agents.runtime('test-agent')
-    runtime.updateCachedStatus('running', 8080)
-
-    containerHost.reconcileWebhookRelay(true)
-    expect(runtime.isStale()).toBe(false)
-
-    containerHost.reconcileWebhookRelay(false)
-    expect(runtime.isStale()).toBe(true)
-  })
-
-  it('forgets the start-time availability once stopped', async () => {
-    await start(true)
-    const runtime = agents.runtime('test-agent')
+    relayState.kind = 'unavailable'
     runtime.updateCachedStatus('stopped', null)
-    runtime.updateCachedStatus('running', 8080)
-
-    containerHost.reconcileWebhookRelay(false)
-    expect(runtime.isStale()).toBe(false)
+    await runtime.ensureRunning()
+    expect(mockStart.mock.calls.at(-1)![0].envVars.WEBHOOK_RELAY_AVAILABLE).toBe('true')
   })
 })
 
@@ -372,13 +346,16 @@ describe('ContainerRuntime drives during a start', () => {
     agents.runtime('test-agent').updateCachedStatus('stopped', null)
   })
 
+  /** The agents a drive change would reach only through a restart, as their runtimes say. */
+  const holdingDrives = () => (agents.runtime('test-agent').holdsDrives() ? ['test-agent'] : [])
+
   it('holds its drives from just before the start reads them, and a stale mark then survives the start', async () => {
     const seen: string[][] = []
     mockGetSettings.mockImplementationOnce(() => {
-      seen.push(containerHost.getAgentIdsHoldingDrives())
+      seen.push(holdingDrives())
       return { container: { agentImage: 'test-image', containerRunner: 'docker' }, app: {} }
     })
-    drives.onList = () => { seen.push(containerHost.getAgentIdsHoldingDrives()) }
+    drives.onList = () => { seen.push(holdingDrives()) }
     mockStart.mockImplementationOnce(async () => { agents.runtime('test-agent').markStale() })
     try {
       await agents.runtime('test-agent').ensureRunning()
@@ -395,7 +372,7 @@ describe('ContainerRuntime drives during a start', () => {
       throw new Error('start failed')
     })
     await expect(agents.runtime('test-agent').ensureRunning()).rejects.toThrow('start failed')
-    expect(containerHost.getAgentIdsHoldingDrives()).toEqual([])
+    expect(holdingDrives()).toEqual([])
     expect(agents.runtime('test-agent').isStale()).toBe(false)
     await agents.runtime('test-agent').ensureRunning()
     expect(agents.runtime('test-agent').isStale()).toBe(false)
@@ -416,14 +393,14 @@ describe('ContainerRuntime drives during a start', () => {
 
     resumeFirst()
     await expect(first).rejects.toThrow('overtook')
-    expect(containerHost.getAgentIdsHoldingDrives()).toEqual(['test-agent'])
+    expect(holdingDrives()).toEqual(['test-agent'])
     finishSecond()
     await second
   })
 })
 
 describe('ContainerHost.watchWebhookRelay', () => {
-  it('publishes status changes and marks agents whose webhook tools went out of date', () => {
+  it('publishes status changes, and leaves running agents as they are', () => {
     agents.drop('test-agent')
     const runtime = agents.runtime('test-agent')
     runtime.updateCachedStatus('running', 8080)
@@ -437,6 +414,6 @@ describe('ContainerHost.watchWebhookRelay', () => {
       type: 'webhook_relay_changed',
       status: { available: false, unavailableReason: 'platform_disconnected', transport: 'idle', lastClaimAt: null },
     })
-    expect(runtime.isStale()).toBe(true)
+    expect(runtime.isStale()).toBe(false)
   })
 })

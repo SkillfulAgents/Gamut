@@ -8,7 +8,8 @@
 import { ContentBlock, JsonlMessageEntry, JsonlSystemEntry } from '@shared/lib/types/agent'
 import type { ProviderErrorPresentation } from '@shared/lib/llm-provider/error-presentation'
 import type { IntegrationMessageDisplay } from '@shared/lib/agent-integrations/message-display-schema'
-import type { ApiAgent } from '@shared/lib/types/api'
+import { subagentReport } from './subagent-report'
+import type { ApiAgent, ApiToolCall } from '@shared/lib/types/api'
 import { makeThinkingBlockId } from '@shared/lib/utils/thinking-block-id'
 import { isSyntheticPlaceholderMessage } from '@shared/lib/utils/synthetic-message'
 import { parseMonitorNotification, type MonitorNotification } from '@shared/lib/utils/monitor-notifications'
@@ -31,13 +32,7 @@ export interface TransformedMessage {
     input: Record<string, unknown>
     result?: string
     isError?: boolean
-    subagent?: {
-      agentId: string
-      status: string
-      totalDurationMs?: number
-      totalTokens?: number
-      totalToolUseCount?: number
-    }
+    subagent?: ApiToolCall['subagent']
     /** The runtime's task id for a Bash call run in the background, or a Monitor's watch. */
     backgroundTaskId?: string
     /** A TaskCreate call's description as the CLI saved it (CLI 2.1.317+). */
@@ -626,6 +621,7 @@ export function transformMessages(entries: (JsonlMessageEntry | JsonlSystemEntry
             ? {
                 agentId: toolResult.toolUseResult.agentId!,
                 status: toolResult.toolUseResult.status || 'completed',
+                report: subagentReport(toolResult.toolUseResult),
                 totalDurationMs: toolResult.toolUseResult.totalDurationMs,
                 totalTokens: toolResult.toolUseResult.totalTokens,
                 totalToolUseCount: toolResult.toolUseResult.totalToolUseCount,

@@ -217,7 +217,9 @@ export function InboundXAgentView({ agentSlug }: InboundXAgentViewProps) {
                   tabIndex={0}
                   aria-label={session.isWidgetRepair
                     ? `Open widget repair${session.widgetRepairSlug ? ` for ${session.widgetRepairSlug}` : ''}`
-                    : `Open call from ${session.triggeredBy.name}`}
+                    : 'mcp' in session
+                      ? `Open MCP session${session.mcp.clientName ? ` from ${session.mcp.clientName}` : ''}`
+                      : `Open call from ${session.triggeredBy.name}`}
                   className="group grid cursor-pointer grid-cols-[minmax(0,1fr)_minmax(0,0.8fr)] items-center gap-4 border-b px-2 py-3 text-xs transition-colors hover:bg-muted/50"
                   onClick={() => {
                     void navigate({
@@ -238,10 +240,17 @@ export function InboundXAgentView({ agentSlug }: InboundXAgentViewProps) {
                   <span className="flex min-w-0 items-center justify-between gap-2">
                     <span className="min-w-0">
                       <span className="block truncate">
-                        {session.isWidgetRepair ? 'Invoked to fix widget' : session.triggeredBy.name}
+                        {session.isWidgetRepair
+                          ? 'Invoked to fix widget'
+                          : 'mcp' in session
+                            ? session.mcp.clientName ?? 'An MCP client'
+                            : session.triggeredBy.name}
                       </span>
                       {session.isWidgetRepair && session.widgetRepairSlug && (
                         <span className="block truncate text-muted-foreground">{session.widgetRepairSlug}</span>
+                      )}
+                      {'mcp' in session && (
+                        <span className="block truncate text-muted-foreground" data-testid="inbound-mcp-session-note">Through MCP</span>
                       )}
                     </span>
                     <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
