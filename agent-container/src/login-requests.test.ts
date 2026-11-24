@@ -65,4 +65,12 @@ describe('prepared sign-in requests', () => {
     forgetPreparedLogin('a')
     expect(isPreparedLoginClosed('a')).toBe(false)
   })
+
+  it('closes only one session\'s requests when that session stops using a browser others still use', () => {
+    putPreparedLogin(prepared('a'))
+    putPreparedLogin({ ...prepared('b'), sessionId: 'session-2' })
+    closePreparedLogins('session-1')
+    expect(isPreparedLoginClosed('a')).toBe(true)
+    expect(isPreparedLoginClosed('b')).toBe(false)
+  })
 })

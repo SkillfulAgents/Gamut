@@ -18,8 +18,13 @@ export interface ActivePageTargetSelectionOptions {
 }
 
 /**
- * Resolve Chrome's active page, optionally giving a user-selected viewer page
- * priority for operations that act on exactly what the user is looking at.
+ * Resolve a session's page among Chrome's: the tab its agent-browser instance
+ * (`daemonTabs`) is on, optionally giving a user-selected viewer page priority
+ * for operations that act on exactly what the user is looking at.
+ *
+ * Never any other page: the browser is shared by the agent's sessions, so a
+ * page the instance is not on may be another session's. With no match (the
+ * session's tab was closed, its instance did not answer) there is none.
  *
  * Viewer priority must stay opt-in: auto-follow callers are trying to discover
  * where the viewer should move and would become sticky if its current target
@@ -32,7 +37,6 @@ export function selectActivePageTarget<T extends PageTargetCandidate>(
   options: ActivePageTargetSelectionOptions = {},
 ): T | null {
   if (targets.length === 0) return null;
-  if (targets.length === 1) return targets[0];
 
   if (options.preferViewer && options.viewerTargetId) {
     const viewerTarget = targets.find((target) => target.id === options.viewerTargetId);
@@ -51,5 +55,5 @@ export function selectActivePageTarget<T extends PageTargetCandidate>(
     if (daemonTarget) return daemonTarget;
   }
 
-  return targets[0];
+  return null;
 }

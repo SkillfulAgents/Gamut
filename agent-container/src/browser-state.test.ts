@@ -1,107 +1,132 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import {
+  attachBrowserSession,
+  browserSessionOf,
+  browserSessions,
+  detachBrowserSession,
   getBrowserState,
-  setBrowserState,
-  resetBrowserState,
-  validateBrowserSession,
-  releaseBrowserLock,
+  onBrowserSessionReleased,
+  releaseBrowserSession,
   renameBrowserSession,
-  transferBrowserLock,
+  resetBrowserState,
+  setBrowserState,
 } from './browser-state'
 
+const ACTIVE = { active: true, cdpUrl: 'ws://127.0.0.1:9222/devtools/browser/x', location: 'container' } as const
+
 describe('browser-state', () => {
+  const released = vi.fn()
+
   beforeEach(() => {
     resetBrowserState()
+    released.mockReset()
+    onBrowserSessionReleased(released)
   })
 
-  describe('validateBrowserSession', () => {
-    it('allows access when browser is not active', () => {
-      expect(validateBrowserSession('session-1')).toBeNull()
+  describe('sessions of one browser', () => {
+    it('each session that opened it has its own instance; one that did not has none', () => {
+      setBrowserState({ ...ACTIVE })
+      const a = attachBrowserSession('session-1')
+      const b = attachBrowserSession('session-2')
+
+      expect(browserSessionOf('session-1')).toBe(a)
+      expect(browserSessionOf('session-2')).toBe(b)
+      expect(browserSessionOf('session-3')).toBeNull()
+      expect(a.key).not.toBe(b.key)
+      expect(browserSessions()).toEqual([a, b])
     })
 
-    it('allows access when the requesting session owns the browser', () => {
-      setBrowserState({ active: true, sessionId: 'session-1', cdpUrl: null, location: 'container' })
-      expect(validateBrowserSession('session-1')).toBeNull()
+    it('names instances apart across browsers, so a new one never starts bound to an old tab', () => {
+      setBrowserState({ ...ACTIVE })
+      const first = attachBrowserSession('session-1').key
+      resetBrowserState()
+      setBrowserState({ ...ACTIVE })
+      expect(attachBrowserSession('session-1').key).not.toBe(first)
     })
 
-    it('blocks access when a different session owns the browser', () => {
-      setBrowserState({ active: true, sessionId: 'session-1', cdpUrl: null, location: 'container' })
-      const error = validateBrowserSession('session-2')
-      expect(error).toBe('Browser is owned by session session-1')
-    })
-  })
-
-  describe('releaseBrowserLock', () => {
-    it('releases the lock when the owning session calls it', () => {
-      setBrowserState({ active: true, sessionId: 'session-1', cdpUrl: 'ws://localhost:9222', location: 'host' })
-      const released = releaseBrowserLock('session-1')
-      expect(released).toBe(true)
-      expect(getBrowserState()).toEqual({ active: false, sessionId: null, cdpUrl: 'ws://localhost:9222', location: 'host' })
+    it('has no sessions once the browser is inactive', () => {
+      setBrowserState({ ...ACTIVE })
+      attachBrowserSession('session-1')
+      setBrowserState({ ...ACTIVE, active: false })
+      expect(browserSessionOf('session-1')).toBeNull()
+      setBrowserState({ ...ACTIVE })
+      expect(browserSessionOf('session-1')).toBeNull()
     })
 
-    it('notifies the pre-release owner after clearing the lock', () => {
-      setBrowserState({ active: true, sessionId: 'session-1', cdpUrl: null, location: 'container' })
-      const onReleased = vi.fn((releasedSessionId: string) => {
-        expect(releasedSessionId).toBe('session-1')
-        expect(getBrowserState().sessionId).toBeNull()
-        expect(getBrowserState().active).toBe(false)
-      })
-
-      expect(releaseBrowserLock('session-1', onReleased)).toBe(true)
-      expect(onReleased).toHaveBeenCalledOnce()
-    })
-
-    it('does not notify when the requester does not own the lock', () => {
-      setBrowserState({ active: true, sessionId: 'session-1', cdpUrl: null, location: 'container' })
-      const onReleased = vi.fn()
-
-      expect(releaseBrowserLock('session-2', onReleased)).toBe(false)
-      expect(onReleased).not.toHaveBeenCalled()
-    })
-
-    it('does not release the lock when a non-owning session calls it', () => {
-      setBrowserState({ active: true, sessionId: 'session-1', cdpUrl: 'ws://localhost:9222', location: 'host' })
-      const released = releaseBrowserLock('session-2')
-      expect(released).toBe(false)
+    it('detaches one session and leaves the others', () => {
+      setBrowserState({ ...ACTIVE })
+      const a = attachBrowserSession('session-1')
+      const b = attachBrowserSession('session-2')
+      detachBrowserSession(a)
+      expect(browserSessions()).toEqual([b])
       expect(getBrowserState().active).toBe(true)
-      expect(getBrowserState().sessionId).toBe('session-1')
+    })
+  })
+
+  describe('releaseBrowserSession', () => {
+    it('drops the session and hands it to the server, saying whether it was the last', () => {
+      setBrowserState({ ...ACTIVE })
+      const a = attachBrowserSession('session-1')
+      const b = attachBrowserSession('session-2')
+
+      expect(releaseBrowserSession('session-1')).toBe(true)
+      expect(released).toHaveBeenLastCalledWith(a, false)
+      expect(browserSessionOf('session-1')).toBeNull()
+
+      expect(releaseBrowserSession('session-2')).toBe(true)
+      expect(released).toHaveBeenLastCalledWith(b, true)
     })
 
-    it('returns false when browser is not active', () => {
-      const released = releaseBrowserLock('session-1')
-      expect(released).toBe(false)
+    it('leaves the browser inactive but where it was once the last session is released', () => {
+      setBrowserState({ ...ACTIVE })
+      attachBrowserSession('session-1')
+      releaseBrowserSession('session-1')
+      expect(getBrowserState()).toEqual({ ...ACTIVE, active: false })
     })
 
-    it('allows a new session to acquire the browser after release', () => {
-      setBrowserState({ active: true, sessionId: 'session-1', cdpUrl: null, location: 'container' })
+    it('does nothing for a session that was not using the browser', () => {
+      setBrowserState({ ...ACTIVE })
+      attachBrowserSession('session-1')
+      expect(releaseBrowserSession('session-2')).toBe(false)
+      expect(released).not.toHaveBeenCalled()
+      expect(browserSessions()).toHaveLength(1)
+    })
 
-      // session-2 is blocked
-      expect(validateBrowserSession('session-2')).not.toBeNull()
-
-      // session-1 releases
-      releaseBrowserLock('session-1')
-
-      // session-2 can now acquire
-      expect(validateBrowserSession('session-2')).toBeNull()
+    it('returns false when the browser is not active', () => {
+      expect(releaseBrowserSession('session-1')).toBe(false)
     })
   })
 
   describe('renameBrowserSession', () => {
-    it('re-keys the lock when the old id owns it (query restart mid-browse)', () => {
-      setBrowserState({ active: true, sessionId: 'old-id', cdpUrl: 'ws://localhost:9222', location: 'host' })
+    it('re-keys the session when its id changes (query restart mid-browse), keeping its instance and its earlier id', () => {
+      setBrowserState({ ...ACTIVE })
+      const s = attachBrowserSession('old-id')
+      const key = s.key
       expect(renameBrowserSession('old-id', 'new-id')).toBe(true)
-      expect(getBrowserState().sessionId).toBe('new-id')
-      expect(getBrowserState().cdpUrl).toBe('ws://localhost:9222')
-      expect(getBrowserState().location).toBe('host')
-      // requests under the new id now pass; old id no longer matches
-      expect(validateBrowserSession('new-id')).toBeNull()
-      expect(validateBrowserSession('old-id')).not.toBeNull()
+      expect(browserSessionOf('new-id')).toBe(s)
+      expect(browserSessionOf('old-id')).toBe(s)
+      expect(s.sessionId).toBe('new-id')
+      expect(s.ids()).toEqual(['new-id', 'old-id'])
+      expect(s.key).toBe(key)
+      expect(browserSessions()).toEqual([s])
     })
 
-    it('does nothing when the old id does not own the lock', () => {
-      setBrowserState({ active: true, sessionId: 'other-session', cdpUrl: null, location: 'container' })
+    it('releases the session by the id it had before, as the session manager may know it', () => {
+      setBrowserState({ ...ACTIVE })
+      const s = attachBrowserSession('old-id')
+      attachBrowserSession('other-session')
+      renameBrowserSession('old-id', 'new-id')
+      expect(releaseBrowserSession('old-id')).toBe(true)
+      expect(released).toHaveBeenLastCalledWith(s, false)
+      expect(browserSessionOf('new-id')).toBeNull()
+      expect(browserSessions().map(b => b.sessionId)).toEqual(['other-session'])
+    })
+
+    it('does nothing when the old id is not using the browser', () => {
+      setBrowserState({ ...ACTIVE })
+      attachBrowserSession('other-session')
       expect(renameBrowserSession('old-id', 'new-id')).toBe(false)
-      expect(getBrowserState().sessionId).toBe('other-session')
+      expect(browserSessionOf('other-session')).not.toBeNull()
     })
 
     it('does nothing when the browser is inactive', () => {
@@ -110,42 +135,14 @@ describe('browser-state', () => {
     })
   })
 
-  describe('transferBrowserLock', () => {
-    it('reassigns ownership while preserving the live connection', () => {
-      setBrowserState({ active: true, sessionId: 'dead-session', cdpUrl: 'ws://localhost:9222', location: 'host' })
-      transferBrowserLock('live-session')
-      expect(getBrowserState()).toEqual({ active: true, sessionId: 'live-session', cdpUrl: 'ws://localhost:9222', location: 'host' })
-      expect(validateBrowserSession('live-session')).toBeNull()
-    })
-
-    it('does nothing when the browser is inactive', () => {
-      transferBrowserLock('live-session')
-      expect(getBrowserState().active).toBe(false)
-      expect(getBrowserState().sessionId).toBeNull()
-    })
-  })
-
-  describe('stale lock scenario (SUP-167)', () => {
-    it('a finished cron session should not block the next cron session', () => {
-      // Cron run #1 opens the browser
-      setBrowserState({ active: true, sessionId: 'cron-session-1', cdpUrl: 'ws://localhost:9222', location: 'host' })
-
-      // Cron run #1 finishes and releases
-      releaseBrowserLock('cron-session-1')
-
-      // Cron run #2 should be able to use the browser
-      expect(validateBrowserSession('cron-session-2')).toBeNull()
-    })
-
-    it('without release, a finished cron session blocks the next one', () => {
-      // Cron run #1 opens the browser
-      setBrowserState({ active: true, sessionId: 'cron-session-1', cdpUrl: 'ws://localhost:9222', location: 'host' })
-
-      // Cron run #1 finishes but does NOT release (the bug)
-      // Cron run #2 tries to use the browser — blocked
-      expect(validateBrowserSession('cron-session-2')).toBe(
-        'Browser is owned by session cron-session-1'
-      )
+  describe('a finished cron session (SUP-167)', () => {
+    it('does not keep the next cron session from the browser, with or without release', () => {
+      setBrowserState({ ...ACTIVE })
+      attachBrowserSession('cron-session-1')
+      // The next run opens its own use of the same browser either way.
+      expect(attachBrowserSession('cron-session-2')).toBe(browserSessionOf('cron-session-2'))
+      releaseBrowserSession('cron-session-1')
+      expect(browserSessions().map(s => s.sessionId)).toEqual(['cron-session-2'])
     })
   })
 })

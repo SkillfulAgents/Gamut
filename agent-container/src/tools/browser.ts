@@ -16,6 +16,7 @@ import {
 } from '../browser-location'
 import { hostAuthHeaders } from '../host-auth'
 import { tabManager } from '../tab-manager'
+import { browserSessionOf } from '../browser-state'
 import { formatUrlDigest, formatUrlDigestBrief, formatFillReadback, formatScrollDigest, type UrlDigest, type ScrollInfo } from '../browser-digest'
 import { parseObservation, EMPTY_OBSERVATION } from '../page-observer'
 import { landedElsewhere, pageWarnings } from '../page-status'
@@ -42,8 +43,8 @@ const CONTAINER_URL = `http://localhost:${process.env.PORT || '3000'}`
 // with a web-browser subagent to delegate rather than read. An unconditional
 // "required" here would either undo that saving or train the model to ignore
 // these hints — including in the no-subagent case where the read is the only
-// source of browsing guidance. It is attached once per browser launch (the
-// open that started a browser), never on tab switches or navigations inside
+// source of browsing guidance. It is attached once per session's browser (the
+// open that started its use of one), never on tab switches or navigations inside
 // a live browser: repeated on every open, it told the web-browser subagent
 // up to 50 times a session to consider delegating to itself (mining theme 31).
 export const BROWSER_USE_GUIDANCE_HINT =
@@ -54,11 +55,6 @@ function errorResult(message: string) {
     content: [{ type: 'text' as const, text: `Error: ${message}` }],
     isError: true,
   }
-}
-
-/** Get tab warning from cached tab count (no network call needed — same process) */
-function getTabWarning(): string {
-  return tabManager.formatTabWarning(tabManager.getTabCount())
 }
 
 export { stripAnsi, extractScreenshotPath }
@@ -81,10 +77,16 @@ async function readScreenshotAsBase64(filePath: string, cssScale: unknown): Prom
  *
  * `getSessionId` is read at call time on every request: a ClaudeCodeProcess's
  * session id changes whenever its SDK query (re)starts, and a module-global id
- * shared across processes is exactly the race that stranded browser sub-agents
- * in "Browser is owned by session <other>" loops (see browser-tools-audit.md).
+ * shared across processes would drive one session's browser tab from another's
+ * (it once stranded browser sub-agents on an ownership lock, see browser-tools-audit.md).
  */
 export function createBrowserTools(getSessionId: () => string | null) {
+  /** Tab warning from the session's cached tab count (no network call needed — same process) */
+  function getTabWarning(): string {
+    const session = browserSessionOf(getSessionId() ?? '')
+    return session ? tabManager.formatTabWarning(session.tabCount) : ''
+  }
+
   async function browserFetch(
     endpoint: string,
     body: Record<string, unknown>
@@ -186,14 +188,15 @@ Omit location to keep using the current browser where it is; when no browser is 
 
 const browserCloseTool = tool(
   'browser_close',
-  `Close the browser and free resources. Call this when you're done browsing.`,
+  `Close the browser and free resources. Call this when you're done browsing. While other sessions of this agent use the browser too, it closes the tabs this session opened and the browser stays open for them.`,
   {},
   async () => {
     const result = await browserFetch('close', {})
     if (!result.success) return errorResult(result.error!)
+    const othersStay = (result.data as Record<string, unknown> | undefined)?.othersStay === true
     return {
       content: [
-        { type: 'text' as const, text: 'Browser closed.' },
+        { type: 'text' as const, text: othersStay ? 'Closed the tabs this session opened, except any another session is on. The browser stays open: other sessions of this agent are using it.' : 'Browser closed.' },
       ],
     }
   }

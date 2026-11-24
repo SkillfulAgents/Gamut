@@ -17,7 +17,6 @@ const deps = {
   browserActive: vi.fn(() => true),
   connectBrowser: vi.fn(async () => cdp as never),
   activeTabId: vi.fn(async (): Promise<string | null> => 'tab-1'),
-  keepActiveTab: vi.fn(<T>(work: () => Promise<T>) => work()),
   observeUrl: vi.fn(async () => ({ url: 'https://github.com/', navigated: true })),
   pageReplaced: vi.fn(),
 }
@@ -46,7 +45,6 @@ beforeEach(() => {
   deps.validateSession.mockReturnValue(null)
   deps.browserActive.mockReturnValue(true)
   deps.activeTabId.mockResolvedValue('tab-1')
-  deps.keepActiveTab.mockImplementation(<T>(work: () => Promise<T>) => work())
   app = new Hono()
   registerSessionRoutes(app, deps)
 })
@@ -142,28 +140,15 @@ describe('session routes', () => {
     log.mockRestore()
   })
 
-  it('keep agent-browser on the agent\'s tab while a capture or a restore runs', async () => {
-    const order: string[] = []
-    deps.keepActiveTab.mockImplementation(async <T>(work: () => Promise<T>) => {
-      order.push('pin')
-      try {
-        return await work()
-      } finally {
-        order.push('unpin')
-      }
-    })
-    vi.mocked(session.captureSession).mockImplementationOnce(async () => {
-      order.push('capture')
-      return { hash: 'h', unsupported: [], ...NOTHING_OUTSIDE }
-    })
-    vi.mocked(session.restoreSession).mockImplementationOnce(async () => {
-      order.push('restore')
-      return { skippedRecords: 0, settled: null }
-    })
+  it('work in the tab of the session that asked: the agent\'s other sessions have tabs of their own', async () => {
+    vi.mocked(session.captureSession).mockResolvedValueOnce({ hash: 'h', unsupported: [], ...NOTHING_OUTSIDE })
+    vi.mocked(session.restoreSession).mockResolvedValueOnce({ skippedRecords: 0, settled: null })
 
     expect((await post('/browser/session/capture', scope)).status).toBe(200)
     expect((await post('/browser/session/restore', { ...scope, bundle: BUNDLE })).status).toBe(200)
-    expect(order).toEqual(['pin', 'capture', 'unpin', 'pin', 'restore', 'unpin'])
+    expect(deps.activeTabId.mock.calls).toEqual([['s-1'], ['s-1']])
+    expect(deps.pageReplaced).toHaveBeenCalledWith('s-1')
+    expect(deps.observeUrl).toHaveBeenCalledWith('s-1')
   })
 
   it('say a capture too large to keep is that', async () => {
@@ -196,7 +181,7 @@ describe('session routes', () => {
     expect(await (await post('/browser/session/restore', { ...scope, bundle: BUNDLE })).json()).toMatchObject({ touched: false, changed: false, cleared: false })
   })
 
-  it('run one operation at a time, and none while an agent-browser command runs', async () => {
+  it('run one operation at a time, and none while an agent-browser command of the session runs', async () => {
     let release = () => {}
     vi.mocked(session.restoreSession).mockImplementationOnce(() => new Promise((resolve) => { release = () => resolve({ skippedRecords: 0, settled: null }) }))
     vi.mocked(session.captureSession).mockResolvedValueOnce({ hash: 'h', unsupported: [], ...NOTHING_OUTSIDE })
@@ -204,7 +189,7 @@ describe('session routes', () => {
     await vi.waitFor(() => expect(session.restoreSession).toHaveBeenCalled())
     const capturing = post('/browser/session/capture', scope)
     let commandRan = false
-    const command = browserCommand(async () => { commandRan = true })
+    const command = browserCommand(scope.sessionId, async () => { commandRan = true })
     await new Promise((resolve) => setTimeout(resolve, 20))
     expect(session.captureSession).not.toHaveBeenCalled()
     expect(commandRan).toBe(false)

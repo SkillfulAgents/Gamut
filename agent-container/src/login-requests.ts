@@ -78,9 +78,13 @@ export function forgetPreparedLogin(toolUseId: string): void {
  * The browser closed: no prepared request can be filled any more, but each
  * stays open to the user (a Browserbase session can end long before they
  * come back). What they save then goes to the vault, for the agent's next try.
+ * With `sessionId`, only that session's requests: it stopped using a browser
+ * the agent's other sessions still use.
  */
-export function closePreparedLogins(): void {
-  for (const toolUseId of entries.keys()) closed.add(toolUseId)
+export function closePreparedLogins(sessionId?: string): void {
+  for (const [toolUseId, entry] of entries) {
+    if (sessionId === undefined || ('prepared' in entry && entry.prepared.sessionId === sessionId)) closed.add(toolUseId)
+  }
 }
 
 /** Whether the browser that showed this request closed since. */

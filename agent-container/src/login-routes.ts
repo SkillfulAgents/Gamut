@@ -124,11 +124,12 @@ export interface LoginRouteDeps {
   /** Null when the session may use the browser, else why not. */
   validateSession(sessionId: string): string | null
   browserActive(): boolean
-  fillDeps(): LoginFillDeps
-  /** Submit the filled form through the CLI and observe the page settle. */
-  submit(plan: SubmitPlan): Promise<SubmitOutcome>
+  /** Hands on the session's tab. */
+  fillDeps(sessionId: string): LoginFillDeps
+  /** Submit the filled form through the session's CLI instance and observe the page settle. */
+  submit(plan: SubmitPlan, sessionId: string): Promise<SubmitOutcome>
   /** The address bar's URL digest now, for a page that moved on by itself. */
-  observeUrl(): Promise<Record<string, unknown> | null>
+  observeUrl(sessionId: string): Promise<Record<string, unknown> | null>
   notifyBrowserAction(): void
   /** How long the host's context read waits for the tool to finish locating fields. */
   contextWaitMs?: number
@@ -195,7 +196,7 @@ export function registerLoginRoutes(app: Hono, deps: LoginRouteDeps): void {
   const answerLonePrompt = async (prepared: PreparedLogin, moved: boolean): Promise<void> => {
     if (getPreparedLogin(prepared.toolUseId) !== prepared || fillsInFlight.has(prepared.toolUseId)) return
     const way = prepared.ways[0]
-    const digest = moved ? await deps.observeUrl() : null
+    const digest = moved ? await deps.observeUrl(prepared.sessionId) : null
     const report: LoginWayReport = {
       type: 'way',
       origin: prepared.origin,
@@ -220,7 +221,7 @@ export function registerLoginRoutes(app: Hono, deps: LoginRouteDeps): void {
     const deadline = Date.now() + (deps.lonePromptWaitMs ?? LONE_PROMPT_WAIT_MS)
     let cdp: CdpConnection | null = null
     try {
-      cdp = await deps.fillDeps().connect()
+      cdp = await deps.fillDeps(prepared.sessionId).connect()
       while (Date.now() < deadline) {
         await new Promise((resolve) => setTimeout(resolve, deps.lonePromptPollMs ?? LONE_PROMPT_POLL_MS))
         if (getPreparedLogin(prepared.toolUseId) !== prepared || !inputManager.hasPendingOfType(prepared.toolUseId, 'login')) return
@@ -262,7 +263,7 @@ export function registerLoginRoutes(app: Hono, deps: LoginRouteDeps): void {
       const repeated = refs.find((ref, index) => refs.indexOf(ref) !== index)
       if (repeated) return fail(422, [`${repeated} is mapped as more than one way`])
       try {
-        const fillDeps = deps.fillDeps()
+        const fillDeps = deps.fillDeps(body.sessionId)
         for (const ref of refs) {
           if (!(await fillDeps.boxOfRef(ref))) return fail(422, [`the box of ${ref} could not be read`])
         }
@@ -304,7 +305,7 @@ export function registerLoginRoutes(app: Hono, deps: LoginRouteDeps): void {
     }
     if (body.submitRef && located.length === 0) return fail(422, ['a submit ref needs at least one field mapped by ref'])
     try {
-      const fillDeps = deps.fillDeps()
+      const fillDeps = deps.fillDeps(body.sessionId)
       if (body.submitRef) {
         if (located.some((field) => field.ref === body.submitRef)) {
           return fail(422, [`${body.submitRef} is mapped as a field and as the submit button`])
@@ -406,7 +407,7 @@ export function registerLoginRoutes(app: Hono, deps: LoginRouteDeps): void {
           stillCurrent: async () => null,
           clickInPage: async () => false,
           enterLandsInField: async () => false,
-        })
+        }, prepared.sessionId)
         if (!outcome.ok) report.clickError = outcome.error
         else {
           if (outcome.submitted) report.clicked = { ref: way.ref }
@@ -445,7 +446,7 @@ export function registerLoginRoutes(app: Hono, deps: LoginRouteDeps): void {
     if (sessionError) return c.json({ error: sessionError }, 409)
     if (isPreparedLoginClosed(body.toolUseId) || !deps.browserActive()) return c.json({ error: 'The browser was closed' }, 409)
     try {
-      const read = await readAuthenticatorSetup(deps.fillDeps(), { qrRef: body.qr ?? null })
+      const read = await readAuthenticatorSetup(deps.fillDeps(prepared.sessionId), { qrRef: body.qr ?? null })
       if (!read.ok) return c.json({ error: read.problem }, 422)
       for (const form of setupKeyForms(read.key)) rememberInjectedSecret(form)
       return c.json({ key: read.key, source: read.source })
@@ -494,7 +495,7 @@ export function registerLoginRoutes(app: Hono, deps: LoginRouteDeps): void {
       prepared.fields.forEach((field, index) => {
         if (SECRET_LOGIN_FIELD_KINDS.has(field.kind) && body.values[index]) rememberInjectedSecret(body.values[index])
       })
-      const fillDeps = deps.fillDeps()
+      const fillDeps = deps.fillDeps(prepared.sessionId)
       const cdp = await fillDeps.connect()
       let report: LoginFillReport
       let watch: PageWatch | null = null
@@ -522,7 +523,7 @@ export function registerLoginRoutes(app: Hono, deps: LoginRouteDeps): void {
           const activity = await awaitPageActivity(cdp, written, fillId, pageWatch, refOf, waitMs)
           if (activity) {
             recordActivity(report, activity)
-            const digest = await deps.observeUrl()
+            const digest = await deps.observeUrl(prepared.sessionId)
             if (digest) report.observation = { digest }
           } else {
             // Read back once the page has had the beat to settle: code boxes can
@@ -563,7 +564,7 @@ export function registerLoginRoutes(app: Hono, deps: LoginRouteDeps): void {
                 stillCurrent: () => pageActivityNow(cdp, written, fillId, pageWatch, refOf),
                 clickInPage: () => (submitRef ? clickSubmitInPage(fillDeps, cdp, submitRef, prepared.origin, written) : Promise.resolve(false)),
                 enterLandsInField: () => lastFieldHasFocus(cdp, written, prepared.origin),
-              })
+              }, prepared.sessionId)
               if (!outcome.ok) {
                 report.submitError = outcome.error
               } else {

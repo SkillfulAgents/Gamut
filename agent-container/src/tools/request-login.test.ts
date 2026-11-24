@@ -36,7 +36,7 @@ function respond(status: number, body: unknown) {
 describe('request_login tool', () => {
   beforeEach(() => {
     resetBrowserState()
-    setBrowserState({ active: true, sessionId: 'session-1', cdpUrl: null, location: 'container' })
+    setBrowserState({ active: true, cdpUrl: null, location: 'container' })
   })
 
   afterEach(() => {

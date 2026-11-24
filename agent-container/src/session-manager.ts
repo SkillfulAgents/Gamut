@@ -10,7 +10,7 @@ import { ClaudeCodeProcess, type InterruptScope } from './claude-code';
 import { SessionPersistence, type SessionUpdate } from './session-persistence';
 import { EventEmitter } from 'events';
 import * as fs from 'fs';
-import { releaseBrowserLock } from './browser-state';
+import { releaseBrowserSession } from './browser-state';
 import { claudeSettingsSchema, SESSION_RETENTION_DAYS } from './claude-settings-schema';
 import { SessionSettlementTracker } from './session-settlement';
 import {
@@ -870,10 +870,10 @@ export class SessionManager extends EventEmitter {
     if (persisted && preserveResume) this.persistence.saveSessionChecked({ ...persisted, releasedForDeletion: true });
     if (!sessionData) return true;
 
-    // Release browser lock if this session owns it
-    const released = releaseBrowserLock(sessionId);
+    // The session stops using the browser, if it was
+    const released = releaseBrowserSession(sessionId);
     if (released) {
-      console.log(`[Session ${sessionId}] Released browser lock (session deleted)`);
+      console.log(`[Session ${sessionId}] Released the browser (session deleted)`);
     }
 
     // Stop the process terminally — dispose (not stop) so a straggler
@@ -1192,14 +1192,14 @@ export class SessionManager extends EventEmitter {
     const wasBusy = sessionData.settlement.getState().runtime === 'busy';
     sessionData.settlement.handleMessage(message);
 
-    // Release browser lock when an automated session's turn completes.
+    // Release the browser when an automated session's turn completes.
     // The SDK query keeps the for-await loop alive waiting for the next user
     // message, so the 'exit' event never fires for idle sessions. Releasing
-    // on 'result' ensures the lock is freed as soon as the model finishes.
+    // on 'result' lets its tabs go as soon as the model finishes.
     if (message.type === 'result' && sessionData.session.metadata?.isAutomated) {
-      const released = releaseBrowserLock(sessionId);
+      const released = releaseBrowserSession(sessionId);
       if (released) {
-        console.log(`[Session ${sessionId}] Released browser lock (automated session turn completed)`);
+        console.log(`[Session ${sessionId}] Released the browser (automated session turn completed)`);
       }
     }
 
@@ -1269,9 +1269,9 @@ export class SessionManager extends EventEmitter {
 
       data.eviction = (async () => {
         try {
-          // An idle session has no business holding the shared browser.
-          if (releaseBrowserLock(sessionId)) {
-            console.log(`[Session ${sessionId}] Released browser lock (idle eviction)`);
+          // An idle session has no business holding tabs in the shared browser.
+          if (releaseBrowserSession(sessionId)) {
+            console.log(`[Session ${sessionId}] Released the browser (idle eviction)`);
           }
           // Graceful: let the CLI exit on stdin EOF and flush its transcript —
           // a hard abort here races the flush and can truncate the session

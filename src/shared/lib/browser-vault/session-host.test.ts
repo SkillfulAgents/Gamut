@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 /** The agent's container as the host reaches it: the browser it reports, and what each capture finds. */
 const container = vi.hoisted(() => ({
-  browser: { active: true, sessionId: 's-1', location: 'container', generation: 1 } as Record<string, unknown>,
+  browser: { active: true, sessionIds: ['s-1'], location: 'container', generation: 1 } as Record<string, unknown>,
   /** The user-input requests open on the agent: a hand-over or a sign-in card has the browser. */
   open: [] as Array<{ id: string; kind: string; scope: { sessionId: string } }>,
   /** The site's state as each capture finds it, in order; the last one repeats. A string is its fingerprint. */
@@ -90,7 +90,7 @@ async function step(account: typeof ACCOUNT, before: string, agentSlug = 'agent-
 
 beforeEach(() => {
   vi.useFakeTimers()
-  container.browser = { active: true, sessionId: 's-1', location: 'container', generation: 1 }
+  container.browser = { active: true, sessionIds: ['s-1'], location: 'container', generation: 1 }
   container.open = []
   container.states = ['signed-out']
   container.restore = { status: 200, body: { restored: true, skippedRecords: 0 } }
@@ -169,7 +169,7 @@ describe('the sign-in watch', () => {
 
     await step(ACCOUNT, 'signed-out')
     container.calls = []
-    container.browser = { active: true, sessionId: 's-1', location: 'host' }
+    container.browser = { active: true, sessionIds: ['s-1'], location: 'host' }
     container.states = ['signed-in-elsewhere']
     await advance(60_000)
     expect(captureCalls()).toEqual([])
@@ -189,10 +189,10 @@ describe('the sign-in watch', () => {
   it('watches nothing when the site could not be read before the step, and ends the watch of a step before it', async () => {
     await step(ACCOUNT, 'signed-out')
     container.calls = []
-    container.browser = { active: true, sessionId: 's-other', location: 'container' }
+    container.browser = { active: true, sessionIds: ['s-other'], location: 'container' }
     expect(await sessionBaseline({ agentSlug: 'agent-a', sessionId: 's-1', scope: SCOPE })).toBeNull()
     watchSignIn({ agentSlug: 'agent-a', sessionId: 's-1', account: { ...ACCOUNT, id: 'acc-2' }, baseline: null })
-    container.browser = { active: true, sessionId: 's-1', location: 'container' }
+    container.browser = { active: true, sessionIds: ['s-1'], location: 'container' }
     container.states = ['signed-in']
     await advance(60_000)
     expect(captureCalls()).toEqual([])
@@ -396,7 +396,7 @@ describe('restoring a saved session', () => {
     vi.mocked(sessions.readAccountSession).mockResolvedValue(null)
     expect(await restore()).toBeNull()
     vi.mocked(sessions.readAccountSession).mockResolvedValue(SAVED)
-    container.browser = { active: true, sessionId: 's-other', location: 'container' }
+    container.browser = { active: true, sessionIds: ['s-other'], location: 'container' }
     expect(await restore()).toBeNull()
     expect(restoreCalls()).toEqual([])
   })

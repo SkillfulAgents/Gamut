@@ -14,8 +14,8 @@ export interface PasskeyRouteDeps {
   validateSession(sessionId: string): string | null
   browserActive(): boolean
   keeper: PasskeyKeeper
-  /** The tab the agent's refs belong to, and the origin of its page. */
-  activeTab(): Promise<{ id: string; url: string } | null>
+  /** The tab the session's refs belong to, and the origin of its page. */
+  activeTab(sessionId: string): Promise<{ id: string; url: string } | null>
 }
 
 const credentialSchema = z.object({
@@ -49,6 +49,9 @@ function originOf(url: string): string | null {
 }
 
 export function registerPasskeyRoutes(app: Hono, deps: PasskeyRouteDeps): void {
+  /** The session whose tab the keeper was armed on. */
+  let armedFor = ''
+
   // POST /browser/passkey/arm - hold passkeys on the agent's tab, or record what it creates
   app.post('/browser/passkey/arm', async (c) => {
     if (!deps.hostAuthEnabled()) return c.json({ error: 'Host authentication is required' }, 503)
@@ -59,11 +62,12 @@ export function registerPasskeyRoutes(app: Hono, deps: PasskeyRouteDeps): void {
     const sessionError = deps.validateSession(body.sessionId)
     if (sessionError) return c.json({ error: sessionError }, 409)
     if (!deps.browserActive()) return c.json({ error: 'No browser is open', reason: 'browser_closed' }, 409)
-    const tab = await deps.activeTab()
+    const tab = await deps.activeTab(body.sessionId)
     const origin = tab ? originOf(tab.url) : null
     if (!tab || !origin) return c.json({ error: 'The browser shows no web page' }, 409)
     try {
       await deps.keeper.arm({ targetId: tab.id, mode: body.mode, credentials: body.credentials, ttlMs: body.ttlMs, keep: body.keep })
+      armedFor = body.sessionId
     } catch (error) {
       console.error('[Browser] Arming passkeys failed:', error instanceof Error ? error.message : 'Unknown error')
       return c.json({ error: 'The browser could not hold passkeys' }, 500)
@@ -93,7 +97,7 @@ export function registerPasskeyRoutes(app: Hono, deps: PasskeyRouteDeps): void {
     if (!deps.hostAuthEnabled()) return c.json({ error: 'Host authentication is required' }, 503)
     const state = deps.keeper.state()
     // The agent may have gone on in another tab (a window the site opened): nothing is held there.
-    const tab = state.armed ? await deps.activeTab().catch(() => null) : null
+    const tab = state.armed ? await deps.activeTab(armedFor).catch(() => null) : null
     return c.json({ ...state, onActiveTab: tab !== null && tab.id === state.targetId })
   })
 }

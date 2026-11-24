@@ -43,7 +43,8 @@ import { recordAccountUse, type VaultAccount } from './vault-service'
 
 const browserStatusSchema = z.object({
   active: z.boolean(),
-  sessionId: z.string().nullable(),
+  /** The sessions using the agent's browser. */
+  sessionIds: z.array(z.string()),
   location: z.enum(['host', 'container']).nullable(),
   generation: z.number().optional(),
 }).loose()
@@ -59,7 +60,7 @@ async function browserOf(agentSlug: string, sessionId: string): Promise<SessionB
   const response = await agentRegistry.get(agentSlug).container.fetch('/browser/status')
   if (!response.ok) return null
   const status = browserStatusSchema.safeParse(await response.json().catch(() => null))
-  if (!status.success || !status.data.active || status.data.sessionId !== sessionId) return null
+  if (!status.success || !status.data.active || !status.data.sessionIds.includes(sessionId)) return null
   const type = status.data.location === 'container' ? 'container' : status.data.location === 'host' ? (await getSettings()).app?.hostBrowserProvider ?? null : null
   return type ? { type, generation: status.data.generation ?? null } : null
 }
