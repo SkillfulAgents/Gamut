@@ -1,5 +1,5 @@
 import type { ServerType } from '@hono/node-server'
-import { agentRegistry, containerHost } from './agent-actor'
+import { agentRegistry, containerHost, stopAllAgents, wakeAgents } from './agent-actor'
 import { shutdownActiveRunner } from './container/client-factory'
 import { taskScheduler } from './scheduler/task-scheduler'
 import { triggerManager } from './scheduler/trigger-manager'
@@ -15,6 +15,7 @@ import { TeamDirectoryProvisioningService } from './team-directory/service'
 import { registerAllAccountProviders } from './account-providers/register'
 import { sessionAutoDeleteMonitor } from './scheduler/session-auto-delete-monitor'
 import { apiLogAutoDeleteMonitor } from './scheduler/api-log-auto-delete-monitor'
+import { McpClientCleanupService } from './mcp-server/oauth/client-cleanup'
 import { accountSyncService } from './scheduler/account-sync-service'
 import { platformService } from './services/platform-service'
 import { getActiveProvider, stopAllProviders } from '../../main/host-browser'
@@ -65,7 +66,7 @@ class ContainerHostService implements Service {
   readonly critical = true
 
   async start(): Promise<void> {
-    await containerHost.initializeAgents(discoveredAgentSlugs)
+    await wakeAgents(discoveredAgentSlugs)
     // Watched once the agents are known, so containers still running from
     // before this launch get their baseline too; from then on it marks
     // agents stale whenever the relay's availability moves.
@@ -110,7 +111,10 @@ function backgroundServices(): Service[] {
     // After the containers, whose runtimes the host still needed: every agent
     // lets go of what it holds, its parked reviews and re-auth waits included.
     new ReleasedAtShutdown('agent-registry', () => agentRegistry.evictAll()),
-    new ReleasedAtShutdown('containers', () => containerHost.stopAll()),
+    new ReleasedAtShutdown('containers', async () => {
+      await stopAllAgents()
+      containerHost.clearRuntimes()
+    }),
 
     // The host's one connection to the platform webhook queue, shared by every
     // feature that receives webhooks. Cheap to start: it claims nothing until a
@@ -150,6 +154,8 @@ function backgroundServices(): Service[] {
     // These only schedule their first pass, so they do not take a startup slot.
     sessionAutoDeleteMonitor,
     apiLogAutoDeleteMonitor,
+    // Auth mode: removes dynamically registered MCP clients nobody connected.
+    new McpClientCleanupService(),
     // Syncs OAuth account status with remote providers.
     accountSyncService,
     // Renews team directories' app-creation credentials (Slack's 12-hour configuration token).

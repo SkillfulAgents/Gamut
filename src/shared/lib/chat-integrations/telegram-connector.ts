@@ -832,6 +832,9 @@ export class TelegramConnector extends ChatAgentIntegration {
           const text = `${header}${escapeMarkdown(q.question)}`
           const hasOptions = !!(q.options && q.options.length > 0)
 
+          // Only a card that asks one question takes a typed reply as its
+          // answer (the chat rule in tools/requests/request-text.ts). The
+          // event's questions are already parsed, so the count is read here.
           const singleQuestionCard = event.questions.length === 1
 
           if (hasOptions && q.multiSelect) {

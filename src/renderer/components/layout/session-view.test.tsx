@@ -11,6 +11,7 @@ const xAgentSession = {
 }
 const mocks = vi.hoisted(() => ({
   navigate: vi.fn(),
+  history: { canGoBack: vi.fn(() => false), back: vi.fn() },
   markRead: vi.fn(),
   setMarkedUnread: vi.fn(),
   // Reports whether a dot was actually showing; defaults to the common no-op open.
@@ -26,6 +27,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('@tanstack/react-router', () => ({
   useNavigate: () => mocks.navigate,
+  useRouter: () => ({ history: mocks.history }),
   useSearch: () => mocks.search,
 }))
 
@@ -126,7 +128,15 @@ describe('SessionView x-agent provenance', () => {
     mocks.clearUnread.mockReturnValue(false)
   })
 
-  it('shows the Back bar and returns to Called from Other Agents', () => {
+  it('returns to the previous page when the session was opened in the app', () => {
+    mocks.history.canGoBack.mockReturnValueOnce(true)
+    render(<SessionView agentSlug="target-agent" sessionId="x-session" />)
+    fireEvent.click(screen.getByTestId('x-agent-session-back-button'))
+    expect(mocks.history.back).toHaveBeenCalledOnce()
+    expect(mocks.navigate).not.toHaveBeenCalled()
+  })
+
+  it('opens Called from Other Agents when a direct link has no prior app page', () => {
     render(<SessionView agentSlug="target-agent" sessionId="x-session" />)
 
     expect(screen.getByTestId('x-agent-session-banner')).toHaveTextContent(
@@ -136,6 +146,7 @@ describe('SessionView x-agent provenance', () => {
     expect(mocks.navigate).toHaveBeenCalledWith({
       to: '/agents/$slug/called-from-agents',
       params: { slug: 'target-agent' },
+      replace: true,
     })
   })
 })

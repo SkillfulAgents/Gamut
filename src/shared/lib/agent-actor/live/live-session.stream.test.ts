@@ -20,7 +20,6 @@ vi.mock('@shared/lib/config/settings', () => ({
   getModelCatalogSettings: () => mockGetSettings().modelCatalog ?? {},
 }))
 
-import { updateSessionMetadata } from '@shared/lib/services/session-service'
 import { attachLiveSessionsHarness, createStreamClient, type StreamClient } from '../testing/live-sessions-harness'
 
 const SESSION_ID = 'test-session-1'
@@ -422,35 +421,47 @@ describe('slash commands', () => {
 // ============================================================================
 
 describe('context usage from the container', () => {
-  const persisted = () => vi.mocked(updateSessionMetadata).mock.calls.filter(([, , patch]) => 'lastUsage' in patch)
+  const persisted = async () => (await live.store(AGENT_SLUG).index.get(SESSION_ID))?.meta
 
-  it('forwards the measured size and saves a settled one', () => {
+  it('forwards the measured size and saves a settled one', async () => {
     mockClient.emit({ type: 'context_usage', totalTokens: 64_041, contextWindow: 1_000_000, settled: true })
 
     expect(sseEvents.filter((e) => e.type === 'context_usage')).toEqual([
       { type: 'context_usage', totalTokens: 64_041, contextWindow: 1_000_000 },
     ])
-    expect(persisted()).toEqual([
-      [expect.anything(), SESSION_ID, { lastUsage: { totalTokens: 64_041, contextWindow: 1_000_000 } }],
-    ])
+    await vi.waitFor(() => expect(sseEvents).toContainEqual({ type: 'context_snapshot_saved' }))
+    expect((await persisted())?.lastUsage).toEqual({ totalTokens: 64_041, contextWindow: 1_000_000 })
   })
 
-  it('forwards a mid-turn size without saving it', () => {
+  it.each([['full', 'full'], [undefined, 'estimate']] as const)('persists a replayed %s breakdown as %s without broadcasting private rows', async (breakdownKind, expectedKind) => {
+    const rows = {
+      categories: [{ name: 'Messages', tokens: 40, kind: 'used' }],
+      totalTokens: 40, rawMaxTokens: 200, percentage: 20,
+      memoryFiles: [{ path: '/private/notes.md', tokens: 2 }],
+    }
+    mockClient.emit({ type: 'context_usage', totalTokens: 40, contextWindow: 200,
+      revision: 'settled', measuredAt: new Date().toISOString(), breakdownKind, breakdown: rows, settled: true, replayed: true })
+    await vi.waitFor(() => expect(sseEvents).toContainEqual({ type: 'context_snapshot_saved' }))
+    expect((await persisted())?.lastContext).toMatchObject({ kind: expectedKind, breakdown: { memoryFiles: rows.memoryFiles } })
+    expect(JSON.stringify(sseEvents)).not.toContain('/private/notes.md')
+  })
+
+  it('forwards a mid-turn size without saving it', async () => {
     mockClient.emit({ type: 'context_usage', totalTokens: 16_830, contextWindow: 1_000_000, settled: false })
 
     expect(sseEvents.filter((e) => e.type === 'context_usage')).toHaveLength(1)
-    expect(persisted()).toHaveLength(0)
+    expect((await persisted())?.lastUsage).toBeUndefined()
   })
 
-  it('ignores a frame without a size or window', () => {
+  it('ignores a frame without a size or window', async () => {
     mockClient.emit({ type: 'context_usage', contextWindow: 1_000_000, settled: true })
     mockClient.emit({ type: 'context_usage', totalTokens: 10, settled: true })
 
     expect(sseEvents.filter((e) => e.type === 'context_usage')).toHaveLength(0)
-    expect(persisted()).toHaveLength(0)
+    expect((await persisted())?.lastUsage).toBeUndefined()
   })
 
-  it('reads no size from API call usage', () => {
+  it('reads no size from API call usage', async () => {
     mockClient.emit({ type: 'stream_event', event: { type: 'message_start', message: { id: 'msg-1', model: 'gpt-6.1-sol' } } })
     mockClient.emit({ type: 'stream_event', event: { type: 'message_delta', usage: { input_tokens: 51_300, cache_read_input_tokens: 39_424 } } })
     mockClient.emit({
@@ -460,15 +471,15 @@ describe('context usage from the container', () => {
     mockClient.emit({ type: 'result', subtype: 'success', modelUsage: { 'claude-haiku-4-5': { contextWindow: 200_000 } } })
 
     expect(sseEvents.filter((e) => e.type === 'context_usage')).toHaveLength(0)
-    expect(persisted()).toHaveLength(0)
+    expect((await persisted())?.lastUsage).toBeUndefined()
   })
 
-  it('still lands after a stop', () => {
+  it('still lands after a stop', async () => {
     sessions().markActive(SESSION_ID)
     sessions().markInterrupted(SESSION_ID)
     mockClient.emit({ type: 'context_usage', totalTokens: 2_717, contextWindow: 1_000_000, settled: true })
 
     expect(sseEvents.filter((e) => e.type === 'context_usage')).toHaveLength(1)
-    expect(persisted()).toHaveLength(1)
+    await vi.waitFor(async () => expect((await persisted())?.lastUsage?.totalTokens).toBe(2_717))
   })
 })

@@ -6,8 +6,8 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { attachLiveSessionsHarness } from '@shared/lib/agent-actor/testing/live-sessions-harness'
-import { userInputRequestManager } from '@shared/lib/tools/requests/request-manager'
-import { ReviewManager } from './review-manager'
+import { userInputRequestManager } from '@shared/lib/agent-actor/testing/routers/request-manager'
+import { ReviewManager } from '@shared/lib/agent-actor/testing/routers/review-manager'
 import { releaseSessionState } from '@shared/lib/agent-actor/agent-state'
 
 // The actors' in-memory state (requests, reviews, live sessions), which the

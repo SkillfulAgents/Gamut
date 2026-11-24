@@ -9,6 +9,7 @@
  */
 
 import { ERROR_REPORTING_INGEST_URL } from '@shared/lib/error-reporting/config'
+import { redactMcpTokens, redactMcpTokensDeep } from '@shared/lib/error-reporting/redact-mcp-token'
 import type { ErrorReportingUser } from '@shared/lib/error-reporting/types'
 import { isElectron } from './env'
 import { isWorkspaceUnavailableError } from './workspace-unavailable'
@@ -45,7 +46,20 @@ function loadSentry(): Promise<typeof import('./sentry-browser-provider') | null
           // from apiFetch is the record. Filtered here so unhandled rejections
           // and cache-level reports are covered alike.
           if (isWorkspaceUnavailableError(hint?.originalException)) return null
-          return event
+          // Settings → MCP Server holds the installation token; no report carries it.
+          try {
+            return redactMcpTokensDeep(event)
+          } catch {
+            return null
+          }
+        },
+        beforeBreadcrumb(breadcrumb) {
+          try {
+            const data = breadcrumb.data && redactMcpTokensDeep({ ...breadcrumb.data })
+            return { ...breadcrumb, message: breadcrumb.message && redactMcpTokens(breadcrumb.message), data }
+          } catch {
+            return null
+          }
         },
       })
       sentry = provider

@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest'
 
-import { MCP_REAUTH_TIMEOUT_MS, McpReauthManager } from './mcp-reauth-manager'
-import { userInputRequestManager } from '@shared/lib/tools/requests/request-manager'
+import { MCP_REAUTH_TIMEOUT_MS } from '@shared/lib/proxy/reauth-waits'
+import { McpReauthManager } from '@shared/lib/agent-actor/testing/routers/mcp-reauth-manager'
+import { userInputRequestManager } from '@shared/lib/agent-actor/testing/routers/request-manager'
 import {
   attachInMemoryAgentState,
   type InMemoryAgentStateDirectory,

@@ -196,7 +196,7 @@ function SessionRow({ session, showIcon, formatDate, agentSlug: agentSlugProp, s
     >
       {showIcon && <MessageSquare className="h-4 w-4 text-muted-foreground shrink-0" />}
       <div className="flex-1 min-w-0">
-        <div className={`text-xs truncate flex items-center gap-2 ${dateAsTitle ? 'font-normal' : 'font-medium'}`}>
+        <div className="text-xs truncate flex items-center gap-2">
           {session.isAwaitingInput ? (
             <AwaitingDot />
           ) : session.isActive ? (

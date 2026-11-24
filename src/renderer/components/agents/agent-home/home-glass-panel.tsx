@@ -1,13 +1,13 @@
 import type { ReactNode } from 'react'
 import { cn } from '@shared/lib/utils/cn'
-import { FLOATING_COMPOSER_CLASS } from '@renderer/components/messages/chat-composer-box'
+import { CANVAS_FLOAT_SHADOW_CLASS, FLOATING_COMPOSER_CLASS } from '@renderer/components/messages/chat-composer-box'
 
 /**
  * Agent Home's glass: the session composer's material (FLOATING_COMPOSER_CLASS: fill, blur and soft shadow), clearer.
  * Behind it sits the halftone background, which a blur smears into a faint haze that dulls its colour, so a thinner
  * fill lets more of the colour through, and the backdrop is saturated to win back what the haze takes.
  */
-const HOME_GLASS = cn(FLOATING_COMPOSER_CLASS, 'supports-[backdrop-filter]:bg-background/[0.58] backdrop-saturate-[1.25]')
+const HOME_GLASS = cn(FLOATING_COMPOSER_CLASS, CANVAS_FLOAT_SHADOW_CLASS, 'supports-[backdrop-filter]:bg-background/[0.58] backdrop-saturate-[1.25]')
 
 /** Agent Home's composer: its glass with no border, like the panels: the shadow and the blur are its edge. */
 export const HOME_GLASS_COMPOSER_CLASS = cn(HOME_GLASS, 'border-0')
@@ -35,7 +35,7 @@ interface HomeGlassPanelProps {
   testId?: string
 }
 
-/** A titled glass sheet in Agent Home's main column: Recent sessions, Bookmarks. */
+/** A titled glass sheet in Agent Home's main column: Recent sessions, Pinned Items. */
 export function HomeGlassPanel({ title, actions, children, className, testId }: HomeGlassPanelProps) {
   return (
     <section className={cn(HOME_GLASS_PANEL_CLASS, 'px-5 pb-4 pt-4', className)} aria-label={title} data-testid={testId}>

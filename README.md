@@ -1,327 +1,122 @@
 <p align="center">
   <img src="build/icon.png" height="128">
-  <h1 align="center">SuperAgent - AI Agent Platform</h1>
+  <h1 align="center">Gamut</h1>
 </p>
 
-SuperAgent is a super app for building and running personal agents. You can create custom agents, let them develop the skills they need to do task for you, and have them run automatocally in the background for you.
+Gamut is an open-source platform for building and running AI agents. Each agent runs in its own sandboxed container, connects to your accounts without ever seeing their tokens, learns skills as it works, and can keep working on a schedule in the background.
 
-| Windows | Mac |
-|:-------:|:---:|
-| [Download for Windows](https://updates.gamutagents.com/download/win) | [Download for Mac](https://updates.gamutagents.com/download/mac) |
+Documentation: **[gamut.so/docs](https://gamut.so/docs)**
 
-**Features:**
+## Ways to run Gamut
 
-- **Containerized Agents** - SuperAgents spins up a containerized sandbox per agent - keeping your computer secure. 
-- **Connected Accounts** - easily connect 100s of accounts your agent can use.
-- **Secure Integrations** - API calls are proxied outside your agent and the agent never sees Auth Tokens, keeping your account secure and giving you an audit trail of agent actions.
-- **Recurring and Scheduled Tasks** - agents can schedule recurring tasks and future work so they can serve you autonomously in the background.
-- **Browser Access** - agents can spin up and use a web browser to accomplish tasks where no API / MCP is available.
-- **Agent Dashboards & Artifacts** - agents can create dashboard for you to more easily access information.
-- **Create Shared Skillsets** - as agents create skills for your work - creaate skillsets to share them with your team!
+| | What it is | Get started |
+|---|---|---|
+| **Cloud** | Gamut hosts everything. Nothing to install. | [Sign up](https://platform.gamutagents.com/auth/login?mode=signup) at [gamut.so](https://gamut.so) |
+| **Desktop** | The app runs every agent locally on your computer, and can also connect to your Cloud workspace. macOS 13 or later on Apple Silicon, and Windows (x64 and arm64). | [Download for Mac](https://updates.gamutagents.com/download/mac) · [Download for Windows](https://updates.gamutagents.com/download/win) · [Docs](https://gamut.so/docs/self-hosting/deployment-options/electron-desktop-app) |
+| **Self-hosted** | You run the server on your own hardware with Docker, or on Kubernetes. | [Quick start](#self-hosting-with-docker) below |
 
-**Run as:**
+## Features
 
-- **Web App** - you can run super agent in server mode and access it via the web. Great if you have a computer that can run it 24/7
-- **Desktop App** - you can download and run superagent locally in your machine as a desktop app.
+- **Sandboxed agents**: every agent gets its own container.
+- **Connected accounts**: API calls go through a proxy outside the agent, so the agent never sees your auth tokens and every call is logged.
+- **Scheduled and recurring tasks**: agents schedule their own future and repeating work.
+- **Browser use**: agents can drive a web browser where no API or MCP server exists.
+- **Dashboards, artifacts and widgets**: agents build views of your information.
+- **Skills and skillsets**: agents write skills as they work, and you can share them with your team as skillsets.
+- **Chat integrations**: talk to agents from Slack, Telegram or iMessage.
 
-## Pre-Reqs
+## Models
 
-To get strated with Superagent, you need:
+Gamut is not tied to one model vendor. Add connections in **Settings > Model Providers**:
 
-1. **A container runtime** -> this is where SuperAgent will run it’s agent containers. Our recommendations:
-  1. [Docker Desktop](https://docs.docker.com/desktop/setup/install/mac-install/)
-  2. [OrbStack](https://orbstack.dev/download)
-  3. [Podman](https://podman.io/get-started)
-2. **An Anthropic API Key** -> we currently only support Anthropic models, more coming soon. Get your API key from the [Anthropic Console](https://platform.claude.com/settings/keys).
-3. **[Optional] A Composio API key** -> SuperAgent uses Composio to generate OAuth Tokens for you for different acocunts. You can get one on [Composio](https://platform.composio.dev).
+- **Anthropic API** and **AWS Bedrock**
+- **OpenRouter**
+- **Subscriptions**: Claude, Codex (ChatGPT), Grok, Kimi, MiniMax and Qwen
+- **Ollama**, for open models on your own hardware
+- **Generic**: any Anthropic- or OpenAI-compatible endpoint at a base URL (OpenAI, vLLM, LiteLLM and similar)
 
+On Cloud, models come with your plan.
 
-# Getting Started
+## Self-hosting with Docker
 
-## Desktop App
-Download the latest release from the links above, or visit the [releases page](https://github.com/SkillfulAgents/Gamut/releases/latest).
-
-## Running with Docker
-
-You can run Superagent in a Docker container using Docker-outside-of-Docker (DooD) to spawn agent containers.
-
-### Using the published image
+You need Docker Engine (or Docker Desktop) with Docker Compose v2. The Gamut container starts each agent as a sibling container through the host's Docker socket.
 
 ```bash
-# Set your API key
-export ANTHROPIC_API_KEY=your-api-key-here
-
-# Pull and run
+git clone https://github.com/SkillfulAgents/Gamut.git
+cd Gamut
 docker compose up
-
-# Access at http://localhost:47891
 ```
 
-### Building locally
+Open http://localhost:47891 and add a model provider in **Settings > Model Providers**. To start with an Anthropic key instead, run `ANTHROPIC_API_KEY=sk-ant-... docker compose up`.
 
-```bash
-# Build and run from source
-docker compose up --build
-```
+The compose file uses the published image `ghcr.io/skillfulagents/superagent:main` and keeps data in `~/.superagent` on the host. Images are built for `linux/amd64` and `linux/arm64`:
 
-### How it works
+| Tag | Description |
+|---|---|
+| `main` | Latest build from `main` (single-user) |
+| `main-auth` | Latest build from `main` with sign-in (multi-user) |
+| `X.Y.Z`, `X.Y` | Release versions (single-user) |
+| `X.Y.Z-auth`, `X.Y-auth` | Release versions with sign-in (multi-user) |
 
-The Docker setup:
-- Mounts the Docker socket for spawning sibling agent containers
-- Persists data in `~/.superagent` (same path on host and container)
-- Mounts `./agent-container` for building agent images on-demand
-
-The image is published to `ghcr.io/iddogino/superagent` on every push to main and on version tags.
-
-## Running from Source
-
-1. Install dependencies:
-   ```bash
-   npm install
-   ```
-
-2. Build the agent container:
-   ```bash
-   npm run build:container
-   ```
-
-3. Set up environment variables (see below)
-
-4. Create the local data directory:
-   ```bash
-   mkdir -p ~/.superagent
-   ```
-
-5. Run database migrations:
-   ```bash
-   npm run db:migrate
-   ```
-
-6. Start the development server:
-   ```bash
-   npm run dev
-   ```
-
-## Environment Variables
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `ANTHROPIC_API_KEY` | Your Anthropic API key (required) | - |
-| `SUMMARIZER_MODEL` | Model used for generating session names | `claude-haiku-4-5` |
-| `CONTAINER_STATUS_SYNC_INTERVAL_SECONDS` | How often to sync container status with Docker (seconds) | `300` |
-| `RUNNER_AVAILABILITY_CACHE_TTL_SECONDS` | How long to cache Docker/Podman availability checks (seconds) | `60` |
-
-## Auth Mode (Multi-User)
-
-Superagent can run in **auth mode** for multi-user deployments with role-based access control. When enabled, users sign up and sign in with email/password, and agents are isolated per user via ACLs.
-
-### How it works
-
-- The first user to sign up is automatically promoted to **admin**.
-- Subsequent users sign up as regular users.
-- On a Platform-managed deployment, members join through Platform instead, and each member's first sign-in gives them their Platform role (owners and admins become **admin**, members become **user**) rather than promoting whoever arrives first. It is set at that sign-in only, so a role changed later in Settings > Users stays.
-- Admins can manage users and access global settings (LLM keys, runtime config).
-- Each agent has an **owner** (the creator) who can invite other users as **user** (can chat) or **viewer** (read-only).
-- Auth mode is **web-only** — the Electron desktop app always runs in single-user mode.
-
-### Enabling auth mode
-
-`AUTH_MODE` is a **compile-time setting** for the frontend (Vite injects it as `__AUTH_MODE__`), so it must be set at build time.
-
-**Using the published Docker image:**
-
-Pre-built auth images are published with the `-auth` suffix:
+Single-user mode has no login screen, so restrict access at the network level. For a multi-user server with sign-in:
 
 ```bash
 SUPERAGENT_IMAGE=ghcr.io/skillfulagents/superagent:main-auth \
-ANTHROPIC_API_KEY=your-api-key \
+TRUSTED_ORIGINS=https://gamut.example.com \
 docker compose up
 ```
 
-**From source:**
+To build the image from source instead, run `docker compose up --build` (add `AUTH_MODE=true` for a multi-user build).
+
+More in the docs:
+
+- [Single-user Docker](https://gamut.so/docs/self-hosting/deployment-options/single-user-docker)
+- [Auth mode (multi-user)](https://gamut.so/docs/self-hosting/deployment-options/auth-mode)
+- [Kubernetes with Helm](https://gamut.so/docs/self-hosting/deployment-options/kubernetes-helm)
+- [Desktop app](https://gamut.so/docs/self-hosting/deployment-options/electron-desktop-app)
+
+## Development
+
+Requirements: Node.js 22.12 or later, and a container runtime (Docker or Podman) for the agent containers.
 
 ```bash
-AUTH_MODE=true npm run dev
+npm install
+npm run dev            # web app and API on http://localhost:47891
+npm run dev:electron   # or the desktop app
 ```
 
-**Building Docker locally:**
+The database is migrated when the server starts. Configuration such as `ANTHROPIC_API_KEY` can go in `.env.local` (see `.env.local.example`), or be set in the app.
 
-```bash
-AUTH_MODE=true docker compose up --build
-```
-
-### Docker image tags
-
-Both regular and auth-enabled images are published on every push to `main` and on version tags:
-
-| Tag | Description |
-|-----|-------------|
-| `main` | Latest from main branch (single-user) |
-| `main-auth` | Latest from main branch (multi-user auth) |
-| `X.Y.Z` | Version release (single-user) |
-| `X.Y.Z-auth` | Version release (multi-user auth) |
-| `X.Y` | Major.minor release (single-user) |
-| `X.Y-auth` | Major.minor release (multi-user auth) |
-
-### Auth environment variables
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `BETTER_AUTH_SECRET` | Secret key for signing session cookies (min 32 chars). If not set, a secret is auto-generated and persisted to `$SUPERAGENT_DATA_DIR/.auth-secret`. | Auto-generated |
-| `SUPERAGENT_VAULT_KEY` / `SUPERAGENT_VAULT_KEY_FILE` | The Browser Vault's encryption key (32 random bytes, base64), or the path of a mounted secret file that holds it. Set one. Unlike `BETTER_AUTH_SECRET`, it cannot be changed once logins are saved. If neither is set, the key is made on first use and kept in `$SUPERAGENT_DATA_DIR/.vault-key`. See [Browser Vault § Key custody](docs/browser-vault.md#key-custody). | `$SUPERAGENT_DATA_DIR/.vault-key` |
-| `TRUSTED_ORIGINS` | Comma-separated list of allowed origins for CORS and CSRF protection. The first origin is also used as the app's base URL for OAuth callbacks. Example: `https://superagent.example.com` | None (permissive CORS) |
-| `HOST` | Server hostname, used to construct the auth base URL when `TRUSTED_ORIGINS` is not set. | `localhost` |
-| `PORT` | Server port, used to construct the auth base URL when `TRUSTED_ORIGINS` is not set. | `47891` |
-| `USE_HTTPS` | Use `https` protocol in the auth base URL when `TRUSTED_ORIGINS` is not set. | `false` |
-| `HOST_PUBLIC_URL` | The public https address of the app, for links and pages handed to outside services (OAuth callbacks, the meeting bot's camera page). Features that need the internet to reach the app, such as [meetings](docs/meeting-integrations.md), are offered only when this is set to a non-private https URL. | First `TRUSTED_ORIGINS` entry (links only) |
-| `RECALL_API_KEY` / `RECALL_REGION` | Self-hosted alternative to the platform proxy for meeting bots: a Recall.ai key and its region (`us-west-2` default). Not needed when the platform is connected. | None |
-
-### Example: production deployment
-
-```bash
-SUPERAGENT_IMAGE=ghcr.io/iddogino/superagent:main-auth \
-ANTHROPIC_API_KEY=your-api-key \
-TRUSTED_ORIGINS=https://superagent.example.com \
-BETTER_AUTH_SECRET=your-secret-key-at-least-32-characters-long \
-docker compose up
-```
-
-The runtime variables (`TRUSTED_ORIGINS`, `BETTER_AUTH_SECRET`, etc.) are passed through automatically by the compose file.
-
-### Optional: Composio OAuth setup
-
-If you connect accounts through Composio (Slack/Gmail/GitHub, etc.), make sure token masking is disabled in your Composio project settings, otherwise SuperAgent cannot read usable access tokens and proxy calls may fail.
-
-In the Composio dashboard, go to:
-- `Project Settings`
-- `Project Configuration`
-- Disable `Mask Connected Account Secrets`
-
-After changing this setting, reconnect the account in SuperAgent.
-
-Create a `.env.local` file in the project root:
-
-```bash
-ANTHROPIC_API_KEY=your-api-key-here
-# Optional overrides
-# SUMMARIZER_MODEL=claude-haiku-4-5
-# CONTAINER_STATUS_SYNC_INTERVAL_SECONDS=300
-# RUNNER_AVAILABILITY_CACHE_TTL_SECONDS=60
-```
-
-[[Finish this section -- get to a running server]]
-
-# Development
-
-## Scripts
-
-### Development
-| Script | Description |
-|--------|-------------|
-| `npm run dev` | Start web app + API server in parallel |
-| `npm run dev:api` | Start API server only (port 3001) |
-| `npm run dev:web` | Start Vite dev server only (port 3000) |
-| `npm run dev:electron` | Start Electron app in development |
-
-### Build
-| Script | Description |
-|--------|-------------|
-| `npm run build` | Build web app + API for production |
-| `npm run build:web` | Build web frontend only |
-| `npm run build:api` | Build API server only |
-| `npm run build:electron` | Build Electron app |
-| `npm run build:container` | Build the agent Docker container |
-
-### Distribution
-| Script | Description |
-|--------|-------------|
-| `npm run dist:mac` | Package Electron app for macOS. Building the built-in runtime's VM image needs Docker running (`scripts/build-lima-image.sh`); without it the app ships Alpine's stock image, whose first boot downloads sudo and reboots once |
-| `npm run dist:win` | Package Electron app for Windows |
-| `npm run preview` | Build and run production server locally |
-
-### Quality
-| Script | Description |
-|--------|-------------|
-| `npm run typecheck` | Run TypeScript type checking |
-| `npm run lint` | Run ESLint |
-| `npm test` | Run tests in watch mode |
-| `npm run test:run` | Run tests once |
-| `npm run test:coverage` | Run tests with coverage |
-
-### Database
-| Script | Description |
-|--------|-------------|
-| `npm run db:migrate` | Run database migrations |
-| `npm run db:generate` | Generate new migration |
+| Script | What it does |
+|---|---|
+| `npm run dev` | Vite dev server with the API built in (port 47891, or `PORT`) |
+| `npm run dev:api` | API server only, with reload (`src/web/server.ts`) |
+| `npm run dev:electron` | Electron app in development |
+| `npm run build` | Production build of the web app and API |
+| `npm run preview` | Build, then run the production server locally |
+| `npm run build:electron` | Build the Electron app |
+| `npm run build:container` | Build the agent container image locally (`superagent-container`) |
+| `npm run dist:mac` / `dist:win` | Package the desktop app for macOS / Windows |
+| `npm run typecheck` | TypeScript type check |
+| `npm run lint` | ESLint |
+| `npm test` / `npm run test:run` | Unit tests (watch / once); `test:coverage` adds coverage |
+| `npm run test:e2e` | Playwright end-to-end tests against mocks |
+| `npm run db:generate` | Generate a migration and bundle it |
+| `npm run db:migrate` | Apply migrations |
 | `npm run db:studio` | Open Drizzle Studio |
-| `npm run db:reset` | Reset database |
 
-## On-demand PR desktop builds
+Before changing code, read [AGENTS.md](AGENTS.md): it holds the project's rules (database access, background work, capability gating and more), with links to the design docs in [`docs/`](docs/). Release steps are in [release.md](release.md).
 
-To build signed macOS and Windows installers for a PR, open **Actions → PR Build →
-Run workflow**, leave the workflow branch as `main`, and enter the PR number.
-You can also trigger it from this checkout with GitHub CLI:
+### On-demand PR desktop builds
+
+To build signed macOS and Windows installers for a PR, open **Actions → PR Build → Run workflow** on `main` and enter the PR number, or run:
 
 ```sh
 gh workflow run pr-build.yml --ref main -f pr_number=1477
 ```
 
-Replace `1477` with the PR to build. The workflow resolves its current head commit
-once and uses it for both platforms. It posts the commit and artifact download
-links in a PR comment; artifacts are retained for 14 days. Signed builds require
-a PR branch in this repository, because they use repository signing secrets.
+Both platforms build the PR's current head commit, and the workflow posts artifact links (kept 14 days) in a PR comment. Signed builds need the PR branch to be in this repository. Add `-f mas=true` (or tick **Also build the Mac App Store package**) to also build the Mac App Store package, which App Store Connect validates and nothing uploads. PR pushes run tests only; `main` pushes and version tags still build automatically.
 
-For the Mac App Store package as well, tick **Also build the Mac App Store
-package** (or add `-f mas=true`). App Store Connect validates it, and it is
-never uploaded. It needs the Store's signing secrets (see
-`.github/workflows/build-mas.yml`); without them the comment says it was skipped.
+## License
 
-The manual trigger becomes available once this workflow change is merged into
-`main`. PR pushes run tests without automatically packaging desktop apps; builds
-on `main` pushes and version-tag releases still run automatically. The Mac App
-Store package is built only by releases, and on demand for a PR. A release
-uploads it to App Store Connect and adds it to the TestFlight groups: Team at
-once, and Beta after Beta App Review. Every release of a version shares one
-TestFlight version (0.6.0-rc.1, rc.2 and 0.6.0 are all 0.6.0), so only its
-first build needs a full review. A full release also leaves the macOS App Store
-version ready to submit: the version being prepared takes its number and build,
-or a new version is made, with the last one's listing, once the last is out.
-Submitting it for review is a click in App Store Connect.
-
-## Architecture
-
-The application uses a dual-target architecture supporting both web and Electron desktop deployment:
-
-### Web Mode
-- **Frontend**: Vite dev server (port 3000) proxies API requests to the backend
-- **Backend**: Hono server (port 3001) handles API routes and serves static files in production
-
-### Electron Mode
-- **Main Process**: Starts embedded Hono API server and creates browser window
-- **Renderer Process**: Same React app as web, communicates with API via localhost
-- **Preload Script**: Exposes safe IPC methods to renderer
-
-The desktop app can also drive a *remote* auth-mode deployment ("cloud
-workspace") instead of its own embedded API. Because the same React app runs in
-three configurations — Electron on the local API, Electron on a cloud workspace,
-and a plain browser — a feature is gated by **what it touches, not by what the
-window is**:
-
-| The feature acts on… | Predicate |
-| --- | --- |
-| this computer, on the agents' behalf | `canUseHostFeatures()` |
-| the machine running the API | `!targetIsRemote()` |
-| the window itself (traffic lights, tray, updates) | `isElectron()` |
-
-`!targetIsRemote()` is true in browsers and `isElectron()` is not, so these are
-not one scale of strictness — choosing the wrong one silently withdraws a
-feature from every web deployment. See
-[docs/cloud-workspace.md § Capability gating](docs/cloud-workspace.md#capability-gating-three-questions-not-one-axis)
-for the truth table and the full inventory of gated sites.
-
-### Agent Containers
-Each agent runs in its own Docker/Podman container with Claude Code in headless mode:
-- Containers communicate via HTTP/WebSocket APIs
-- SSE streaming for real-time message updates
-- File-based persistence for agents, sessions, and messages
-- SQLite database for OAuth connected accounts 
+[MIT](LICENSE)

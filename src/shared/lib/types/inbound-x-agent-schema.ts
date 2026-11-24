@@ -26,6 +26,14 @@ export const inboundXAgentSessionSchema = z.union([
       name: z.string(),
     }),
   }),
+  // Started by a person through the MCP server, from another AI tool.
+  inboundSessionBaseSchema.extend({
+    isWidgetRepair: z.literal(false).optional(),
+    mcp: z.object({
+      /** What the client called itself; null when its protocol era does not say. */
+      clientName: z.string().nullable(),
+    }),
+  }),
 ])
 
 export const inboundXAgentDetailsSchema = z.object({

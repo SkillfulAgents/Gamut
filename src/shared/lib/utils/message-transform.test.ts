@@ -1235,6 +1235,29 @@ describe('transformMessages', () => {
       })
     })
 
+    it('keeps the saved Agent report separate from its parent-facing tool result', () => {
+      const handBack = '[Subagent hand-back] Relay the result to the user.'
+      const report = 'The audit found 21 entries.'
+      const toolUseResult = {
+        stdout: handBack, stderr: '', interrupted: false, isImage: false,
+        agentId: 'audit', status: 'completed', harnessNoteCount: 1,
+        content: [
+          { type: 'text', text: '<tools-used-before-summary>Bash</tools-used-before-summary>' },
+          { type: 'text', text: report },
+        ],
+      }
+      const entries = [
+        createAssistantMessage('uuid-1', 'msg-1', [
+          { type: 'tool_use', id: 'launch', name: 'Agent', input: {} },
+        ]),
+        createUserMessage('uuid-2', [{ type: 'tool_result', tool_use_id: 'launch', content: handBack }], undefined, { toolUseResult }),
+      ]
+
+      const toolCall = asMessage(transformMessages(entries)[0]).toolCalls[0]
+      expect(toolCall.result).toBe(handBack)
+      expect(toolCall.subagent?.report).toBe(report)
+    })
+
     it('does not extract subagent metadata from non-Task tools', () => {
       const entries: JsonlMessageEntry[] = [
         createAssistantMessage('uuid-1', 'msg-1', [

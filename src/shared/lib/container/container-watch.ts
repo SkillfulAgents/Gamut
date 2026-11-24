@@ -1,7 +1,7 @@
 /**
  * The checks on one agent's container, which the agent's actor owns, as it
- * owns the idle alarm: each waits on a timer of its own in this process, and
- * nothing host-wide schedules them.
+ * owns the idle alarm: each check waits on a timer of its own in this
+ * process, and nothing host-wide schedules them.
  *
  * - Every 300 s, whether the container runs. A container can exit without
  *   this process (a crash, a kill, a runtime that restarted), and a read that
@@ -18,7 +18,7 @@
  */
 import pLimit from 'p-limit'
 import { background } from '../background'
-import { processIdleTimer, type IdleTimer } from './idle-alarm'
+import { processTimer, type ProcessTimer } from './process-timer'
 
 /** Interval for checking that a running container still runs (in ms). Default: 300 seconds */
 const STATUS_CHECK_INTERVAL_MS = parseInt(
@@ -52,7 +52,7 @@ export interface ContainerWatchDeps {
 /** One check that runs every `intervalMs` while it is on. */
 class RecurringCheck {
   private on = false
-  private waiting: IdleTimer | undefined
+  private waiting: ProcessTimer | undefined
 
   constructor(
     private readonly name: string,
@@ -84,7 +84,7 @@ class RecurringCheck {
   }
 
   private arm(): void {
-    (this.waiting ??= processIdleTimer()).set(this.intervalMs, () => background(this.pass(), { name: this.name }))
+    (this.waiting ??= processTimer()).set(this.intervalMs, () => background(this.pass(), { name: this.name }))
   }
 
   private async pass(): Promise<void> {

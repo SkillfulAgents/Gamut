@@ -194,6 +194,7 @@ xAgent.post('/download-file', zValidator('json', xAgentDownloadFileBodySchema), 
 // ----------------------------------------------------------------------------
 
 const invokeBodySchema = z.object({
+  callerToolUseId: z.string().min(1).max(256).optional(),
   slug: z.string().optional(),
   prompt: z.string().min(1),
   sessionId: z.string().optional(),

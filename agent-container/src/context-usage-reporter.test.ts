@@ -34,56 +34,74 @@ describe('contextUsageChange', () => {
 });
 
 describe('ContextUsageReporter', () => {
-  it('sends the CLI count against the auto-compact window', async () => {
-    const sent: ContextUsageFrame[] = [];
-    const reporter = new ContextUsageReporter(async () => summary(64_041), (frame) => sent.push(frame));
-
-    reporter.refresh(true);
+  it('requests only summary totals mid-turn', async () => {
+    const send = vi.fn();
+    const read = vi.fn(async () => summary(64_041));
+    const reporter = new ContextUsageReporter(read, send);
+    reporter.refresh(false);
     await flush();
-
-    expect(sent).toEqual([{ type: 'context_usage', totalTokens: 64_041, contextWindow: 1_000_000, settled: true }]);
+    expect(read).toHaveBeenCalledExactlyOnceWith('summary');
+    expect(send).toHaveBeenCalledWith({ type: 'context_usage', totalTokens: 64_041, contextWindow: 1_000_000, settled: false });
   });
 
-  it('runs one read at a time and one more for a burst during it, keeping settled', async () => {
+  it('captures full rows automatically and replays them only for their revision', async () => {
+    const counted = {
+      ...summary(400, 2000), percentage: 20,
+      categories: [{ name: 'Messages', kind: 'used', tokens: 400, color: 'blue' }],
+    } as SDKControlGetContextUsageResponse;
+    const send = vi.fn();
+    const read = vi.fn(async (detail: 'summary' | 'full') => detail === 'full' ? counted : summary(350, 2000));
+    const reporter = new ContextUsageReporter(read, send);
+    reporter.refresh(true);
+    await flush();
+    expect(read).toHaveBeenCalledExactlyOnceWith('full');
+    expect(reporter.settledFrame).toMatchObject({
+      breakdownKind: 'full', totalTokens: 400, revision: reporter.revision, measuredAt: expect.any(String),
+      breakdown: { categories: [{ name: 'Messages', kind: 'used', tokens: 400 }] },
+    });
+    reporter.refresh(false);
+    expect(reporter.settledFrame).toBeUndefined();
+    await flush();
+    expect(send.mock.calls[1][0].totalTokens).toBe(350);
+    expect(send.mock.calls[1][0].breakdown).toBeUndefined();
+  });
+
+  it('drops a superseded full count and reads the latest revision once', async () => {
     const first = deferred<SDKControlGetContextUsageResponse>();
-    const reads = [first.promise, Promise.resolve(summary(32_166))];
-    const read = vi.fn(() => reads.shift()!);
+    const read = vi.fn((detail: 'summary' | 'full') => detail === 'full' ? first.promise : Promise.resolve(summary(32_166)));
     const sent: ContextUsageFrame[] = [];
-    const reporter = new ContextUsageReporter(read, (frame) => sent.push(frame));
-
-    reporter.refresh(false);
+    const reporter = new ContextUsageReporter(read, frame => sent.push(frame));
+    reporter.refresh(true);
     reporter.refresh(false);
     reporter.refresh(true);
     reporter.refresh(false);
-    expect(read).toHaveBeenCalledTimes(1);
-
-    first.resolve(summary(16_830));
+    first.resolve({ ...summary(400), categories: [], percentage: 4 });
     await flush();
-
-    expect(read).toHaveBeenCalledTimes(2);
-    expect(sent).toEqual([
-      { type: 'context_usage', totalTokens: 16_830, contextWindow: 1_000_000, settled: false },
-      { type: 'context_usage', totalTokens: 32_166, contextWindow: 1_000_000, settled: true },
-    ]);
+    expect(read.mock.calls).toEqual([['full'], ['summary']]);
+    expect(sent).toEqual([{ type: 'context_usage', totalTokens: 32_166, contextWindow: 1_000_000, settled: false }]);
+    expect(reporter.settledFrame).toBeUndefined();
   });
 
-  it('sends nothing without a query, and keeps working after a failed read', async () => {
-    const reads: Array<() => Promise<SDKControlGetContextUsageResponse | undefined>> = [
-      async () => undefined,
-      async () => { throw new Error('query closed'); },
-      async () => summary(2_717),
-    ];
+  it('keeps totals if a full count fails and retries full detail at the next turn end', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const sent: ContextUsageFrame[] = [];
-    const reporter = new ContextUsageReporter(() => reads.shift()!(), (frame) => sent.push(frame));
-
-    for (let i = 0; i < 3; i++) {
-      reporter.refresh(true);
-      await flush();
+    try {
+      const read = vi.fn<(detail: 'full' | 'summary') => Promise<SDKControlGetContextUsageResponse | undefined>>()
+        .mockResolvedValueOnce(undefined)
+        .mockRejectedValueOnce(new Error('count unavailable'))
+        .mockResolvedValueOnce(summary(2_717))
+        .mockResolvedValueOnce({ ...summary(4_000), percentage: 2, categories: [] });
+      const send = vi.fn();
+      const reporter = new ContextUsageReporter(read, send);
+      for (let i = 0; i < 3; i++) {
+        reporter.refresh(true);
+        await flush();
+      }
+      expect(read.mock.calls).toEqual([['full'], ['full'], ['summary'], ['full']]);
+      expect(send.mock.calls[0][0]).toEqual({ type: 'context_usage', totalTokens: 2_717, contextWindow: 1_000_000, settled: true });
+      expect(send.mock.calls[1][0]).toMatchObject({ breakdownKind: 'full', totalTokens: 4_000 });
+      expect(warn).toHaveBeenCalledTimes(1);
+    } finally {
+      warn.mockRestore();
     }
-
-    expect(sent).toEqual([{ type: 'context_usage', totalTokens: 2_717, contextWindow: 1_000_000, settled: true }]);
-    expect(warn).toHaveBeenCalledTimes(1);
-    warn.mockRestore();
   });
 });

@@ -1,14 +1,13 @@
 import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from 'vitest'
 
-import { ReviewManager, humanizeActionName, generateReviewDisplayText } from './review-manager'
+import { ReviewManager } from '@shared/lib/agent-actor/testing/routers/review-manager'
+import { humanizeActionName, generateReviewDisplayText } from '@shared/lib/proxy/review-display'
 import { getScopeDescriptors } from './scope-catalog'
 import { pendingUserInputRequestSchema } from '@shared/lib/tools/requests/request-schema'
 import { requestBodyPreview } from './review-display'
 import { awaitReview } from './review-request'
-import {
-  userInputRequestManager,
-  type UserInputRequestTransition,
-} from '@shared/lib/tools/requests/request-manager'
+import { userInputRequestManager } from '@shared/lib/agent-actor/testing/routers/request-manager'
+import type { UserInputRequestTransition } from '@shared/lib/tools/requests/agent-input-requests'
 import {
   attachInMemoryAgentState,
   type InMemoryAgentStateDirectory,

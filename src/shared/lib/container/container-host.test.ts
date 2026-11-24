@@ -646,7 +646,7 @@ describe('ContainerRuntime.ensureRunning — mount volumes', () => {
     mockHealth.mockReturnValueOnce(new Promise((resolve) => { answer = resolve }))
     mockStop.mockResolvedValueOnce({ forceStopUsed: false, stopped: false })
     // The agent's alarm, as its actor would hold it.
-    const alarm = new IdleAlarm({ timeoutMs: async () => 30 * 60_000, lastActivityAt: () => agents.runtime('test-agent').sleepableSince(), isBusy: () => false, sleep: async () => {} })
+    const alarm = new IdleAlarm({ timeoutMs: async () => 30 * 60_000, lastActivityAt: () => agents.runtime('test-agent').sleepableSince(), isBusy: () => false, sleep: async () => {}, wakeAt: () => {}, cancelWake: () => {} })
     agents.drop('test-agent')
     const previous: TestRuntimeParts = agents.use((slug, self) => ({ ...previous(slug, self), idleAlarm: alarm }))
     const runtime = agents.runtime('test-agent')
@@ -660,7 +660,7 @@ describe('ContainerRuntime.ensureRunning — mount volumes', () => {
 
       await vi.waitFor(() => expect(alarm.isArmed()).toBe(true))
     } finally {
-      alarm.cancel()
+      alarm.disarm()
       agents.use(previous)
       agents.drop('test-agent')
     }
@@ -943,59 +943,13 @@ describe('ContainerRuntime.ensureRunning — cached running liveness TTL', () =>
 // hasRunningAgents / getRunningAgentIds
 // ============================================================================
 
-describe('ContainerHost — hasRunningAgents / getRunningAgentIds', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-    containerHost.clearRuntimes()
-  })
-
-  it('hasRunningAgents returns false when no agents are cached', () => {
-    expect(containerHost.hasRunningAgents()).toBe(false)
-  })
-
-  it('hasRunningAgents returns false when all agents are stopped', () => {
-    agents.runtime('agent-1').updateCachedStatus('stopped', null)
-    agents.runtime('agent-2').updateCachedStatus('stopped', null)
-    expect(containerHost.hasRunningAgents()).toBe(false)
-  })
-
-  it('hasRunningAgents returns true when at least one agent is running', () => {
-    agents.runtime('agent-1').updateCachedStatus('stopped', null)
-    agents.runtime('agent-2').updateCachedStatus('running', 4002)
-    expect(containerHost.hasRunningAgents()).toBe(true)
-  })
-
-  it('getRunningAgentIds returns empty array when none are running', () => {
-    agents.runtime('agent-1').updateCachedStatus('stopped', null)
-    expect(containerHost.getRunningAgentIds()).toEqual([])
-  })
-
-  it('getRunningAgentIds returns only running agent IDs', () => {
-    agents.runtime('agent-1').updateCachedStatus('stopped', null)
-    agents.runtime('agent-2').updateCachedStatus('running', 4002)
-    agents.runtime('agent-3').updateCachedStatus('running', 4003)
-    const running = containerHost.getRunningAgentIds()
-    expect(running).toHaveLength(2)
-    expect(running).toContain('agent-2')
-    expect(running).toContain('agent-3')
-  })
-
-  it('getRunningAgentIds reflects status changes', () => {
-    agents.runtime('agent-1').updateCachedStatus('running', 4001)
-    expect(containerHost.getRunningAgentIds()).toContain('agent-1')
-
-    agents.runtime('agent-1').markAsStopped()
-    expect(containerHost.getRunningAgentIds()).not.toContain('agent-1')
-  })
-})
-
 // ============================================================================
 // clearRuntimes while a container is starting
 //
 // The settings route clears the runtimes when the container runner changes.
 // A start already in flight finishes on the runtime it began on; that runtime
-// has to stay known to the host, or the container it brings up is running
-// with nothing counting it as running or stopping it on quit.
+// has to stay the agent's, or the container it brings up is running with
+// nothing counting it as running or stopping it on quit.
 // ============================================================================
 
 describe('ContainerHost.clearRuntimes', () => {
@@ -1025,7 +979,6 @@ describe('ContainerHost.clearRuntimes', () => {
     expect(agents.peek('agent-1')).toBe(runtime)
     finishStart()
     await started
-    expect(containerHost.hasRunningAgents()).toBe(true)
     expect(agents.runtime('agent-1').getCachedInfo()).toEqual({ status: 'running', port: 4001 })
   })
 
@@ -1052,7 +1005,20 @@ describe('ContainerHost.clearRuntimes', () => {
     containerHost.clearRuntimes()
 
     expect(agents.peek('agent-1')).toBeUndefined()
-    expect(containerHost.hasRunningAgents()).toBe(false)
+    // The agent's next runtime starts from nothing.
+    expect(agents.runtime('agent-1').getCachedInfo().status).toBe('stopped')
+  })
+
+  it('forgets a runtime its agent dropped: a later clear leaves the agent\'s new one alone', () => {
+    const first = agents.runtime('agent-1')
+    agents.drop('agent-1')
+    const second = agents.runtime('agent-1')
+    second.updateCachedStatus('running', 4001)
+    expect(second).not.toBe(first)
+
+    containerHost.clearRuntimes()
+
+    expect(agents.peek('agent-1')).toBeUndefined()
   })
 })
 
@@ -1522,15 +1488,6 @@ describe('ContainerRuntime.syncAgentStatus', () => {
     expect(globalFeed.publish).not.toHaveBeenCalled()
   })
 
-  it('wakes every agent at startup, and waits until each has read its container', async () => {
-    mockGetInfoFromRuntime.mockResolvedValue({ status: 'running', port: 4005 })
-
-    await containerHost.initializeAgents(['wake-1', 'wake-2'])
-
-    for (const slug of ['wake-1', 'wake-2']) expect(agents.peek(slug)?.getCachedInfo()).toEqual({ status: 'running', port: 4005 })
-    expect(containerHost.getRunningAgentIds().sort()).toEqual(['wake-1', 'wake-2'])
-  })
-
   it('marks sessions inactive when container transitions to stopped', async () => {
     agents.runtime('sync-agent').getClient()
     agents.runtime('sync-agent').updateCachedStatus('running', 4005)
@@ -1646,81 +1603,6 @@ describe('ContainerHost start/fail guards vs PULLING_IMAGE', () => {
     }
     act()
     assert()
-  })
-})
-
-// ============================================================================
-// stopAll — timeout and error isolation
-// ============================================================================
-
-describe('ContainerHost.stopAll', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-    containerHost.clearRuntimes()
-    vi.useFakeTimers()
-  })
-
-  afterEach(() => {
-    vi.useRealTimers()
-  })
-
-  it('stops all containers and clears state', async () => {
-    agents.runtime('agent-1').getClient()
-    agents.runtime('agent-2').getClient()
-    agents.runtime('agent-1').updateCachedStatus('running', 4001)
-    agents.runtime('agent-2').updateCachedStatus('running', 4002)
-    mockStop.mockResolvedValue({ forceStopUsed: false })
-    mockGetInfoFromRuntime.mockResolvedValue({ status: 'stopped', port: null })
-
-    const promise = containerHost.stopAll()
-    await vi.advanceTimersByTimeAsync(0)
-    await promise
-
-    expect(mockStop).toHaveBeenCalledTimes(2)
-    // After stopAll, clients and statuses are cleared — getCachedInfo returns default 'stopped'
-    expect(agents.runtime('agent-1').getCachedInfo()).toEqual({ status: 'stopped', port: null })
-  })
-
-  it('does not throw when individual container stop fails', async () => {
-    agents.runtime('agent-1').getClient()
-    agents.runtime('agent-2').getClient()
-    agents.runtime('agent-1').updateCachedStatus('running', 4001)
-    agents.runtime('agent-2').updateCachedStatus('running', 4002)
-    // First stop fails, second succeeds
-    mockStop.mockRejectedValueOnce(new Error('connection refused'))
-    mockStop.mockResolvedValueOnce({ forceStopUsed: false })
-    mockGetInfoFromRuntime.mockResolvedValue({ status: 'stopped', port: null })
-
-    const promise = containerHost.stopAll()
-    await vi.advanceTimersByTimeAsync(0)
-    // Should not throw
-    await expect(promise).resolves.toBeUndefined()
-  })
-
-  it('times out individual containers without blocking others', async () => {
-    agents.runtime('fast-agent').getClient()
-    agents.runtime('slow-agent').getClient()
-    agents.runtime('fast-agent').updateCachedStatus('running', 4001)
-    agents.runtime('slow-agent').updateCachedStatus('running', 4002)
-
-    let callCount = 0
-    mockStop.mockImplementation(() => {
-      callCount++
-      if (callCount === 2) {
-        // Second container hangs
-        return new Promise(() => {})
-      }
-      return Promise.resolve({ forceStopUsed: false })
-    })
-    mockGetInfoFromRuntime.mockResolvedValue({ status: 'stopped', port: null })
-
-    const promise = containerHost.stopAll()
-    // Preparation plus the existing runtime escalation chain.
-    await vi.advanceTimersByTimeAsync(51000)
-    await promise
-
-    // Both were attempted
-    expect(mockStop).toHaveBeenCalledTimes(2)
   })
 })
 
@@ -1895,7 +1777,7 @@ describe('ContainerRuntime.stopContainer force stop recovery', () => {
 
 // The stale-agents record: agents still running on a container env that a
 // setting change replaced. Stops clear it.
-describe('ContainerHost stale agents', () => {
+describe('ContainerRuntime stale agents', () => {
   beforeEach(() => {
     containerHost.clearRuntimes()
   })
@@ -1906,12 +1788,12 @@ describe('ContainerHost stale agents', () => {
 
   const stale = () => ['a', 'b', 'c'].map((s) => agents.runtime(s).isStale())
 
-  it('markAgentsStale marks every running agent; a stop or a drop clears one', () => {
+  it('a running agent marked stale stays so; a stop or a drop clears it', () => {
     running('a', 'b')
-    containerHost.markAgentsStale()
+    for (const slug of ['a', 'b']) agents.runtime(slug).markStale()
     running('c') // started after the change: fresh until the next change
     expect(stale()).toEqual([true, true, false])
-    containerHost.markAgentsStale()
+    agents.runtime('c').markStale()
     expect(stale()).toEqual([true, true, true])
 
     agents.runtime('a').updateCachedStatus('stopped', null)

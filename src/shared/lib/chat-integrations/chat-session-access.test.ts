@@ -59,9 +59,6 @@ vi.mock('@shared/lib/agent-actor', () => {
   return { agentRegistry: { get: () => actor } }
 })
 
-vi.mock('@shared/lib/proxy/review-manager', () => ({
-  reviewManager: { submitDecision: vi.fn() },
-}))
 
 vi.mock('@shared/lib/error-reporting', () => ({
   captureException: vi.fn(),

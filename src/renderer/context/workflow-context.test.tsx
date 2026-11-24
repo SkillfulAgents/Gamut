@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { useRequiredTray, useTrayState } from './session-tray-context'
 import { describe, it, expect, vi } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import { WorkflowProvider, useWorkflow } from './workflow-context'
@@ -11,14 +12,17 @@ vi.mock('@renderer/router/use-route-location', () => ({
 
 function Probe() {
   const wf = useWorkflow()
+  const tray = useRequiredTray()
+  const { selected, tabs, hidden } = useTrayState(tray)
+  const front = tabs.find(t => t.key === selected)
   return (
     <div>
-      <div data-testid="open">{String(wf.isOpen)}</div>
-      <div data-testid="selected">{wf.selectedRunId ?? 'none'}</div>
-      <div data-testid="count">{wf.openWorkflows.length}</div>
+      <div data-testid="open">{String(!hidden && front?.kind === 'workflow')}</div>
+      <div data-testid="selected">{front?.kind === 'workflow' ? front.runId : 'none'}</div>
+      <div data-testid="count">{tabs.length}</div>
       <button onClick={() => wf.openWorkflow('wf_1', 'first')}>open1</button>
       <button onClick={() => wf.openWorkflow('wf_2', 'second')}>open2</button>
-      <button onClick={() => wf.close()}>close</button>
+      <button onClick={() => tray.hide()}>close</button>
     </div>
   )
 }

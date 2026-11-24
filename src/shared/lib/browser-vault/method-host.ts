@@ -145,7 +145,7 @@ export async function addSignInMethod(request: HostToolRequest): Promise<HostToo
     { ...(shown ? { username: shown } : {}), site: account.site, source: 'vault', saved: false, held: [] },
     { answer: false },
   )
-  if (!filled.ok) return refused(filled.browserClosed ? 'the browser was closed' : filled.error)
+  if (!filled.ok) return refused(filled.reason === 'browser_closed' ? 'the browser was closed' : filled.error)
   const report = filled.result.report
   if (!report) return refused('the browser did not say what the fill did')
   if (!fieldsWentIn(filled.result, 1)[0]) return resolved({ type: 'authenticator_not_added', site: account.site, username: account.username, report })

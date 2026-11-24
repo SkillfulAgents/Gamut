@@ -5,6 +5,7 @@ import {
   loginBrowserClosedSchema,
   loginContextSchema,
   loginFillResultSchema,
+  loginFillUnconfirmedSchema,
   loginSessionAnswerSchema,
   loginVaultInfoSchema,
   loginWayResultSchema,
@@ -69,15 +70,12 @@ export function useLoginContext(agentSlug: string, sessionId: string, toolUseId:
   })
 }
 
-/**
- * The viewer's saved accounts for the request's site, their accounts on
- * sign-in providers, and whether other members share the agent. Per viewer:
- * in auth mode the vault is each user's own.
- */
-/** A fill the browser closed before: what was kept for the agent's next try, if anything. Null for any other answer. */
-export function browserClosedState(data: unknown): LoginRequestState | null {
+/** A fill the agent must resume on a fresh page, including what the host saved. */
+export function interruptedFillState(data: unknown): LoginRequestState | null {
   const closed = loginBrowserClosedSchema.safeParse(data)
-  return closed.success ? { status: 'browser_closed', kept: closed.data.kept ?? null } : null
+  if (closed.success) return { status: 'browser_closed', kept: closed.data.kept ?? null, saveError: closed.data.saveError }
+  const unconfirmed = loginFillUnconfirmedSchema.safeParse(data)
+  return unconfirmed.success ? { status: 'fill_unconfirmed', username: unconfirmed.data.saved.username } : null
 }
 
 /** A picked account that signed in with its saved session instead of its values. Null for any other answer. */
@@ -86,6 +84,7 @@ export function sessionState(data: unknown): LoginRequestState | null {
   return answer.success ? { status: 'session', ...answer.data.session } : null
 }
 
+/** The viewer's own saved accounts and sign-in providers, and whether other members share the agent. */
 export function useLoginVaultInfo(agentSlug: string, sessionId: string, toolUseId: string, enabled: boolean) {
   return useQuery<LoginVaultInfo, Error>({
     queryKey: ['login-request-vault', agentSlug, sessionId, toolUseId],
@@ -159,8 +158,8 @@ export function useLoginRequestActions({ agentSlug, sessionId, toolUseId }: UseL
       const data = await postJson(`${base}/fill-login`, { toolUseId, origin: context.origin, values, ...options })
       // Answered elsewhere (another window): nothing was sent.
       if (data.alreadySettled) return { status: 'settled' }
-      const closed = browserClosedState(data)
-      if (closed) return closed
+      const interrupted = interruptedFillState(data)
+      if (interrupted) return interrupted
       const session = sessionState(data)
       if (session) return session
       const result = loginFillResultSchema.parse(data)

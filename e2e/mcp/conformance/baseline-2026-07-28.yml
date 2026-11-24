@@ -1,0 +1,98 @@
+# Expected failures of @modelcontextprotocol/conformance 0.2.0-alpha.12
+# (`--requirements 2026-07-28`) against Gamut's /mcp.
+#
+# Each entry names one check (`<scenario>:<check-id>`), so every other check of
+# that scenario, the wire-schema check included, stays enforced. A check that
+# starts passing fails the run (stale baseline): remove its entry. With a
+# baseline the suite counts a WARNING (a SHOULD not met) as a failure, so
+# warnings are listed too.
+#
+# Why each fails:
+# - FIXTURE: the check needs a diagnostic tool of the suite's reference server
+#   (test_missing_capability, test_streaming_elicitation, test_logging_tool,
+#   test_simple_text, test_input_required_result_*, a tool with x-mcp-header
+#   annotations, …). Gamut does not ship test tools. The suite reports these as
+#   "Not testable".
+# - NO-CAPABILITY: the check exercises a capability Gamut does not declare
+#   (resources, prompts, completions). The server answers -32601, correct for an
+#   undeclared capability.
+# - TASKS: the Tasks extension (SEP-2663), deferred by the spec (SUP-1569,
+#   "Long-running work"). Reported by the suite as not scored for 2026-07-28.
+# - DESIGN: see the entry.
+server:
+  # FIXTURE (server-stateless): the other 24 checks of the scenario pass and stay enforced.
+  - server-stateless:sep-2575-server-rejects-undeclared-capability
+  - server-stateless:sep-2575-missing-capability-http-400
+  - server-stateless:sep-2575-http-server-no-independent-requests-on-stream
+  - server-stateless:sep-2575-server-no-log-without-loglevel
+  # WARNING (SHOULD): no notifications/tools/list_changed on a listen stream.
+  # The tool list is fixed per deployment version and the server declares no
+  # listChanged, so there is nothing to notify.
+  - server-stateless:sep-2575-server-sends-tools-list-changed-on-subscription
+  # NO-CAPABILITY, WARNING: resources/read of a missing resource; no resources
+  # capability, so -32601 rather than -32602 with data.uri.
+  - sep-2164-resource-not-found:sep-2164-error-code
+  - sep-2164-resource-not-found:sep-2164-data-uri
+  # NO-CAPABILITY (caching): tools/list caching hints pass; prompts and resources lists do not exist.
+  - caching:sep-2549-prompts-list-caching-hints
+  - caching:sep-2549-resources-list-caching-hints
+  - caching:sep-2549-resources-templates-list-caching-hints
+  # NO-CAPABILITY: completion/complete.
+  - completion-complete:completion-complete
+  # FIXTURE: the reference server's content tools.
+  - tools-call-simple-text:tools-call-simple-text
+  - tools-call-image:tools-call-image
+  - tools-call-audio:tools-call-audio
+  - tools-call-embedded-resource:tools-call-embedded-resource
+  - tools-call-mixed-content:tools-call-mixed-content
+  - tools-call-error:tools-call-error
+  - tools-call-with-progress:tools-call-with-progress
+  - json-schema-2020-12:json-schema-2020-12-tool-found
+  # NO-CAPABILITY: resources.
+  - resources-list:resources-list
+  - resources-read-text:resources-read-text
+  - resources-read-binary:resources-read-binary
+  - resources-templates-read:resources-templates-read
+  # NO-CAPABILITY: prompts.
+  - prompts-list:prompts-list
+  - prompts-get-simple:prompts-get-simple
+  - prompts-get-with-args:prompts-get-with-args
+  - prompts-get-embedded-resource:prompts-get-embedded-resource
+  - prompts-get-with-image:prompts-get-with-image
+  # FIXTURE: input_required results (SEP-2322) are exercised through the
+  # reference server's test_input_required_result_* tools; Gamut's read tools
+  # never need input (elicitation is out of scope for V1).
+  - input-required-result-basic-elicitation:sep-2322-elicitation-incomplete
+  - input-required-result-basic-sampling:sep-2322-sampling-incomplete
+  - input-required-result-basic-list-roots:sep-2322-list-roots-incomplete
+  - input-required-result-request-state:sep-2322-request-state-incomplete
+  - input-required-result-multiple-input-requests:sep-2322-multiple-inputs-incomplete
+  - input-required-result-multi-round:sep-2322-multi-round-r1
+  - input-required-result-non-tool-request:sep-2322-non-tool-incomplete
+  - input-required-result-result-type:sep-2322-result-type-included
+  - input-required-result-tampered-state:sep-2322-reject-tampered-state
+  - input-required-result-capability-check:sep-2322-respect-client-capabilities
+  # FIXTURE, WARNING: the same tools, called with a missing input response or
+  # extra params; the server answers "Tool … not found".
+  - input-required-result-missing-input-response:sep-2322-missing-response-rerequests
+  - input-required-result-ignore-extra-params:sep-2322-ignore-unexpected-params
+  # FIXTURE: SEP-2243 custom headers need a tool with x-mcp-header annotations.
+  # The standard-header scenario (http-header-validation) passes all 14 checks.
+  - http-custom-header-server-validation:sep-2243-server-no-xmcp-tool
+  - http-custom-header-server-validation:sep-2243-server-decode-base64
+  - http-custom-header-server-validation:sep-2243-server-validate-param-match
+  - http-custom-header-server-validation:sep-2243-server-reject-invalid-param-chars
+  - http-custom-header-server-validation:sep-2243-server-reject-param-mismatch
+  # DESIGN: no Host/Origin check without auth mode; the installation token
+  # keeps rebinding pages out. See baseline-2025.yml.
+  - dns-rebinding-protection:localhost-host-rebinding-rejected
+  # TASKS: the extension is not advertised.
+  - tasks-lifecycle
+  - tasks-capability-negotiation
+  - tasks-wire-fields
+  - tasks-request-state-removal
+  - tasks-mrtr-input
+  - tasks-request-headers
+  - tasks-dispatch-and-envelope
+  - tasks-required-task-error
+  - tasks-mrtr-composition

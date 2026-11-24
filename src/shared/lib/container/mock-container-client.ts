@@ -23,11 +23,13 @@ import type {
 import type { ObserveUnexpectedDeathInput, RuntimeFatalKind, UnexpectedDeathPlan } from './runtime-death'
 import { resolveContainerModel } from './resolve-model'
 import { getAgentWorkspaceDir, getSessionJsonlPath, readJsonlFile } from '../utils/file-storage'
-import { reviewManager } from '../proxy/review-manager'
+import { awaitReview } from '../proxy/review-request'
+import { agentRegistry } from '../agent-actor/registry'
 import { matchScopes } from '../proxy/scope-matcher'
 import { withUserReason } from '../proxy/user-reason'
 import { db } from '../db'
 import { connectedAccounts } from '../db/schema'
+import type { RuntimeContext } from './context-breakdown-schema'
 import { background } from '../background'
 
 export const MOCK_ACCOUNT_ID = 'mock-account-id'
@@ -1654,8 +1656,8 @@ export class ProxyReviewScenario implements MockScenario {
     setTimeout(() => background(async () => {
       await seedMockConnectedAccount(accountId)
       // Fire-and-forget — the promise resolves when the user decides
-      background(reviewManager.requestReview({
-        agentSlug,
+      const reviews = agentRegistry.get(agentSlug).inputs.reviews
+      background(awaitReview(reviews, (raise) => reviews.request({
         accountId,
         callerSessionId,
         reviewType: 'api',
@@ -1665,7 +1667,7 @@ export class ProxyReviewScenario implements MockScenario {
         matchedScopes: this.matchedScopes,
         scopeDescriptions: this.scopeDescriptions,
         endpointDescription: matchScopes(this.toolkit, this.method, '/' + this.targetPath).endpointDescription,
-      }).then((review) => {
+      }, raise)).then((review) => {
         // Write JSONL and complete the session after the user decides
         client.writeJsonlEntry(sessionId, {
           type: 'user',
@@ -1734,8 +1736,8 @@ export class MixedPendingRequestsScenario implements MockScenario {
     // specs wait for all three cards independently.
     setTimeout(() => background(async () => {
       await seedMockConnectedAccount(accountId)
-      background(reviewManager.requestReview({
-        agentSlug,
+      const reviews = agentRegistry.get(agentSlug).inputs.reviews
+      background(awaitReview(reviews, (raise) => reviews.request({
         accountId,
         reviewType: 'api',
         toolkit: 'slack',
@@ -1743,7 +1745,7 @@ export class MixedPendingRequestsScenario implements MockScenario {
         targetPath: 'api/chat.postMessage',
         matchedScopes: ['chat:write'],
         scopeDescriptions: { 'chat:write': 'Send messages to channels' },
-      }).catch(() => {
+      }, raise)).catch(() => {
         // Denied or timed out — the turn lifecycle is owned by the input
         // machinery, so nothing to do here.
       }), { name: 'mock-mixed-pending-requests-scenario.request-review' })
@@ -1805,12 +1807,12 @@ export class XAgentReviewScenario implements MockScenario {
 
     const capturedDelay = delay
     setTimeout(() => {
-      background(reviewManager.requestXAgentReview(
-        agentSlug,
-        this.targetAgentSlug,
-        this.targetAgentName,
-        this.operation,
-      ).then(({ decision }) => {
+      const reviews = agentRegistry.get(agentSlug).inputs.reviews
+      background(awaitReview(reviews, (raise) => reviews.requestXAgent({
+        targetAgentSlug: this.targetAgentSlug,
+        targetAgentName: this.targetAgentName,
+        operation: this.operation,
+      }, raise)).then(({ decision }) => {
         client.writeJsonlEntry(sessionId, {
           type: 'user',
           message: { content: userMessage },
@@ -3975,6 +3977,38 @@ export class MockContainerClient extends EventEmitter implements ContainerClient
       if (live()) this.writeJsonlEntry(sid, entry)
     }
     return view
+  }
+
+  /** A fixed breakdown in the shape the CLI's full `/context` gives, for a session the mock knows. */
+  async getContextBreakdown(sessionId: string): Promise<RuntimeContext> {
+    if (!this.sessions.has(sessionId)) return { breakdown: null }
+    const categories = [
+      { id: 'messages', name: 'Messages', tokens: 43_100, kind: 'used' },
+      { id: 'mcp_tools', name: 'MCP tools', tokens: 27_800, kind: 'used' },
+      { id: 'system_tools', name: 'System tools', tokens: 17_800, kind: 'used' },
+      { id: 'system_prompt', name: 'System prompt', tokens: 12_700, kind: 'used' },
+      { id: 'memory_files', name: 'Memory files', tokens: 1_100, kind: 'used' },
+      { id: 'skills', name: 'Skills', tokens: 9_800, kind: 'used' },
+      { id: 'autocompact_buffer', name: 'Autocompact buffer', tokens: 33_000, kind: 'buffer' },
+      { id: 'free_space', name: 'Free space', tokens: 54_700, kind: 'free' },
+      { id: 'mcp_tools_deferred', name: 'MCP tools (deferred)', tokens: 48_100, kind: 'deferred' },
+    ]
+    const breakdown = {
+      categories,
+      totalTokens: 112_300,
+      rawMaxTokens: 200_000,
+      percentage: 56,
+      model: 'claude-opus-5-5',
+      memoryFiles: [{ path: '/workspace/CLAUDE.md', tokens: 1_100 }],
+      mcpTools: [
+        { name: 'mcp__browser__navigate', serverName: 'browser', tokens: 900, isLoaded: true },
+        { name: 'mcp__user-input__deliver_file', serverName: 'user-input', tokens: 600, isLoaded: true },
+      ],
+      skills: { totalSkills: 2, includedSkills: 2, tokens: 9_800, skillFrontmatter: [{ name: 'widgets', tokens: 5_200 }, { name: 'dashboards', tokens: 4_600 }] },
+      autoCompactThreshold: 167_000,
+      isAutoCompactEnabled: true,
+    }
+    return { breakdown }
   }
 
   /**

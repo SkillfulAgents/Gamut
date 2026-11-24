@@ -3,8 +3,8 @@ import { describe, it, expect, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import { deliverFileRenderer } from './renderer'
 
-vi.mock('@renderer/context/file-preview-context', () => ({
-  useFilePreview: () => ({ openFile: vi.fn() }),
+vi.mock('@renderer/context/agent-file-opener-context', () => ({
+  useAgentFileOpener: () => ({ openFile: vi.fn() }),
 }))
 
 vi.mock('@renderer/lib/env', () => ({

@@ -61,13 +61,13 @@ describe('hostFromManagerMock', () => {
       getCachedInfo: vi.fn().mockReturnValue({ status: 'running', port: 1 }),
       removeClient: vi.fn(),
       clearClients: vi.fn(),
-      getRunningAgentIds: vi.fn().mockReturnValue(['a']),
+      getReadiness: vi.fn().mockReturnValue({ status: 'READY' }),
       onBeforeContainerStop: null as null | ((slug: string) => Promise<void>),
     }
     const host = hostFromManagerMock(manager) as {
       createRuntime(slug: string): { ensureRunning(): Promise<string>; getCachedInfo(): unknown; dispose(): void; slug: string }
       clearRuntimes(): void
-      getRunningAgentIds(): string[]
+      getReadiness(): unknown
       onBeforeContainerStop: ((slug: string) => Promise<void>) | null
     }
 
@@ -82,7 +82,7 @@ describe('hostFromManagerMock', () => {
 
     host.clearRuntimes()
     expect(manager.clearClients).toHaveBeenCalledTimes(1)
-    expect(host.getRunningAgentIds()).toEqual(['a'])
+    expect(host.getReadiness()).toEqual({ status: 'READY' })
 
     const hook = async () => {}
     host.onBeforeContainerStop = hook

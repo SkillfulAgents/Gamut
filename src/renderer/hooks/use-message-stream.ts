@@ -1,4 +1,7 @@
+import { publishSubagentSnapshot } from './use-session-subagents'
+import { receiveAgentInvocation } from './use-invocations'
 
+import { invalidatePendingUserRequests } from '@renderer/lib/pending-request-cache'
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useQueryClient, QueryClient } from '@tanstack/react-query'
 import { getApiBaseUrl } from '@renderer/lib/env'
@@ -67,6 +70,8 @@ interface StreamState {
   apiErrorCode: string | null
   /** Provider-authored copy for the error, computed server-side by the active provider. */
   errorPresentation: ProviderErrorPresentation | null
+  /** True after the first status snapshot or browser event. */
+  browserStatusKnown?: boolean
   browserActive: boolean // Whether browser is running for this session
   computerUseApp: string | null // Name of the app the agent's computer use last acted in
   computerUseAppIcon: string | null // Base64 PNG icon of that app
@@ -505,22 +510,25 @@ function getOrCreateEventSource(
   // Once per connection, and it never touches the streamed content.
   let reconnecting = false
   let reconciled = false
+  let browserStatusRevision = 0
   const reconcileConnection = () => {
     if (reconciled) return
     reconciled = true
     // Resync the unified pending-request store too: its create/resolve
     // events are one-shot, so anything settled or opened while this
     // stream was down must be recovered from the snapshot endpoint.
-    queryClient.invalidateQueries({ queryKey: ['pending-user-requests'] })
-    // Fetch current browser status to sync state (handles missed events)
+    void invalidatePendingUserRequests(queryClient)
+    // A live update or a newer connection supersedes this snapshot while it is in flight.
+    const revision = ++browserStatusRevision
     fetch(`${baseUrl}/api/agents/${agentSlug}/browser/status`)
       .then((res) => res.json())
       .then((status: { active?: boolean; sessionId?: string }) => {
+        if (revision !== browserStatusRevision || eventSources.get(key) !== es || typeof status.active !== 'boolean') return
         const latest = streamStates.get(sessionId)
         // Only mark browser active if it belongs to THIS session
         const activeForThisSession = (status.active ?? false) && status.sessionId === sessionId
-        if (latest && latest.browserActive !== activeForThisSession) {
-          streamStates.set(sessionId, { ...latest, browserActive: activeForThisSession })
+        if (latest && (!latest.browserStatusKnown || latest.browserActive !== activeForThisSession)) {
+          streamStates.set(sessionId, { ...latest, browserActive: activeForThisSession, browserStatusKnown: true })
           streamListeners.get(sessionId)?.forEach((listener) => listener())
         }
       })
@@ -566,6 +574,7 @@ function getOrCreateEventSource(
           error: null,
           apiErrorCode: null,
           errorPresentation: null,
+          browserStatusKnown: current?.browserStatusKnown,
           browserActive: current?.browserActive ?? false,
           computerUseApp: current?.computerUseApp ?? null,
           computerUseAppIcon: current?.computerUseAppIcon ?? null,
@@ -688,6 +697,7 @@ function getOrCreateEventSource(
           // and is still valid context for the last turn. Cleared on next session_active.
           apiErrorCode: current?.apiErrorCode ?? null,
           errorPresentation: current?.errorPresentation ?? null,
+          browserStatusKnown: current?.browserStatusKnown,
           browserActive: current?.browserActive ?? false,
           computerUseApp: current?.computerUseApp ?? null,
           computerUseAppIcon: current?.computerUseAppIcon ?? null,
@@ -766,6 +776,7 @@ function getOrCreateEventSource(
           error: data.error || 'An unknown error occurred',
           apiErrorCode: data.apiErrorCode || null,
           errorPresentation: providerErrorPresentationSchema.nullish().catch(null).parse(data.errorPresentation) ?? null,
+          browserStatusKnown: current?.browserStatusKnown,
           browserActive: current?.browserActive ?? false,
           computerUseApp: current?.computerUseApp ?? null,
           computerUseAppIcon: current?.computerUseAppIcon ?? null,
@@ -823,6 +834,7 @@ function getOrCreateEventSource(
           const task: BackgroundTaskRef = {
             taskId: data.taskId,
             startedAt: data.startedAt,
+            parentTaskId: data.parentTaskId,
             isWorkflow: data.isWorkflow,
             isSubagent: data.isSubagent,
             taskType: data.taskType,
@@ -952,6 +964,7 @@ function getOrCreateEventSource(
           error: null,
           apiErrorCode: null,
           errorPresentation: null,
+          browserStatusKnown: current?.browserStatusKnown,
           browserActive: current?.browserActive ?? false,
           computerUseApp: current?.computerUseApp ?? null,
           computerUseAppIcon: current?.computerUseAppIcon ?? null,
@@ -978,6 +991,7 @@ function getOrCreateEventSource(
           error: current?.error ?? null,
           apiErrorCode: data.apiErrorCode || current?.apiErrorCode || null,
           errorPresentation: current?.errorPresentation ?? null,
+          browserStatusKnown: current?.browserStatusKnown,
           browserActive: current?.browserActive ?? false,
           computerUseApp: current?.computerUseApp ?? null,
           computerUseAppIcon: current?.computerUseAppIcon ?? null,
@@ -1020,6 +1034,7 @@ function getOrCreateEventSource(
           error: current?.error ?? null,
           apiErrorCode: current?.apiErrorCode ?? null,
           errorPresentation: current?.errorPresentation ?? null,
+          browserStatusKnown: current?.browserStatusKnown,
           browserActive: current?.browserActive ?? false,
           computerUseApp: current?.computerUseApp ?? null,
           computerUseAppIcon: current?.computerUseAppIcon ?? null,
@@ -1062,6 +1077,7 @@ function getOrCreateEventSource(
           error: current?.error ?? null,
           apiErrorCode: current?.apiErrorCode ?? null,
           errorPresentation: current?.errorPresentation ?? null,
+          browserStatusKnown: current?.browserStatusKnown,
           browserActive: current?.browserActive ?? false,
           computerUseApp: current?.computerUseApp ?? null,
           computerUseAppIcon: current?.computerUseAppIcon ?? null,
@@ -1115,6 +1131,9 @@ function getOrCreateEventSource(
           }, 5000))
         }
       }
+      else if (data.type === 'agent_invoked') {
+        receiveAgentInvocation(queryClient, sessionId)
+      }
       else if (data.type === 'messages_updated') {
         invalidateMessagesThrottled(queryClient, sessionId)
       }
@@ -1142,6 +1161,12 @@ function getOrCreateEventSource(
         // user_request_resolved, and the branch above invalidates the store
         // every tab renders from.
         invalidateMessagesThrottled(queryClient, sessionId)
+      }
+      else if (data.type === 'context_snapshot_saved') {
+        // The saved rows are now readable, including when compaction happened
+        // without an activity transition. A pre-commit request cannot win.
+        const queryKey = ['context-breakdown', agentSlug, sessionId]
+        void queryClient.cancelQueries({ queryKey }).then(() => queryClient.invalidateQueries({ queryKey }))
       }
       else if (data.type === 'context_usage') {
         // Context window usage update from backend
@@ -1206,7 +1231,7 @@ function getOrCreateEventSource(
         // carrier — the refetch reads the server registry snapshot, so a
         // burst of events collapses into one consistent read and a stale
         // in-flight response can never overwrite a newer one.
-        queryClient.invalidateQueries({ queryKey: ['pending-user-requests'] })
+        void invalidatePendingUserRequests(queryClient)
         // The one thing the snapshot can't do in time: an auto-approved
         // script_run / computer_use is ALREADY executing server-side, and
         // between its tool_use streaming in and its result persisting, the
@@ -1281,10 +1306,11 @@ function getOrCreateEventSource(
         }
       }
       else if (data.type === 'browser_active') {
-        // Browser state changed
+        browserStatusRevision++
         if (current) {
           streamStates.set(sessionId, {
             ...current,
+            browserStatusKnown: true,
             browserActive: data.active ?? false,
           })
         }
@@ -1537,7 +1563,11 @@ function getOrCreateEventSource(
         streamStates.set(sessionId, { ...next, turnOutcome: null })
       }
 
-      // Notify all listeners
+      if (next && (data.type === 'connected' || next.activeSubagents !== current?.activeSubagents
+        || next.completedSubagents !== current?.completedSubagents || next.backgroundTasks !== current?.backgroundTasks
+        || next.isActive !== current?.isActive)) {
+        publishSubagentSnapshot(queryClient, sessionId, next, data.type === 'connected' || data.type === 'session_idle')
+      }
       streamListeners.get(sessionId)?.forEach((listener) => listener())
     } catch (error) {
       console.error('Failed to parse SSE message:', error)

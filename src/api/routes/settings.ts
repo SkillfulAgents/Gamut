@@ -57,7 +57,7 @@ import {
   getWebProvider,
   resolveEffectiveWebVendorFrom,
 } from '@shared/lib/web-provider'
-import { agentRegistry, containerHost } from '@shared/lib/agent-actor'
+import { containerHost, hasRunningAgents as anyAgentRunning, runningAgentSlugs, stopAllAgents } from '@shared/lib/agent-actor'
 import { checkAllRunnersAvailability, refreshRunnerAvailability, startRunner, restartRunner, getContainerClientClass, getRunnerDisplayName, SUPPORTED_RUNNERS, type ContainerRunner } from '@shared/lib/container/client-factory'
 import { offersRuntime } from '@shared/lib/facts/capabilities'
 import { getServerFacts } from '@shared/lib/facts/server-facts'
@@ -387,7 +387,7 @@ async function buildSettingsResponse(
 settings.get('/', async (c) => {
   try {
     const currentSettings = await getSettings()
-    const hasRunningAgents = containerHost.hasRunningAgents()
+    const hasRunningAgents = await anyAgentRunning()
     const runnerAvailability = await checkAllRunnersAvailability()
     return c.json(await buildSettingsResponse(currentSettings, hasRunningAgents, runnerAvailability))
   } catch (error) {
@@ -412,7 +412,7 @@ settings.put(
         return c.json({ error: 'Select this provider in Settings → Model Providers, where a separate API-capable summarizer can be chosen.' }, 400)
       }
 
-      const hasRunningAgents = containerHost.hasRunningAgents()
+      const hasRunningAgents = await anyAgentRunning()
       const now = new Date()
 
       // One compare-and-set: the patch is applied to, and validated against,
@@ -483,7 +483,7 @@ settings.put(
           {
             error: refusal.message,
             ...(refusal.includeRunningAgentIds
-              ? { runningAgents: await containerHost.getRunningAgentIds() }
+              ? { runningAgents: await runningAgentSlugs() }
               : {}),
           },
           refusal.status,
@@ -509,11 +509,6 @@ settings.put(
           catalog: !!body.modelCatalog,
           models: (['agentModel', 'summarizerModel', 'browserModel', 'dashboardBuilderModel'] as const).filter(key => !!body.llmProvider || Object.hasOwn(body.models ?? {}, key)),
           selectDefault: !!body.llmProvider })
-      }
-
-      // A new auto-sleep timeout applies to the containers already up.
-      if (body.app?.autoSleepTimeoutMinutes !== undefined) {
-        agentRegistry.rearmIdleAlarms()
       }
 
       // If account provider settings changed, re-register providers
@@ -589,7 +584,7 @@ settings.post('/start-runner', async (c) => {
     )
 
     if (result.success) {
-      if (!containerHost.hasRunningAgents()) {
+      if (!(await anyAgentRunning())) {
         const { written } = await updateSettings((s) => {
           if (s.container.containerRunner === runner) return false
           s.container.containerRunner = runner
@@ -988,7 +983,8 @@ settings.post('/factory-reset', async (c) => {
     // Through each agent's actor: this process may hold none of the containers.
     await stopAgentsAndRemoveWorkspaces()
     // Then whatever this process still holds, and folders no agent claims.
-    await containerHost.stopAll()
+    await stopAllAgents()
+    containerHost.clearRuntimes()
     await removeIfPresent(getAgentsDataDir())
 
     // Clear every agent/app-owned relational table (children before parents).

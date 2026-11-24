@@ -27,6 +27,7 @@ const VENDOR_LABELS: Record<string, string> = {
   xai: 'xAI',
   kimi: 'Moonshot AI',
   deepseek: 'DeepSeek',
+  minimax: 'MiniMax',
   gemini: 'Google',
   qwen: 'Alibaba',
 }

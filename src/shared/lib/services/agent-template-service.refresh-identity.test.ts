@@ -37,9 +37,6 @@ vi.mock('@shared/lib/container/container-host', async () => {
     }),
   }
 })
-vi.mock('@shared/lib/proxy/review-manager', () => ({
-  reviewManager: { getPendingReviewsForAgent: vi.fn(() => []) },
-}))
 
 // The skillset cache is a directory this suite writes; nothing is fetched.
 let cacheRoot: string

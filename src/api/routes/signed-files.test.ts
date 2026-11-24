@@ -145,6 +145,12 @@ describe('minting', () => {
     expect(shorter.expiresAt.getTime()).toBe(now + 30_000)
   })
 
+  it('uses the base URL the minter passes, without a trailing slash', async () => {
+    const minted = await mintSignedDownloadUrl('alice', { kind: 'workspace-file', agentSlug: 'agent', path: 'notes/a.txt' }, { baseUrl: 'http://localhost:47892/' })
+    expect(minted.url).toMatch(/^http:\/\/localhost:47892\/api\/signed-files\/[A-Za-z0-9_-]+\.[A-Za-z0-9_-]{43}$/)
+    expect(await (await redeem(minted.url)).text()).toBe('alpha file contents')
+  })
+
   it('refuses a lifetime past the maximum', async () => {
     await expect(mintSignedDownloadUrl('alice', { kind: 'workspace-file', agentSlug: 'agent', path: 'notes/a.txt' }, { ttlMs: MAX_SIGNED_FILE_URL_TTL_MS + 1 }))
       .rejects.toBeInstanceOf(RangeError)

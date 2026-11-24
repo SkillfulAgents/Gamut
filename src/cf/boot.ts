@@ -12,6 +12,9 @@ import { d1, migrateD1 } from '@shared/lib/db/drivers/d1'
 import { migrationBundle } from '@shared/lib/db/migrations/bundle'
 import { runDataMigrations } from '@shared/lib/db/data-migrations'
 import { initializeAppState, isAppStateInitialized } from '@shared/lib/app-state'
+import { containerHost as containers, initializeAgentRegistry } from '@shared/lib/agent-actor'
+import { LocalAgentActor } from '@shared/lib/agent-actor/local-agent-actor'
+import { localHostPort as host } from '@shared/lib/host/local-host-port'
 import { setBlobStore } from '@shared/lib/blob-store/blob-store'
 import { setImageService } from '@shared/lib/images/image-service'
 import { setUploadByteStore } from '@shared/lib/utils/chunked-upload-bytes'
@@ -123,6 +126,8 @@ export function startErrorReporting(): void {
 export async function migrateDatabase(env: Env): Promise<void> {
   // This can be the first thing the isolate does: a failed migration must reach error reporting.
   startErrorReporting()
+  // As a boot does before it opens the database: the data migrations reach agents through this wiring.
+  wireAgents()
   await migrateD1(env.DB, migrationBundle)
   await runDataMigrations((await d1(env.DB).open()).db)
 }
@@ -132,6 +137,7 @@ async function start(env: Env): Promise<void> {
   // Before anything can start a container: how SuperAgent's cloudflare-container runner reaches agents here.
   installCloudflareContainers(agentContainers(env.AGENT))
   installFetch()
+  wireAgents()
   // A Worker's disk does not outlive a request: blobs and the bytes of uploads in progress live in R2.
   setBlobStore(new CloudflareBlobStore(env.HOST_FILES))
   setUploadByteStore(new CloudflareUploadByteStore(env.HOST_FILES))
@@ -148,6 +154,11 @@ async function start(env: Env): Promise<void> {
     await initializeBackgroundWork(tasks)
   }
   registerBackgroundWork({ localContainers: false })
+}
+
+/** Which actor this isolate runs, said once: an agent's actor runs in the isolate that serves the call. */
+function wireAgents(): void {
+  initializeAgentRegistry((slug) => new LocalAgentActor(slug, { containers, host }))
 }
 
 /**

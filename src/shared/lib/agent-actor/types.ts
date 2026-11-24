@@ -1,3 +1,5 @@
+import type { SubagentRef } from './subagent-metadata'
+export type { SubagentRef } from './subagent-metadata'
 /**
  * Agent actor — the single entry point for everything that acts on one agent.
  *
@@ -68,40 +70,31 @@ import type {
   UserInputRequestOutcome,
 } from '@shared/lib/tools/requests/request-schema'
 import type { SettledUserInputRequest } from '@shared/lib/tools/requests/agent-input-requests'
-import type { ReviewDecisionDetail, ReviewDetails, ReviewOutcome, ReviewRequest } from '@shared/lib/proxy/review-manager'
-import type { AccountReauthDetails } from '@shared/lib/proxy/account-reauth-manager'
-import type { McpReauthDetails } from '@shared/lib/proxy/mcp-reauth-manager'
-import type { ReauthOutcome } from '@shared/lib/proxy/reauth-waits'
+import type { ReviewDecisionDetail, ReviewOutcome, ReviewRequest } from '@shared/lib/proxy/agent-reviews'
+import type { ReviewDetails } from '@shared/lib/proxy/review-display'
+import type { AccountReauthDetails, McpReauthDetails, ReauthOutcome } from '@shared/lib/proxy/reauth-waits'
 import type { ScopeLabel } from '@shared/lib/proxy/scope-metadata'
 import type { ComputerUsePermissionLevel, PermissionGrantType } from '@shared/lib/computer-use/types'
 import type { ComputerUseRun, HostRunOutcome, ScriptRun } from './host-runs'
 import type { WidgetRefreshOutcome } from '@shared/lib/widgets/agent-widget-refreshes'
 import type { McpProxySession } from '@shared/lib/mcp/agent-mcp-sessions'
+import type { SessionContext } from '@shared/lib/container/context-breakdown-schema'
 import type { VolumeUploadOutcome } from '@shared/lib/volumes/volume-upload-guard'
 
 /** The agent's directory-name slug. Not the URL `displaySlug`. */
 export type AgentSlug = string
 
 export interface AgentRegistry {
-  /** Never fails and never does I/O; creates the handle on first use. */
+  /** Never fails and never does I/O; makes the agent's actor on first use. */
   get(slug: AgentSlug): AgentActor
+  /** The actors made so far and not evicted: what this process knows of its agents. */
+  held(): AgentActor[]
   /**
-   * The auto-sleep timeout changed: every held agent re-arms its idle alarm
-   * against the new value, read once for all of them. `timeoutMs`, when the
-   * caller has the value its write committed, is used as is; otherwise the
-   * timeout is read here, after the write, and never joined to a read an
-   * alarm started before it (see `IdleAlarm.rearm`). Returns before the
-   * alarms are armed when it reads.
-   */
-  rearmIdleAlarms(timeoutMs?: number): void
-  /**
-   * Drop the handle and forget its container runtime, releasing everything
-   * the handle owns: parked reviews and re-auth waits are rejected, open
-   * input requests are settled as invalidated, in-memory grants and what
-   * the session index held in memory are gone. Does not stop the container.
+   * Drop the actor, which releases everything it holds here
+   * (`AgentActor.dispose`). Does not stop the container.
    */
   evict(slug: AgentSlug): Promise<void>
-  /** `evict` for every handle, at shutdown: parked callers are let go. Does not stop containers. */
+  /** `evict` for every actor, at shutdown: parked callers are let go. Does not stop containers. */
   evictAll(): Promise<void>
 }
 
@@ -130,6 +123,29 @@ export interface AgentActor {
   live(): Promise<AgentLiveSummary>
   /** What the agent list shows about the agent, read in one call. */
   listing(): Promise<AgentListing>
+  /**
+   * Settles once the actor knows whether its container runs: an actor is made
+   * without I/O, and reads its container first thing after. Startup waits for
+   * this on every agent, so one nobody opens still sees a container left
+   * running from before this launch.
+   */
+  ready(): Promise<void>
+  /**
+   * The registry is dropping the actor: release everything it holds in this
+   * process. Parked reviews and re-auth waits are rejected, open input
+   * requests are settled as invalidated, in-memory grants are gone, and its
+   * container runtime is forgotten (the container is not stopped). At
+   * `'shutdown'` what it has recorded and not stored yet is stored first,
+   * since nothing reads it again.
+   */
+  dispose(reason?: 'shutdown'): Promise<void>
+  /**
+   * The agent is being deleted: remove everything it stored, its workspace
+   * and its session index. The caller has stopped its container, and removes
+   * the agent from the catalog after: a removal that fails here leaves the
+   * agent listed, so the delete can be tried again.
+   */
+  delete(): Promise<void>
   readonly container: ContainerOps
   readonly sessions: SessionOps
   readonly messages: MessageOps
@@ -277,7 +293,10 @@ export interface AgentCatalog {
   resolve(input: string): Promise<AgentSlug | null>
   /** The agent for a display slug or a slug, or null when there is no such agent. */
   resolveRecord(input: string): Promise<AgentRecord | null>
-  /** Remove an agent and everything it owns. The caller stops its container first. */
+  /**
+   * Remove an agent from the catalog. What the agent stored is deleted
+   * first, by its actor (`AgentActor.delete`).
+   */
   remove(slug: AgentSlug): Promise<void>
 }
 
@@ -296,6 +315,12 @@ export interface ContainerOps {
    * marked stale (`AgentLiveSummary.container.stale`) for the user to restart.
    */
   invalidate(options?: { restart?: boolean }): Promise<'not-running' | 'marked-stale' | 'restarted'>
+  /**
+   * Whether a change to the agent's drives reaches it only through a restart:
+   * its container runs, or a start is past reading the drives. With
+   * `orStarting`, any start in flight counts too.
+   */
+  holdsDrives(options?: { orStarting?: boolean }): Promise<boolean>
   /** `client.getInfo` — queries the runtime; prefer `status()` unless freshness matters. */
   info(): Promise<ContainerInfo>
   /**
@@ -379,6 +404,8 @@ export interface SessionOps {
   exportMetadata(): Promise<PortableSessionMetadataMap>
   /** `ingestSessionMetadataFile` — take a `session-metadata.json` an import wrote into the workspace into the index. */
   ingestMetadataFile(): Promise<void>
+  /** Record a delivered call on its parent session, atomically merging concurrent calls. */
+  recordInvocation(sessionId: string, invocation: import('@shared/lib/services/x-agent/invoked-session-schema').InvokedSession): Promise<void>
   /** `updateSessionMetadata` */
   updateMetadata(sessionId: string, updates: Partial<SessionMetadata>): Promise<SessionMetadata | undefined>
   /** `sessionFileRealPathWithinAgent` — the transcript's real location is inside the workspace, links followed. */
@@ -448,6 +475,8 @@ export interface SessionOps {
   markIdle(sessionId: string): Promise<void>
   /** `client.stopTask` — stop one background task by its SDK task id. */
   stopTask(sessionId: string, taskId: string): Promise<boolean>
+  /** The saved context, or an on-demand measurement from an already running process. */
+  contextBreakdown(sessionId: string, refresh: boolean): Promise<SessionContext>
   /**
    * `LiveSessions.waitForIdle`: `'idle'` once the session is not active (at
    * once when it is not running), `'timeout'` when it still is after `timeoutMs`.
@@ -594,6 +623,8 @@ export interface MessageOps {
 
   /** `getSessionMessagesWithCompact` */
   withCompact(sessionId: string): Promise<(JsonlMessageEntry | JsonlSystemEntry)[]>
+  /** Matching tool uses and results from the complete session. */
+  toolHistory(sessionId: string, names: string[]): Promise<import('@shared/lib/utils/message-transform').TransformedItem[]>
   /** `readTranscriptView`: the transcript other agents read, and its delivered files, in one streaming pass. */
   transcriptView(sessionId: string, opts: { fullTranscript?: boolean; limit?: number }): Promise<TranscriptView>
   /** `findDeliveredFile`: one delivered file of the transcript, found in one streaming pass. */
@@ -927,13 +958,6 @@ export interface AccountReauthOps {
 export interface UsageOps {
   /** `loadDailyUsageData` over every transcript the CLI wrote for this agent. */
   daily(options?: CommonLoadOptions): Promise<DailyUsageData[]>
-}
-
-/** A subagent a session launched, as its sidecar metadata describes it. */
-export interface SubagentRef {
-  id: string
-  /** The Task tool call that launched it, when the sidecar recorded one. */
-  toolUseId?: string
 }
 
 /** One media item from a transcript, ready to serve. */

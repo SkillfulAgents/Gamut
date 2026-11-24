@@ -61,10 +61,11 @@ describe('getProviderCatalog', () => {
       ['openai', 'gpt-6.2-sol'],
       ['xai', 'grok-4.7'],
       ['gemini', 'gemini-4-carbon'],
-      ['kimi', 'kimi-k3'],
+      ['kimi', 'kimi-k3.1-pro'],
       ['meta', 'muse-wonder-1.0'],
       ['zai', 'glm-5.3-flash'],
       ['deepseek', 'deepseek-v4.1-flash'],
+      ['minimax', 'minimax-m3.1-flash'],
     ])
   })
 
@@ -173,9 +174,11 @@ describe('getProviderCatalog', () => {
     ['muse-spark-1.3', ['low', 'medium', 'high', 'xhigh', 'max']],
     ['muse-spark-1.2', ['low', 'medium', 'high', 'xhigh']],
     ['muse-spark-1.3-contributor', ['low', 'medium', 'high', 'xhigh']],
+    ['kimi-k3.1-pro', ['low', 'medium', 'high', 'max']],
     ['kimi-k3', ['low', 'medium', 'high', 'max']],
     ['glm-5.3-flash', ['low', 'medium', 'high', 'xhigh', 'max']],
     ['deepseek-v4.1-flash', ['low', 'medium', 'high']],
+    ['minimax-m3.1-flash', ['low', 'medium', 'high', 'xhigh']],
   ])('platform %s accepts efforts %j', (id, efforts) => {
     const model = getProviderCatalog('platform').find((m) => m.id === id)!
     expect(model.supportedEfforts).toEqual(efforts)
@@ -394,15 +397,28 @@ describe('getProviderCatalog', () => {
     const grokLatest = catalog.filter((m) => m.family === 'grok' && m.isLatest)
     expect(grokLatest.map((m) => m.id)).toEqual(['grok-4.7'])
     // Kimi rides Fireworks' Anthropic-compatible wire, which strips server tools.
-    expect(catalog.find((m) => m.id === 'kimi-k3')).toMatchObject({
+    expect(catalog.find((m) => m.id === 'kimi-k3.1-pro')).toMatchObject({
       family: 'kimi',
       isLatest: true,
+      isDefault: true,
+      icon: 'kimi',
+      supportsWebSearch: false,
+      supportsWebFetch: false,
+      supportsImageInput: true,
+      contextWindow: 1_048_576,
+      pricing: { inputPerMtok: 2, outputPerMtok: 10, cacheReadPerMtok: 0.2 },
+    })
+    expect(catalog.find((m) => m.id === 'kimi-k3.1-pro')!.supportedSpeeds).toBeUndefined()
+    expect(catalog.find((m) => m.id === 'kimi-k3')).toMatchObject({
+      family: 'kimi',
       icon: 'kimi',
       supportsWebSearch: false,
       supportsWebFetch: false,
       supportedSpeeds: ['normal', 'fast'],
       pricing: { inputPerMtok: 3, outputPerMtok: 15, speedMultipliers: { fast: 1.5 } },
     })
+    expect(catalog.find((m) => m.id === 'kimi-k3')!.isLatest).toBeFalsy()
+    expect(catalog.find((m) => m.id === 'kimi-k3')!.isDefault).toBeFalsy()
     // Cloudflare Workers AI via the platform proxy. Bare id only.
     expect(catalog.find((m) => m.id === 'glm-5.3-flash')).toMatchObject({
       family: 'glm',
@@ -440,6 +456,19 @@ describe('getProviderCatalog', () => {
       pricing: { inputPerMtok: 0.3, outputPerMtok: 1.2, cacheReadPerMtok: 0.006 },
     })
     expect(catalog.find((m) => m.id === 'deepseek-v4.1-flash')!.supportedSpeeds).toBeUndefined()
+    // MiniMax rides Fireworks' Anthropic-compatible wire; no fast router, so no speeds.
+    expect(catalog.find((m) => m.id === 'minimax-m3.1-flash')).toMatchObject({
+      label: 'MiniMax M3.1 Flash',
+      family: 'minimax',
+      isLatest: true,
+      icon: 'minimax',
+      supportsWebSearch: false,
+      supportsWebFetch: false,
+      supportsImageInput: true,
+      contextWindow: 1_048_576,
+      pricing: { inputPerMtok: 0.15, outputPerMtok: 0.6, cacheReadPerMtok: 0.015 },
+    })
+    expect(catalog.find((m) => m.id === 'minimax-m3.1-flash')!.supportedSpeeds).toBeUndefined()
     // Platform keys off bare ids, never the OpenRouter vendor-prefixed slugs.
     expect(catalog.some((m) => m.id === 'openai/gpt-5.5')).toBe(false)
     expect(catalog.some((m) => m.id === 'z-ai/glm-5.2')).toBe(false)
@@ -807,7 +836,8 @@ describe('resolveModelForProvider', () => {
 
   it('resolves the kimi alias per provider, since the two catalogs use different ids', async () => {
     expect(await resolveModelForProvider('kimi', 'openrouter', 'agent')).toBe('moonshotai/kimi-k3')
-    expect(await resolveModelForProvider('kimi', 'platform', 'agent')).toBe('kimi-k3')
+    expect(await resolveModelForProvider('kimi', 'platform', 'agent')).toBe('kimi-k3.1-pro')
+    expect(await resolveModelForProvider('kimi-k3', 'platform', 'agent')).toBe('kimi-k3')
     // Pinning an older version stays pinned rather than riding the alias.
     expect(await resolveModelForProvider('moonshotai/kimi-k2.6', 'openrouter', 'agent')).toBe(
       'moonshotai/kimi-k2.6',

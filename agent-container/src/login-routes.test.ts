@@ -415,7 +415,9 @@ describe('POST /browser/login/fill', () => {
     putPreparedLogin({ ...PREPARED, toolUseId: 'tu-other' })
     park('tu-other', 'browser_input')
     expect((await post('/browser/login/fill', fillBody({ toolUseId: 'tu-other' }))).status).toBe(409)
-    expect((await post('/browser/login/fill', fillBody({ toolUseId: 'tu-gone' }))).status).toBe(409)
+    const missing = await post('/browser/login/fill', fillBody({ toolUseId: 'tu-gone' }))
+    expect(missing.status).toBe(409)
+    expect(await missing.json()).toMatchObject({ reason: 'form_unavailable' })
     expect(fillDeps.connect).not.toHaveBeenCalled()
   })
 

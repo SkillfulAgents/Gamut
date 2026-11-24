@@ -127,13 +127,6 @@ vi.mock('@shared/lib/services/x-agent-policy-service', () => ({
 }))
 vi.mock('@shared/lib/proxy/token-store', () => ({ revokeProxyToken: vi.fn(), validateProxyToken: vi.fn() }))
 vi.mock('@shared/lib/proxy/host-url', () => ({ getContainerHostUrl: () => 'localhost', getAppPort: () => 3000 }))
-vi.mock('@shared/lib/proxy/review-manager', () => ({
-  reviewManager: {
-    getPendingReviewsForAgent: () => [], submitDecision: vi.fn(), resolveMatchingPending: vi.fn(),
-    resolveMatchingPendingByLabel: vi.fn(), resolveMatchingXAgentByOperation: vi.fn(),
-    denyAllForAgent: vi.fn(),
-  },
-}))
 vi.mock('@shared/lib/services/webhook-trigger-service', () => ({
   countActiveTriggersPerAccount: vi.fn(async () => ({})), listWebhookTriggers: vi.fn(),
   listActiveWebhookTriggers: vi.fn(async () => []), listCancelledWebhookTriggers: vi.fn(),

@@ -166,3 +166,26 @@ export function signsInWithAuthSession(): boolean {
 export function signsInWithApple(): boolean {
   return signsInWithAuthSession()
 }
+
+/**
+ * Whether the MCP server this window configures runs on the computer the
+ * window runs on: the desktop app driving its own API. Then its address is a
+ * loopback one, which tools on this computer reach and hosted apps (claude.ai,
+ * ChatGPT) cannot. Otherwise (a web deployment, or a cloud workspace) the
+ * server is another machine, reached at its own address.
+ */
+export function mcpServerRunsOnThisComputer(): boolean {
+  return canUseHostFeatures()
+}
+
+/**
+ * Whether Settings offers who can reach the MCP server (this computer only, or
+ * other devices on the network): the API runs inside the desktop app, the one
+ * server that checks where a request comes from (`checksLoopbackSource()`). A
+ * web deployment's network setup decides that instead. A question about the
+ * server: unknown server facts read as no.
+ */
+export function offersMcpReachChoice(): boolean {
+  const distribution = serverFacts()?.distribution
+  return !!distribution && distribution !== 'deployment'
+}

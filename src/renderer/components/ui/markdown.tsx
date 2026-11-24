@@ -5,7 +5,7 @@ import { createMarkdownUrlTransform, hasUrlScheme, markdownUrlTransform } from '
 import { Link, type LinkProps } from '@tanstack/react-router'
 import { isAgentPageHref, settingsTabFromHref } from '@renderer/lib/in-app-link'
 import { DialogContext } from '@renderer/context/dialog-context'
-import { AgentFileOpenerContext } from '@renderer/context/agent-file-opener-context'
+import { useAgentFileOpener } from '@renderer/context/agent-file-opener-context'
 import { openableProps } from '@renderer/lib/openable'
 import { isFolderPath } from '@shared/lib/utils/workspace-path'
 
@@ -13,7 +13,7 @@ import { isFolderPath } from '@shared/lib/utils/workspace-path'
 
 // A file link keeps the file's real URL, so a middle-click or a copied link still gets the file.
 function AgentFileLink({ children, href, filePath, agentSlug }: { children?: ReactNode; href: string; filePath: string; agentSlug: string }) {
-  const opener = useContext(AgentFileOpenerContext)
+  const opener = useAgentFileOpener()
   if (isFolderPath(filePath)) {
     if (!opener) return <>{children}</>
     // Inline text, not a button: a button never wraps, so text after it at the end of a line drops to its own line.

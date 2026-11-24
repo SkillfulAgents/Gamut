@@ -319,9 +319,22 @@ export function useMessageListScroll<T>(options: MessageListScrollOptions<T>) {
     el.scrollTop = top
   }, [])
 
+  // Remember a point inside the visible message. Rewrapping an earlier turn can
+  // change its height by hundreds of pixels even when the reader never scrolls.
+  const readingPoint = useRef<{ row: Element; fraction: number; inset: number } | null>(null)
   const rememberPosition = useCallback(() => {
     const el = scrollRef.current
     if (!el) return
+    if (!followingRef.current) {
+      const rect = el.getBoundingClientRect()
+      const inset = rect.height / 3
+      const y = rect.top + inset
+      const row = document.elementFromPoint?.(rect.left + rect.width / 2, y)?.closest('[data-message-id]')
+      const box = row?.getBoundingClientRect()
+      readingPoint.current = row && box?.height && el.contains(row)
+        ? { row, fraction: (y - box.top) / box.height, inset }
+        : null
+    }
     const trail = positionTrailRef.current
     const now = performance.now()
     const latest = trail[trail.length - 1]
@@ -928,17 +941,48 @@ export function useMessageListScroll<T>(options: MessageListScrollOptions<T>) {
   // a shrink would slide the live edge behind the fold), and container-only
   // resizes (a growing composer). Re-attach after the loading/error states
   // resolve — the scroll container mounts only then.
+  //
+  // Width changes reflow the transcript. Follow the live edge immediately,
+  // or hold the message the reader was inspecting at its previous screen position.
   useEffect(() => {
     const content = contentRef.current
     const viewport = scrollRef.current
     if (!content || !viewport || typeof ResizeObserver === 'undefined') return
+    let lastWidth = viewport.clientWidth
     const observer = new ResizeObserver(() => {
+      const width = viewport.clientWidth
+      const widthChanged = width !== lastWidth
+      lastWidth = width
+      if (widthChanged) {
+        const baseline = baselineRef.current
+        if (followingRef.current) {
+          if (glideRef.current?.kind === 'follow') glideRef.current.cancel()
+          if (!glideRef.current) {
+            writeScrollTop(viewport, liveEdgeTarget(viewport))
+            rememberPosition()
+            return
+          }
+        } else if (baseline && !selectionInProgress() && !touchActiveRef.current && !glideRef.current) {
+          const point = readingPoint.current
+          if (point && viewport.contains(point.row)) {
+            const box = point.row.getBoundingClientRect()
+            const offset = box.top + point.fraction * box.height - viewport.getBoundingClientRect().top - point.inset
+            writeScrollTop(viewport, viewport.scrollTop + offset)
+            rememberPosition()
+            return
+          }
+          const fromBottom = Math.max(0, baseline.scrollHeight - baseline.clientHeight - baseline.scrollTop)
+          writeScrollTop(viewport, Math.max(0, viewport.scrollHeight - viewport.clientHeight - fromBottom))
+          rememberPosition()
+          return
+        }
+      }
       pinToLiveEdge()
     })
     observer.observe(content)
     observer.observe(viewport)
     return () => observer.disconnect()
-  }, [pinToLiveEdge, isLoading, error])
+  }, [pinToLiveEdge, writeScrollTop, rememberPosition, selectionInProgress, isLoading, error])
 
   // WebKit moves the viewport off our OWN DOM commits. Re-rendering the reply
   // at the live edge (its speaker button swapped for the playback strip, its

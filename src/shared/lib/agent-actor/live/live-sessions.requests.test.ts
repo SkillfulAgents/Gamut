@@ -58,7 +58,7 @@ vi.mock('@shared/lib/config/settings', () => ({
 }))
 
 import { attachLiveSessionsHarness, createStreamClient, type StreamClient } from '../testing/live-sessions-harness'
-import { userInputRequestManager } from '@shared/lib/tools/requests/request-manager'
+import { userInputRequestManager } from '@shared/lib/agent-actor/testing/routers/request-manager'
 import { LiveSessions } from './live-sessions'
 
 /**

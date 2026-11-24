@@ -42,15 +42,6 @@ vi.mock('@shared/lib/config/settings', () => ({
   getAgentCapabilitySettings: () => ({ subagents: 'allow', workflows: 'allow' }),
   VALID_SCRIPT_TYPES: { darwin: ['applescript', 'shell'], linux: ['shell'], win32: ['powershell'] },
 }))
-vi.mock('@shared/lib/computer-use/permission-manager', () => ({
-  computerUsePermissionManager: {
-    checkPermission: vi.fn(() => 'prompt_needed'),
-    getActiveApp: vi.fn(() => undefined),
-    setActiveApp: vi.fn(),
-    clearActiveApp: vi.fn(),
-    consumeOnceGrant: vi.fn(),
-  },
-}))
 vi.mock('@shared/lib/computer-use/types', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@shared/lib/computer-use/types')>()),
   getRequiredPermissionLevel: vi.fn(() => 'use_application'),
@@ -532,7 +523,7 @@ const SDK296_SCENARIOS = [
   'sendmessage-resumed-subagent',
 ]
 
-describe.each(['sdk296', 'sdk300', 'sdk303', 'sdk311', 'sdk318', 'sdk321', 'sdk325'])('%s capture replays', (sdk) => {
+describe.each(['sdk296', 'sdk300', 'sdk303', 'sdk311', 'sdk318', 'sdk321', 'sdk325', 'sdk330'])('%s capture replays', (sdk) => {
   const SDK296_FIXTURES = SDK296_SCENARIOS.map((scenario) => `${sdk}-${scenario}`)
 
   afterEach(() => {
@@ -687,7 +678,12 @@ describe.each(['sdk296', 'sdk300', 'sdk303', 'sdk311', 'sdk318', 'sdk321', 'sdk3
     expect(childEnd).toBeGreaterThan(0)
     // The child is a background task of the session in its own right: started
     // and ended once, and no session_idle while it ran.
-    expect(sseEvents.filter((e) => e['type'] === 'background_task_started' && e['taskId'] === childId)).toHaveLength(1)
+    const childEvents = sseEvents.filter(e => e['type'] === 'background_task_started' && e['taskId'] === childId)
+    expect(childEvents).toHaveLength(1)
+    expect(childEvents[0]).toMatchObject({ parentTaskId: childStart!['parent_task_id'] })
+    expect(sseEvents).toContainEqual(expect.objectContaining({
+      backgroundTasks: [expect.objectContaining({ taskId: childId, parentTaskId: childStart!['parent_task_id'] })],
+    }))
     for (const snap of timeline.slice(0, childEnd)) {
       expect(snap.sessionIdleCount, `idle at t=${snap.t} while ${childId} ran`).toBe(0)
     }
@@ -699,7 +695,7 @@ describe.each(['sdk296', 'sdk300', 'sdk303', 'sdk311', 'sdk318', 'sdk321', 'sdk3
 // a background subagent like any other (async_launched ack, task_started with
 // is_backgrounded, terminal task frames); only its transcript differs (see
 // subagentOwnEntries).
-describe.each(['sdk303', 'sdk311', 'sdk318', 'sdk321', 'sdk325'])('%s fork captures replay', (sdk) => {
+describe.each(['sdk303', 'sdk311', 'sdk318', 'sdk321', 'sdk325', 'sdk330'])('%s fork captures replay', (sdk) => {
   afterEach(() => {
     vi.clearAllMocks()
   })

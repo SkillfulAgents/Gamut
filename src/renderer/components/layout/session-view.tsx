@@ -2,13 +2,14 @@ import { SessionChatColumn } from './session-chat-column'
 import { pickRuntimeOptions } from '@shared/lib/container/runtime-options'
 import { FilePreviewProvider } from '@renderer/context/file-preview-context'
 import { WorkflowProvider } from '@renderer/context/workflow-context'
-import { CalendarClock, GitFork, Plug, Wrench, Zap } from 'lucide-react'
+import { Cable, CalendarClock, GitFork, Plug, Wrench, Zap } from 'lucide-react'
 import { SessionProvenanceBanner } from './session-provenance-banner'
+import { ContentCanvas } from './content-shell'
 import { useCallback, useEffect, useMemo } from 'react'
 import { useSession, useSetSessionMarkedUnread, useClearSessionUnread } from '@renderer/hooks/use-sessions'
 import { HttpError } from '@renderer/lib/api'
 import { SessionNotFound } from '@renderer/router/route-fallbacks'
-import { useNavigate, useSearch } from '@tanstack/react-router'
+import { useNavigate, useRouter, useSearch } from '@tanstack/react-router'
 import type { MessageTarget } from '@renderer/components/messages/locate-message'
 import { useMarkSessionNotificationsRead } from '@renderer/hooks/use-notifications'
 import { useAgentIntegration, useSessionAgentIntegrationId } from '@renderer/hooks/use-agent-integrations'
@@ -40,6 +41,7 @@ interface SessionViewProps {
 export function SessionView({ agentSlug, sessionId, onSessionCreated: handleSessionCreated }: SessionViewProps) {
   useRenderTracker('SessionView')
   const navigate = useNavigate()
+  const { history } = useRouter()
   const { data: session, error: sessionError } = useSession(sessionId, agentSlug)
   const { data: integrationId } = useSessionAgentIntegrationId(agentSlug, sessionId)
   const { data: integration } = useAgentIntegration(integrationId ?? null)
@@ -126,6 +128,7 @@ export function SessionView({ agentSlug, sessionId, onSessionCreated: handleSess
 
   return (
     <>
+      <ContentCanvas />
       {session?.scheduledTaskId && (
         <SessionProvenanceBanner
           icon={CalendarClock}
@@ -184,6 +187,20 @@ export function SessionView({ agentSlug, sessionId, onSessionCreated: handleSess
           testId="widget-repair-session-banner"
         />
       )}
+      {session?.mcpInvocation && (
+        <SessionProvenanceBanner
+          icon={Cable}
+          text={<>Session started through MCP{session.mcpInvocation.clientName ? <> from &quot;{session.mcpInvocation.clientName}&quot;</> : null}</>}
+          back={{
+            label: 'Back',
+            onClick: () => {
+              void navigate({ to: '/agents/$slug/called-from-agents', params: { slug: agentSlug } })
+            },
+            testId: 'mcp-session-back-button',
+          }}
+          testId="mcp-session-banner"
+        />
+      )}
       {session?.invokedByAgentSlug && (
         <SessionProvenanceBanner
           icon={GitFork}
@@ -191,7 +208,8 @@ export function SessionView({ agentSlug, sessionId, onSessionCreated: handleSess
           back={{
             label: 'Back',
             onClick: () => {
-              void navigate({ to: '/agents/$slug/called-from-agents', params: { slug: agentSlug } })
+              if (history.canGoBack()) history.back()
+              else void navigate({ to: '/agents/$slug/called-from-agents', params: { slug: agentSlug }, replace: true })
             },
             testId: 'x-agent-session-back-button',
           }}
@@ -199,7 +217,7 @@ export function SessionView({ agentSlug, sessionId, onSessionCreated: handleSess
         />
       )}
 
-      <FilePreviewProvider sessionAgentSlug={agentSlug} commentsEnabled={!isViewOnly}>
+      <FilePreviewProvider rememberTabs sessionAgentSlug={agentSlug} commentsEnabled={!isViewOnly}>
         <WorkflowProvider>
           <div className="flex-1 flex flex-col min-h-0">
             {sessionId && <SessionSearchBar search={search} />}

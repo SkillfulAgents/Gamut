@@ -254,9 +254,6 @@ vi.mock('@shared/lib/services/notification-service', () => ({
   deleteNotificationsBySessionIds: vi.fn(),
 }))
 
-vi.mock('@shared/lib/proxy/review-manager', () => ({
-  reviewManager: {},
-}))
 
 vi.mock('@shared/lib/services/x-agent-policy-service', () => ({
   listXAgentPolicies: vi.fn(),
@@ -280,9 +277,6 @@ vi.mock('@shared/lib/services/agent-cleanup-service', () => ({
   cleanupAgentData: vi.fn(),
 }))
 
-vi.mock('@shared/lib/computer-use/permission-manager', () => ({
-  computerUsePermissionManager: {},
-}))
 
 vi.mock('@shared/lib/computer-use/executor', () => ({
   executeComputerUseCommand: vi.fn(),
@@ -349,7 +343,7 @@ vi.mock('../llm-polyfill', () => ({
 }))
 
 import agents from './agents'
-import { userInputRequestManager } from '@shared/lib/tools/requests/request-manager'
+import { userInputRequestManager } from '@shared/lib/agent-actor/testing/routers/request-manager'
 
 function createApp() {
   const app = new Hono()

@@ -7,6 +7,7 @@ const FAMILY_LABELS: Record<string, string> = {
   'gpt-luna': 'GPT Luna',
   glm: 'GLM',
   deepseek: 'DeepSeek',
+  minimax: 'MiniMax',
   'gemini-carbon': 'Gemini Carbon',
   'gemini-argon': 'Gemini Argon',
   'gemini-hydrogen': 'Gemini Hydrogen',

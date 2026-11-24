@@ -1,6 +1,9 @@
 services:
   superagent:
-    image: ${SUPERAGENT_IMAGE:-ghcr.io/iddogino/superagent:main}
+    # Official image, rebuilt on every push to main. Pin a release with e.g.
+    # SUPERAGENT_IMAGE=ghcr.io/skillfulagents/superagent:X.Y.Z, or use the
+    # multi-user build with SUPERAGENT_IMAGE=ghcr.io/skillfulagents/superagent:main-auth
+    image: ${SUPERAGENT_IMAGE:-ghcr.io/skillfulagents/superagent:main}
     build:
       context: .
       args:
@@ -19,9 +22,10 @@ services:
       - ./agent-container:/app/agent-container:ro
     environment:
       - SUPERAGENT_DATA_DIR=${HOME}/.superagent
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      # Optional: model providers can be added in the app (Settings > Model Providers)
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - PORT=47891
-      # Auth mode (requires building with AUTH_MODE=true)
+      # Auth mode (use a -auth image, or build with AUTH_MODE=true)
       - AUTH_MODE=${AUTH_MODE:-false}
       - BETTER_AUTH_SECRET=${BETTER_AUTH_SECRET:-}
       # Browser Vault key (base64, 32 bytes) or a secret file holding it; unset keeps it in the data dir

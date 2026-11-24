@@ -6,8 +6,8 @@ import { FileDeliveryRow } from './file-delivery-row'
 
 const openFile = vi.fn()
 
-vi.mock('@renderer/context/file-preview-context', () => ({
-  useFilePreview: () => ({ openFile }),
+vi.mock('@renderer/context/agent-file-opener-context', () => ({
+  useAgentFileOpener: () => ({ openFile }),
 }))
 
 vi.mock('@renderer/lib/env', () => ({

@@ -256,6 +256,16 @@ describe('Subagents', () => {
       expect(subagents.snapshot()[0].status).toBe('completed')
     })
 
+    it('emits only the authored report between the SDK’s leading and trailing notes', () => {
+      const { subagents, events } = startedForeground()
+      const text = (value: string) => ({ type: 'text', text: value })
+      subagents.toolResults(userFrame([toolResult('toolu_1', '[Subagent hand-back] instructions')], {
+        status: 'completed', agentId: 'a1', harnessNoteCount: 1, harnessTailCount: 1,
+        content: [text('tools-used-before-summary'), text('First paragraph.'), text('Second paragraph.'), text('usage')],
+      }))
+      expect(events.at(-1)).toMatchObject({ type: 'subagent_completed', resultText: 'First paragraph.\nSecond paragraph.' })
+    })
+
     it('completes a run once', () => {
       const { subagents, types, ended } = startedForeground()
 

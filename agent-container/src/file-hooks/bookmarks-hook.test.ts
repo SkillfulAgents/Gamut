@@ -39,7 +39,7 @@ describe('BookmarksFileHook.onRead', () => {
   it('returns additional context with format hints', () => {
     const result = hook.onRead('/workspace/bookmarks.json')
     expect(result.additionalContext).toBeDefined()
-    expect(result.additionalContext).toContain('bookmarks')
+    expect(result.additionalContext).toContain('Pinned Items')
     expect(result.additionalContext).toContain('"link"')
     expect(result.additionalContext).toContain('"file"')
   })
@@ -180,7 +180,7 @@ describe('BookmarksFileHook.onWrite — warnings', () => {
     const result = hook.onWrite('/workspace/bookmarks.json', JSON.stringify(bookmarks))
     expect(result.error).toBeUndefined()
     expect(result.warning).toBeDefined()
-    expect(result.warning).toContain('6 bookmarks')
+    expect(result.warning).toContain('6 pins')
   })
 
   it('does not warn for exactly 5 bookmarks', () => {

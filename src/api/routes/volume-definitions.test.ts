@@ -58,10 +58,10 @@ vi.mock('@shared/lib/agent-actor/registry', () => ({
   },
 }))
 const running = vi.hoisted(() => ({ read: vi.fn() }))
-vi.mock('@shared/lib/agent-actor', () => ({ containerHost: { getAgentIdsHoldingDrives: (options?: { orStarting?: boolean }) => {
+vi.mock('@shared/lib/agent-actor', () => ({ agentsHoldingDrives: async (options?: { orStarting?: boolean }) => {
   running.read()
   return [...containers.running, ...(options?.orStarting ? containers.starting : [])]
-} } }))
+} }))
 const feed = vi.hoisted(() => ({ publish: vi.fn() }))
 vi.mock('@shared/lib/notifications/global-feed', () => ({ globalFeed: feed }))
 import routes from './volume-definitions'

@@ -83,7 +83,7 @@ vi.mock('@shared/lib/account-providers', async (importOriginal) => {
 
 import proxy from '../../../../api/routes/proxy'
 import { agentRegistry } from '@shared/lib/agent-actor'
-import { userInputRequestManager } from '@shared/lib/tools/requests/request-manager'
+import { userInputRequestManager } from '@shared/lib/agent-actor/testing/routers/request-manager'
 import { restateRule } from './author'
 import { RULE_HELPERS_SOURCE } from './helpers-source'
 import vm from 'node:vm'

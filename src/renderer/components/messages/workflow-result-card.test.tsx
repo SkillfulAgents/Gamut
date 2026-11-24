@@ -3,7 +3,7 @@ import { render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { WorkflowResultCard } from './workflow-result-card'
 
-vi.mock('@renderer/context/workflow-context', () => ({ useWorkflow: () => ({ openWorkflow: vi.fn() }) }))
+vi.mock('@renderer/context/workflow-context', () => ({ useOpenWorkflow: () => vi.fn() }))
 
 describe('WorkflowResultCard', () => {
   it('draws a mermaid fence in the workflow result and keeps other fences as code', async () => {

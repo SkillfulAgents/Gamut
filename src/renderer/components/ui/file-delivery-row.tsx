@@ -1,7 +1,7 @@
 import { ArrowDownToLine, ChevronRight } from 'lucide-react'
 import { buttonVariants } from './button'
 import { FileIconTile } from './file-icon-tile'
-import { useFilePreview } from '@renderer/context/file-preview-context'
+import { useAgentFileOpener } from '@renderer/context/agent-file-opener-context'
 import { openableProps } from '@renderer/lib/openable'
 import { MAX_ZIP_BYTES } from '@renderer/lib/file-types'
 import { describeWorkspaceFile } from '@renderer/lib/workspace-file'
@@ -28,20 +28,20 @@ interface FileDeliveryRowProps {
  * can still be downloaded from inside the drawer.
  */
 export function FileDeliveryRow({ filePath, agentSlug, description, sizeBytes, className }: FileDeliveryRowProps) {
-  const { openFile } = useFilePreview()
+  const opener = useAgentFileOpener()
   const file = describeWorkspaceFile(filePath, agentSlug)
   const detail = description?.trim() || (file.relativePath !== file.name ? file.relativePath : null)
   const metadata = [detail, sizeBytes !== undefined ? formatFileSize(sizeBytes) : null].filter(Boolean)
   // Past the limit the drawer only says so, so the row keeps the one-click download.
-  const previewable = file.previewable && !(file.preview === 'archive' && (sizeBytes ?? 0) > MAX_ZIP_BYTES)
+  const previewable = !!opener && file.previewable && !(file.preview === 'archive' && (sizeBytes ?? 0) > MAX_ZIP_BYTES)
 
   return (
     <div
-      {...openableProps(() => openFile(file.path, file.agentSlug, description))}
+      {...(opener && openableProps(() => opener.openFile(file.path, file.agentSlug, description)))}
       className={cn(
         // The row is the size container the Download label collapses on.
-        'group flex w-full items-center gap-3 rounded-card border bg-background px-3 py-2 text-left cursor-pointer [container-type:inline-size]',
-        'hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring transition-colors',
+        'group flex w-full items-center gap-3 rounded-card border bg-background px-3 py-2 text-left [container-type:inline-size]',
+        opener && 'cursor-pointer hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring transition-colors',
         className,
       )}
       data-testid="file-delivery-row"
@@ -57,9 +57,9 @@ export function FileDeliveryRow({ filePath, agentSlug, description, sizeBytes, c
           </div>
         )}
       </div>
-      {previewable || !file.downloadUrl ? (
+      {(previewable || !file.downloadUrl) && opener ? (
         <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground transition-colors group-hover:text-foreground" aria-hidden="true" />
-      ) : (
+      ) : file.downloadUrl && (
         <a
           href={file.downloadUrl}
           target="_blank"

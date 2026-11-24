@@ -12,7 +12,7 @@ import {
 } from '@renderer/hooks/use-message-stream'
 import { isTurnStartingUserMessage, type PendingMessage } from './pending-message'
 import { classifyUserMessage, classifyUserText } from './user-message-kinds'
-import { MessageItem, readsSubagentState } from './message-item'
+import { MessageItem, hasWorkflowCall } from './message-item'
 import { currentRoutedProviderError } from '@renderer/components/provider-error/provider-error-placement'
 import { ToolCallItem, StreamingToolCallItem } from './tool-call-item'
 import { ThinkingBlockItem } from './thinking-block-item'
@@ -36,7 +36,7 @@ import { appendToSessionDraft, useDraftsStore } from '@renderer/context/drafts-c
 import { useQueryClient } from '@tanstack/react-query'
 import { resolveRouteAgentId, type ApiAgent } from '@renderer/hooks/use-agents'
 import { draftFromAgentText } from './composer-chips'
-import { useWorkflow } from '@renderer/context/workflow-context'
+import { useOpenWorkflow } from '@renderer/context/workflow-context'
 import { useRenderTracker } from '@renderer/lib/perf'
 import {
   useEffect,
@@ -263,9 +263,10 @@ export function MessageList({ sessionId, agentSlug, pendingUserMessages, pending
   // Auto-open the drawer to a workflow the moment it launches (once per run, only while
   // still active). On reload there's no workflow_started replay, so completed runs won't
   // re-pop — the user opens those from the inline block.
-  const { openWorkflow } = useWorkflow()
+  const openWorkflow = useOpenWorkflow()
   const autoOpenedWorkflowsRef = useRef<Set<string>>(new Set())
   useEffect(() => {
+    if (!openWorkflow) return
     for (const w of workflows ?? []) {
       if (!w.completedAt && w.runId && !autoOpenedWorkflowsRef.current.has(w.runId)) {
         autoOpenedWorkflowsRef.current.add(w.runId)
@@ -429,10 +430,10 @@ export function MessageList({ sessionId, agentSlug, pendingUserMessages, pending
     }
   }, [isCompacting, boundaryCount, sessionId])
 
-  // The one row (streaming or persisted) whose provider error a ProviderErrorPlacement shows right now.
+  // Read-only transcripts have no composer or banner to take over a provider error.
   const currentRoutedError = useMemo(
-    () => currentRoutedProviderError({ isActive, error: streamError, apiErrorCode, errorPresentation }, messages),
-    [isActive, streamError, apiErrorCode, errorPresentation, messages],
+    () => readOnly ? null : currentRoutedProviderError({ isActive, error: streamError, apiErrorCode, errorPresentation }, messages),
+    [readOnly, isActive, streamError, apiErrorCode, errorPresentation, messages],
   )
 
   // Voice mode reading this session: subscribed once here and handed to
@@ -1004,6 +1005,10 @@ export function MessageList({ sessionId, agentSlug, pendingUserMessages, pending
     )
   }
 
+  if (error && !(error instanceof TranscriptNotFoundError) && !messages && !isActive && !hasPendingMessages) {
+    return <p role="alert" className="p-4 text-sm text-muted-foreground">Could not load this conversation.</p>
+  }
+
   // The transcript file is gone (e.g. removed by the CLI's retention cleanup)
   // while the session still appears in the nav. Don't show this during the
   // new-session window: the composer's client has a pendingUserMessage then,
@@ -1027,7 +1032,8 @@ export function MessageList({ sessionId, agentSlug, pendingUserMessages, pending
   }
 
   return (
-    <div className="relative flex-1 min-h-0 overflow-hidden">
+    // Under a floating header the transcript reaches up behind it (--header-overlap, globals.css).
+    <div className="relative flex-1 min-h-0 overflow-hidden mt-[calc(-1*var(--header-overlap,0px))]">
       {/* A labelled, focusable scroll region is intentional: keyboard users
           need to be able to drive the transcript with its scroll keys. */}
       {/* eslint-disable jsx-a11y/no-noninteractive-tabindex */}
@@ -1054,7 +1060,7 @@ export function MessageList({ sessionId, agentSlug, pendingUserMessages, pending
         <div ref={contentRef} className="mx-auto w-full max-w-[720px] px-4">
         <div
           ref={contentBodyRef}
-          className={`space-y-4 ${readOnly ? 'pt-3' : 'pt-[100px]'}`}
+          className={`space-y-4 ${readOnly ? 'pt-[calc(12px+var(--header-overlap,0px))]' : 'pt-[calc(100px+var(--header-overlap,0px))]'}`}
           role="log"
           aria-relevant="additions"
           aria-busy={isStreaming || undefined}
@@ -1107,7 +1113,7 @@ export function MessageList({ sessionId, agentSlug, pendingUserMessages, pending
             } else if (item.type === 'compact_boundary') {
               renderedItem = <CompactBoundaryItem boundary={item as ApiCompactBoundary} />
             } else if (item.type === 'informational') {
-              renderedItem = <InformationalItem item={item as ApiInformational} />
+              renderedItem = <InformationalItem item={item as ApiInformational} agentSlug={agentSlug} />
             } else if (item.type === 'monitor_event') {
               renderedItem = <MonitorEventItem item={item as ApiMonitorEvent} />
             } else {
@@ -1129,8 +1135,8 @@ export function MessageList({ sessionId, agentSlug, pendingUserMessages, pending
                       isSessionActive={canHaveRunningToolCalls.has(item.id)}
                       // Subagent state changes identity on every subagent event; passing it only
                       // to rows that read it keeps the other rows' memo.
-                      activeSubagents={readsSubagentState(displayedMessage) ? activeSubagents : undefined}
-                      completedSubagents={readsSubagentState(displayedMessage) ? completedSubagents : undefined}
+                      activeSubagents={hasWorkflowCall(displayedMessage) ? activeSubagents : undefined}
+                      completedSubagents={hasWorkflowCall(displayedMessage) ? completedSubagents : undefined}
                       onRemoveMessage={readOnly ? undefined : handleRemoveMessage}
                       onRemoveToolCall={readOnly ? undefined : handleRemoveToolCall}
                       workDetailClassName={
@@ -1282,8 +1288,6 @@ export function MessageList({ sessionId, agentSlug, pendingUserMessages, pending
                   sessionId={sessionId}
                   agentSlug={agentSlug}
                   isSessionActive={isActive}
-                  activeSubagent={activeSubagents?.find(s => s.parentToolId === tool.id) ?? null}
-                  isCompleted={completedSubagents?.has(tool.id) ?? false}
                 />
               )
             } else if (tool.name === 'Workflow') {

@@ -62,6 +62,21 @@ describe('local transcript ops — containment', () => {
     expect(await listSubagents(createLocalSessionStore(AGENT), SESSION)).toEqual([{ id: 'x', toolUseId: 'tu-1' }])
   })
 
+  it('lists legacy transcripts and validated sidecars without opening transcripts', async () => {
+    const metadata = { agentType: 'Explore', description: 'Review', finished: true, stoppedByUser: true }
+    await fs.promises.writeFile(path.join(subagentsDir, 'agent-old.jsonl'), 'large historical transcript')
+    await fs.promises.writeFile(path.join(subagentsDir, 'agent-new.jsonl'), '')
+    await fs.promises.writeFile(path.join(subagentsDir, 'agent-new.meta.json'), JSON.stringify({ ...metadata, privateField: 'omit' }))
+    await fs.promises.writeFile(path.join(subagentsDir, 'agent-partial.meta.json'), '{')
+    await fs.promises.mkdir(path.join(subagentsDir, 'workflows'))
+    const store = createLocalSessionStore(AGENT)
+    const reads = vi.spyOn(store.files, 'getDoc')
+    const entries = await listSubagents(store, SESSION)
+    expect(entries.sort((a, b) => a.id.localeCompare(b.id))).toEqual([{ id: 'new', ...metadata }, { id: 'old' }, { id: 'partial' }])
+    expect(reads.mock.calls.every(([name]) => name.endsWith('.meta.json'))).toBe(true)
+    expect(await listSubagents(store, 'missing')).toEqual([])
+  })
+
   it('does not read the sidecars of the subagents the caller already knows', async () => {
     await fs.promises.writeFile(path.join(subagentsDir, 'agent-known.meta.json'), JSON.stringify({ toolUseId: 'tu-1' }))
     await fs.promises.writeFile(path.join(subagentsDir, 'agent-new.meta.json'), JSON.stringify({ toolUseId: 'tu-2' }))

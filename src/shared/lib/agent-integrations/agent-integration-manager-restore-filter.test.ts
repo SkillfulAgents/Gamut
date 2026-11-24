@@ -39,9 +39,6 @@ vi.mock('@shared/lib/container/container-host', async () => {
   return { containerHost: hostFromManagerMock({ ensureRunning: vi.fn() }) }
 })
 
-vi.mock('@shared/lib/proxy/review-manager', () => ({
-  reviewManager: { submitDecision: vi.fn(), getPendingReviewsForAgent: vi.fn(() => []) },
-}))
 
 vi.mock('@shared/lib/error-reporting', () => ({
   captureException: vi.fn(),

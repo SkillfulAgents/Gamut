@@ -14,6 +14,7 @@ import { isTelegramTemporary } from '../chat-integrations/telegram-error'
 import { collectEnvironmentData, probeEnvironmentData } from './environment'
 import { background } from '../background'
 import { APP_VERSION } from '../config/version'
+import { redactMcpTokens } from './redact-mcp-token'
 
 function mapSeverity(level: SeverityLevel): Sentry.SeverityLevel {
   return level as Sentry.SeverityLevel
@@ -54,9 +55,14 @@ export function redactSignedFileTokens(text: string): string {
   return text.replace(SIGNED_FILE_TOKEN, '$1[redacted]')
 }
 
+// The MCP installation token, wherever it appears: the `Authorization` header
+// the HTTP integration attaches to an event raised while handling `/mcp`, a
+// logged line, a breadcrumb.
+export { redactMcpTokens }
+
 /** Every credential this module looks for in a string, redacted. */
 function redactCredentials(text: string): string {
-  return redactSignedFileTokens(redactBotTokens(text))
+  return redactMcpTokens(redactSignedFileTokens(redactBotTokens(text)))
 }
 
 /** Redact credentials in every string of an event the SDK is about to send (the request's URL among them). */

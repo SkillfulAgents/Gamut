@@ -1,0 +1,60 @@
+import { describe, expect, it, vi } from 'vitest'
+import type { ContainerConfig, ContainerInfo } from './types'
+import { ContainerNotFoundError } from './types'
+import { BaseContainerClient } from './base-container-client'
+
+vi.mock('@shared/lib/container/host-token-store', () => ({ getOrCreateHostToken: () => 'test-host-token' }))
+vi.mock('@shared/lib/config/settings', () => ({ getSettings: () => ({ enableToolSearch: true }) }))
+vi.mock('@shared/lib/llm-provider', () => ({ activeLlmProviderFrom: () => ({ getContainerEnvVars: () => ({}) }) }))
+
+class StubFetchClient extends BaseContainerClient {
+  constructor(private readonly response: Response) {
+    super({ agentId: 'test-agent' } as ContainerConfig)
+  }
+  protected getRunnerCommand(): string { return 'docker' }
+  async getInfoFromRuntime(): Promise<ContainerInfo> { return { status: 'running', port: 1 } }
+  override async fetch(): Promise<Response> { return this.response }
+}
+
+describe('BaseContainerClient.forkSession', () => {
+  it('returns null when the container predates the fork route (404)', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const client = new StubFetchClient(new Response('404 Not Found', { status: 404 }))
+    expect(await client.forkSession('src-1')).toBeNull()
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('predates the fork endpoint'))
+    warn.mockRestore()
+  })
+
+  it('throws ContainerNotFoundError when the session is gone (JSON 404)', async () => {
+    const client = new StubFetchClient(Response.json({ error: 'Session not found' }, { status: 404 }))
+    await expect(client.forkSession('src-1')).rejects.toBeInstanceOf(ContainerNotFoundError)
+  })
+
+  it('returns the new id on 201', async () => {
+    const client = new StubFetchClient(Response.json({ id: 'fork-1' }, { status: 201 }))
+    expect(await client.forkSession('src-1')).toEqual({ id: 'fork-1' })
+  })
+})
+
+describe('BaseContainerClient.getContextBreakdown', () => {
+  it('passes the session id as one URL segment', async () => {
+    const client = new StubFetchClient(Response.json({ breakdown: null }))
+    const fetch = vi.spyOn(client, 'fetch')
+    await client.getContextBreakdown('notes #2')
+    expect(fetch).toHaveBeenCalledWith('/sessions/notes%20%232/context', { method: 'GET' })
+  })
+
+  it('supports older agent images and non-resident sessions', async () => {
+    const old = new StubFetchClient(new Response('404 Not Found', { status: 404 }))
+    expect(await old.getContextBreakdown('s')).toEqual({ breakdown: null })
+    const stopped = new StubFetchClient(Response.json({ breakdown: null }))
+    expect(await stopped.getContextBreakdown('s')).toEqual({ breakdown: null })
+  })
+
+  it('surfaces runtime and payload errors for retry', async () => {
+    const failed = new StubFetchClient(new Response(null, { status: 500 }))
+    await expect(failed.getContextBreakdown('s')).rejects.toThrow('HTTP 500')
+    const invalid = new StubFetchClient(Response.json({ breakdown: { categories: [] } }))
+    await expect(invalid.getContextBreakdown('s')).rejects.toThrow()
+  })
+})

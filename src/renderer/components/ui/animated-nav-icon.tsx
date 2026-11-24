@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react'
 import {
   Activity, ArrowLeft, BadgeCheck, BarChart3, Bell, Blocks, Bolt, BookUser, Brain,
   createLucideIcon, Cuboid, FlaskConical, KeyRound, Layers,
-  LayoutGrid, ListTodo, LogOut, Logs, Mic, Mouse, MousePointer2, Plus,
+  LayoutGrid, ListTodo, LogOut, Logs, Mic, Mouse, MousePointer2, Plug, Plus,
   Route, ScrollText, Search, Settings, Shield, Smartphone, Sparkle,
   Users, Workflow, type LucideIcon, type LucideProps,
 } from 'lucide-react'
@@ -124,6 +124,10 @@ const icons = {
   mobile: {
     icon: Smartphone,
     motion: [{ ...turn([0, -7, 7, -7, 7, 0]), duration: 450 }],
+  },
+  plug: {
+    icon: Plug,
+    motion: [move(['translate(0, 0)', 'translate(2px, -2px)', 'translate(0, 0)'])],
   },
   connections: {
     icon: Blocks,

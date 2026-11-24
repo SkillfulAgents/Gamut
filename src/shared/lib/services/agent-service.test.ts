@@ -5,6 +5,7 @@ import * as os from 'os'
 import Database from 'better-sqlite3'
 import { drizzle } from 'drizzle-orm/better-sqlite3'
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator'
+import { eq } from 'drizzle-orm'
 import * as schema from '@shared/lib/db/schema'
 import { agentAvatarSchema } from '@shared/lib/types/agent-avatar'
 import {
@@ -15,15 +16,15 @@ import {
 
 // Mock the container host before importing the service
 // Use vi.hoisted to ensure mock variables are available when vi.mock is hoisted
-const { mockGetCachedInfo, mockStopContainer, mockGetClient, mockGetPendingReviewsForAgent } = vi.hoisted(() => {
+const { mockGetCachedInfo, mockStopContainer, mockGetClient, mockPendingReviews } = vi.hoisted(() => {
   const mockGetCachedInfo = vi.fn((): { status: string; port: number | null } => ({ status: 'stopped', port: null }))
   const mockStopContainer = vi.fn(() => Promise.resolve())
   const mockGetInfo = vi.fn(() => Promise.resolve({ status: 'stopped', port: null }))
   const mockGetClient = vi.fn(() => ({
     getInfo: mockGetInfo,
   }))
-  const mockGetPendingReviewsForAgent = vi.fn((): unknown[] => [])
-  return { mockGetCachedInfo, mockStopContainer, mockGetClient, mockGetPendingReviewsForAgent }
+  const mockPendingReviews = vi.fn((_agentSlug: string): unknown[] => [])
+  return { mockGetCachedInfo, mockStopContainer, mockGetClient, mockPendingReviews }
 })
 
 vi.mock('@shared/lib/container/container-host', async () => {
@@ -40,11 +41,13 @@ vi.mock('@shared/lib/container/container-host', async () => {
   }
 })
 
-vi.mock('@shared/lib/proxy/review-manager', () => ({
-  reviewManager: {
-    getPendingReviewsForAgent: mockGetPendingReviewsForAgent,
-  },
-}))
+// The agent's reviews: what is pending. The mock is told which agent's were asked.
+vi.mock('@shared/lib/proxy/agent-reviews', async (importOriginal) => {
+  const { agentReviewsWith } = await import('@shared/lib/agent-actor/testing/agent-store-mocks')
+  return agentReviewsWith(await importOriginal<typeof import('@shared/lib/proxy/agent-reviews')>(), (agentSlug) => ({
+    pending: () => mockPendingReviews(agentSlug),
+  }))
+})
 
 // The catalog is the `agents` table: one in-memory database per test, so a
 // test's agents never leak into the next.
@@ -288,7 +291,7 @@ Instructions
 
     it('surfaces awaiting input when agent has pending proxy reviews and no active sessions', async () => {
       await createTestAgent('review-agent', SAMPLE_INSTRUCTIONS)
-      mockGetPendingReviewsForAgent.mockReturnValueOnce([
+      mockPendingReviews.mockReturnValueOnce([
         { id: 'review-1', agentSlug: 'review-agent', accountId: 'acc-1', toolkit: 'gmail', method: 'GET', targetPath: '/messages', matchedScopes: [], scopeDescriptions: {} },
       ])
 
@@ -859,6 +862,35 @@ Instructions`
       expect(await fresh.mcpSessions.get('mcp-1', proxySession)).toBeNull()
       expect(await fresh.volumeUploads.allowDelete('notes.txt')).toBe(true)
       expect(await fresh.sessions.takeDeferredNaming('session-1')).toBe(false)
+    })
+
+    it('removes what the agent stored with it: its directory and its session index', async () => {
+      await createTestAgent('test-agent', SAMPLE_INSTRUCTIONS)
+      const sessionsOf = (slug: string) => testDb.select().from(schema.agentSessions).where(eq(schema.agentSessions.agentSlug, slug)).all()
+      await testDb.insert(schema.agentSessions).values({ agentSlug: 'test-agent', sessionId: 's1', metadata: '{"name":"Its session"}' }).run()
+
+      await deleteAgent('test-agent')
+
+      expect(fs.existsSync(path.join(testDir, 'agents', 'test-agent'))).toBe(false)
+      expect(await sessionsOf('test-agent')).toEqual([])
+    })
+
+    it('keeps the agent listed when what it stored cannot be deleted, so the delete can be retried', async () => {
+      await createTestAgent('test-agent', SAMPLE_INSTRUCTIONS)
+      // A read-only parent refuses to unlink the agent directory itself.
+      const agentsDir = path.join(testDir, 'agents')
+      await fs.promises.chmod(agentsDir, 0o555)
+
+      try {
+        await expect(deleteAgent('test-agent')).rejects.toThrow()
+        expect(await agentExists('test-agent')).toBe(true)
+      } finally {
+        await fs.promises.chmod(agentsDir, 0o755)
+      }
+
+      expect(await deleteAgent('test-agent')).toBe(true)
+      expect(await agentExists('test-agent')).toBe(false)
+      expect(fs.existsSync(path.join(agentsDir, 'test-agent'))).toBe(false)
     })
   })
 

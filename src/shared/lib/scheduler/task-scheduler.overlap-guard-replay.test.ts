@@ -101,15 +101,6 @@ vi.mock('@shared/lib/error-reporting', () => ({ captureException: vi.fn() }))
 
 // ----- Live-sessions-side mocks (mirrors the container replay suites) -----
 
-vi.mock('@shared/lib/computer-use/permission-manager', () => ({
-  computerUsePermissionManager: {
-    checkPermission: vi.fn(() => 'prompt_needed'),
-    getActiveApp: vi.fn(() => undefined),
-    setActiveApp: vi.fn(),
-    clearActiveApp: vi.fn(),
-    consumeOnceGrant: vi.fn(),
-  },
-}))
 vi.mock('@shared/lib/computer-use/types', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@shared/lib/computer-use/types')>()),
   getRequiredPermissionLevel: vi.fn(() => 'use_application'),
