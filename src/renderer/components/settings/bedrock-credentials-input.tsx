@@ -202,8 +202,8 @@ export function BedrockCredentialsInput({
                 </Button>
               )}
               {apiKeyStatus?.source === 'settings' && (
-                <Button size="sm" variant="outline" onClick={handleRemove} disabled={isBusy}>
-                  {isRemoving ? 'Removing...' : 'Remove Saved Credentials'}
+                <Button size="sm" variant="soft" onClick={handleRemove} disabled={isBusy}>
+                  {isRemoving ? 'Removing...' : 'Remove saved credentials'}
                 </Button>
               )}
             </div>
@@ -245,8 +245,8 @@ export function BedrockCredentialsInput({
                 </Button>
               )}
               {apiKeyStatus?.source === 'settings' && (
-                <Button size="sm" variant="outline" onClick={handleRemove} disabled={isBusy}>
-                  {isRemoving ? 'Removing...' : 'Remove Saved Credentials'}
+                <Button size="sm" variant="soft" onClick={handleRemove} disabled={isBusy}>
+                  {isRemoving ? 'Removing...' : 'Remove saved credentials'}
                 </Button>
               )}
             </div>

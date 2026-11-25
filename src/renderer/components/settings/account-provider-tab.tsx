@@ -7,7 +7,6 @@ import {
   SelectValue,
 } from '@renderer/components/ui/select'
 import { Input } from '@renderer/components/ui/input'
-import { Label } from '@renderer/components/ui/label'
 import { Button } from '@renderer/components/ui/button'
 import { useSettings, useUpdateSettings } from '@renderer/hooks/use-settings'
 import { useUser } from '@renderer/context/user-context'
@@ -15,6 +14,7 @@ import { usePlatformAuthStatus } from '@renderer/hooks/use-platform-auth'
 import { ComposioApiKeyInput } from '@renderer/components/settings/composio-api-key-input'
 import { ProviderApiKeyInput } from '@renderer/components/settings/provider-api-key-input'
 import type { AccountProviderType } from '@shared/lib/config/settings'
+import { SETTINGS_CARD_CLASS, SettingRow } from './setting-row'
 
 const ACCOUNT_PROVIDERS: Array<{
   value: AccountProviderType
@@ -77,38 +77,78 @@ export function AccountProviderTab() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h3 className="text-sm font-medium">Account Provider</h3>
-        <p className="text-xs text-muted-foreground mt-1">
-          Choose which service manages OAuth connections (Gmail, Slack, GitHub, etc.).
-        </p>
-      </div>
-
       <div className="space-y-2">
-        <Label htmlFor="account-provider">Provider</Label>
-        <Select
-          value={activeProvider}
-          onValueChange={(value) => {
-            updateSettings.mutateAsync({ app: { accountProvider: value as AccountProviderType } })
-              .catch((err) => console.error('Failed to save account provider:', err))
-          }}
-          disabled={isLoading}
-        >
-          <SelectTrigger id="account-provider">
-            <SelectValue placeholder="Select a provider" />
-          </SelectTrigger>
-          <SelectContent>
-            {ACCOUNT_PROVIDERS.map((p) => (
-              <SelectItem key={p.value} value={p.value}>
-                {p.label}
-                <span className="text-muted-foreground ml-2">({p.description})</span>
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <p className="text-xs text-muted-foreground">
-          Switching providers requires reconnecting your OAuth accounts.
-        </p>
+        <div className={SETTINGS_CARD_CLASS}>
+          <SettingRow
+            name="Service that manages OAuth connections"
+            help="Handles sign-in to Gmail, Slack, GitHub and the like. Switching providers means reconnecting your accounts."
+            htmlFor="account-provider"
+            right={
+              <Select
+                variant="row"
+                value={activeProvider}
+                onValueChange={(value) => {
+                  updateSettings.mutateAsync({ app: { accountProvider: value as AccountProviderType } })
+                    .catch((err) => console.error('Failed to save account provider:', err))
+                }}
+                disabled={isLoading}
+              >
+                <SelectTrigger id="account-provider">
+                  {/* The list explains each provider; the row shows only its name. */}
+                  <SelectValue placeholder="Select a provider">
+                    {ACCOUNT_PROVIDERS.find((p) => p.value === activeProvider)?.label}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  {ACCOUNT_PROVIDERS.map((p) => (
+                    <SelectItem key={p.value} value={p.value}>
+                      {p.label}
+                      <span className="text-muted-foreground ml-2">({p.description})</span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            }
+          />
+          {/* User ID — shared across providers */}
+          <SettingRow
+            name="Your user ID with the provider"
+            help={isAuthMode
+              ? 'Set automatically from your account.'
+              : 'Scopes OAuth connections to you. Any string works, such as your email.'}
+            status={!isAuthMode && hasUserId ? 'Configured' : undefined}
+            htmlFor="provider-user-id"
+            stack
+            right={
+              <>
+                <Input
+                  id="provider-user-id"
+                  type="text"
+                  value={isAuthMode ? (user?.id ?? '') : userIdInput}
+                  onChange={(e) => setUserIdInput(e.target.value)}
+                  placeholder={hasUserId ? 'Enter new user ID to replace' : 'Enter your user ID'}
+                  disabled={isAuthMode || isLoading}
+                  className="h-8 w-full md:w-[220px] text-xs"
+                />
+                {!isAuthMode && userIdInput.trim() && (
+                  <Button size="sm" onClick={handleSaveUserId} disabled={isSavingUserId}>
+                    {isSavingUserId ? 'Saving...' : 'Save user ID'}
+                  </Button>
+                )}
+                {!isAuthMode && hasUserId && !userIdInput.trim() && (
+                  <Button
+                    size="sm"
+                    variant="soft"
+                    onClick={handleRemoveUserId}
+                    disabled={isSavingUserId}
+                  >
+                    {isSavingUserId ? 'Removing...' : 'Remove user ID'}
+                  </Button>
+                )}
+              </>
+            }
+          />
+        </div>
       </div>
 
       {/* Provider-specific configuration */}
@@ -145,80 +185,33 @@ export function AccountProviderTab() {
       )}
 
       {activeProvider === 'nango' && (
-        <>
-          <ProviderApiKeyInput
-            providerId="nango"
-            label="Nango Secret Key"
-            placeholder="Enter Nango secret key"
-            apiKeySettingsField="nangoSecretKey"
-            apiKeyStatusKey="nango"
-            validationEndpoint="/api/settings/validate-nango-key"
-            validationBody={(apiKey) => ({ apiKey })}
-            showSourceIndicator
-            showNotConfiguredAlert
-            showHelpText
-            showRemoveButton
-            helpText={
-              <>
-                Find your secret key in the{' '}
-                <a
-                  href="https://app.nango.dev/dev/environment-settings#api-keys"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-primary underline underline-offset-4"
-                >
-                  Nango Dashboard
-                </a>
-              </>
-            }
-            disabled={isLoading}
-          />
-        </>
-      )}
-
-      {/* User ID — shared across providers */}
-      <div className="space-y-2">
-        <Label htmlFor="provider-user-id">User ID</Label>
-
-        {!isAuthMode && hasUserId && (
-          <div className="flex items-center gap-2">
-            <span className="text-xs px-2 py-0.5 rounded-full bg-green-500/10 text-green-700 dark:text-green-400">
-              Configured
-            </span>
-          </div>
-        )}
-
-        <Input
-          id="provider-user-id"
-          type="text"
-          value={isAuthMode ? (user?.id ?? '') : userIdInput}
-          onChange={(e) => setUserIdInput(e.target.value)}
-          placeholder={hasUserId ? 'Enter new user ID to replace' : 'Enter your user ID'}
-          disabled={isAuthMode || isLoading}
+        <ProviderApiKeyInput
+          providerId="nango"
+          label="Nango Secret Key"
+          placeholder="Enter Nango secret key"
+          apiKeySettingsField="nangoSecretKey"
+          apiKeyStatusKey="nango"
+          validationEndpoint="/api/settings/validate-nango-key"
+          validationBody={(apiKey) => ({ apiKey })}
+          showSourceIndicator
+          showNotConfiguredAlert
+          showHelpText
+          showRemoveButton
+          helpText={
+            <>
+              Find your secret key in the{' '}
+              <a
+                href="https://app.nango.dev/dev/environment-settings#api-keys"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-primary underline underline-offset-4"
+              >
+                Nango Dashboard
+              </a>
+            </>
+          }
+          disabled={isLoading}
         />
-
-        <p className="text-xs text-muted-foreground">
-          {isAuthMode
-            ? 'Automatically set from your account.'
-            : 'Your unique identifier for the account provider. Used to scope OAuth connections to you. Can be any string (e.g., your email).'}
-        </p>
-
-        {!isAuthMode && hasUserId && (
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={handleRemoveUserId}
-            disabled={isSavingUserId}
-          >
-            {isSavingUserId ? 'Removing...' : 'Remove User ID'}
-          </Button>
-        )}
-      </div>
-
-      {!isAuthMode && userIdInput.trim() && (
-        <Button size="sm" onClick={handleSaveUserId} disabled={isSavingUserId}>
-          {isSavingUserId ? 'Saving...' : 'Save User ID'}
-        </Button>
       )}
     </div>
   )

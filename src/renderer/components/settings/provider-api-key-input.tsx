@@ -214,12 +214,12 @@ export function ProviderApiKeyInput({
       {showRemoveButton && apiKeyStatus?.source === 'settings' && !hasInput && (
         <Button
           size="sm"
-          variant="outline"
+          variant="soft"
           onClick={showRemoveConfirm ? () => setShowRemoveDialog(true) : handleRemoveApiKey}
           disabled={isBusy}
           className="ml-2"
         >
-          {isRemoving ? 'Removing...' : 'Remove Saved Key'}
+          {isRemoving ? 'Removing...' : 'Remove saved key'}
         </Button>
       )}
     </div>

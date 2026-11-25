@@ -14,6 +14,7 @@ import { useSettings, useUpdateSettings } from '@renderer/hooks/use-settings'
 import { useUser } from '@renderer/context/user-context'
 import { Plus, Trash2 } from 'lucide-react'
 import type { AnalyticsTarget, AnalyticsTargetType } from '@shared/lib/config/settings'
+import { SETTINGS_CARD_CLASS, SETTINGS_SECTION_HEADING, SettingRow } from './setting-row'
 
 const TARGET_TYPE_LABELS: Record<AnalyticsTargetType, string> = {
   amplitude: 'Amplitude',
@@ -68,130 +69,125 @@ export function AnalyticsTab() {
 
   return (
     <div className="space-y-6">
-      {/* Share Error Reports */}
-      <div className="flex items-center justify-between">
-        <div className="space-y-0.5">
-          <Label htmlFor="share-error-reports">Share Error Reports</Label>
-          <p className="text-xs text-muted-foreground">
-            Send error reports to help us diagnose and fix issues faster
-          </p>
-        </div>
-        <Switch
-          id="share-error-reports"
-          checked={settings?.shareErrorReports !== false}
-          onCheckedChange={(checked: boolean) => {
-            updateSettings.mutate({ shareErrorReports: checked })
-          }}
-          disabled={isSettingsLoading}
+      <div className={SETTINGS_CARD_CLASS}>
+        <SettingRow
+          name="Share error reports"
+          htmlFor="share-error-reports"
+          right={
+            <Switch
+              id="share-error-reports"
+              checked={settings?.shareErrorReports !== false}
+              onCheckedChange={(checked: boolean) => {
+                updateSettings.mutate({ shareErrorReports: checked })
+              }}
+              disabled={isSettingsLoading}
+            />
+          }
         />
-      </div>
-
-      {/* Share Analytics */}
-      <div className="flex items-center justify-between">
-        <div className="space-y-0.5">
-          <Label htmlFor="share-analytics">Share Anonymous Analytics</Label>
-          <p className="text-xs text-muted-foreground">
-            Help improve Gamut by sharing anonymous usage data
-          </p>
-        </div>
-        <Switch
-          id="share-analytics"
-          checked={!!settings?.shareAnalytics}
-          onCheckedChange={(checked: boolean) => {
-            updateSettings.mutate({ shareAnalytics: checked })
-          }}
-          disabled={isSettingsLoading}
+        <SettingRow
+          name="Share anonymous usage data"
+          htmlFor="share-analytics"
+          right={
+            <Switch
+              id="share-analytics"
+              checked={!!settings?.shareAnalytics}
+              onCheckedChange={(checked: boolean) => {
+                updateSettings.mutate({ shareAnalytics: checked })
+              }}
+              disabled={isSettingsLoading}
+            />
+          }
         />
       </div>
 
       {/* Analytics Targets - Admin only */}
       {isAdmin && (
-        <div className="pt-4 border-t space-y-4">
-          <div>
-            <Label>Analytics Targets</Label>
-            <p className="text-xs text-muted-foreground mt-1">
-              Send analytics events to your own analytics providers. These apply to all users.
-            </p>
-          </div>
-
-          {/* Existing targets */}
-          {targets.length > 0 && (
-            <div className="space-y-3">
-              {targets.map((target, index) => (
-                <div key={index} className="flex items-center justify-between p-3 border rounded-card">
-                  <div className="flex items-center gap-3">
+        <div className="space-y-2">
+          <h3 className={SETTINGS_SECTION_HEADING}>Analytics targets</h3>
+          <div className={SETTINGS_CARD_CLASS}>
+            {targets.map((target, index) => (
+              <SettingRow
+                key={index}
+                name={TARGET_TYPE_LABELS[target.type]}
+                // Which key this target sends with: data, not a description.
+                status={Object.entries(target.config).map(([k, v]) =>
+                  `${k}: ${v.slice(0, 8)}...`
+                ).join(', ')}
+                right={
+                  <>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8"
+                      onClick={() => handleRemoveTarget(index)}
+                      aria-label={`Remove ${TARGET_TYPE_LABELS[target.type]} target`}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
                     <Switch
                       checked={target.enabled}
                       onCheckedChange={(checked) => handleToggleTarget(index, checked)}
+                      aria-label={`Send events to ${TARGET_TYPE_LABELS[target.type]}`}
                     />
-                    <div>
-                      <p className="text-sm font-medium">{TARGET_TYPE_LABELS[target.type]}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {Object.entries(target.config).map(([k, v]) =>
-                          `${k}: ${v.slice(0, 8)}...`
-                        ).join(', ')}
-                      </p>
-                    </div>
+                  </>
+                }
+              />
+            ))}
+
+            {showAddForm ? (
+              <div className="space-y-3 py-3 px-4">
+                <Select
+                  value={newTargetType}
+                  onValueChange={(v) => {
+                    setNewTargetType(v as AnalyticsTargetType)
+                    setNewTargetConfig({})
+                  }}
+                >
+                  <SelectTrigger aria-label="Analytics provider">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="amplitude">Amplitude</SelectItem>
+                    <SelectItem value="google-analytics">Google Analytics</SelectItem>
+                    <SelectItem value="mixpanel">Mixpanel</SelectItem>
+                  </SelectContent>
+                </Select>
+
+                {TARGET_CONFIG_FIELDS[newTargetType].map((field) => (
+                  <div key={field.key} className="space-y-1">
+                    <Label htmlFor={`analytics-target-${field.key}`} className="text-xs font-normal">{field.label}</Label>
+                    <Input
+                      id={`analytics-target-${field.key}`}
+                      type="password"
+                      placeholder={field.placeholder}
+                      value={newTargetConfig[field.key] ?? ''}
+                      onChange={(e) => setNewTargetConfig(prev => ({ ...prev, [field.key]: e.target.value }))}
+                    />
                   </div>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => handleRemoveTarget(index)}
-                  >
-                    <Trash2 className="h-4 w-4" />
+                ))}
+
+                <div className="flex gap-2">
+                  <Button size="sm" onClick={handleAddTarget}>
+                    Add
+                  </Button>
+                  <Button size="sm" variant="soft" onClick={() => { setShowAddForm(false); setNewTargetConfig({}) }}>
+                    Cancel
                   </Button>
                 </div>
-              ))}
-            </div>
-          )}
-
-          {/* Add new target */}
-          {showAddForm ? (
-            <div className="space-y-3 p-3 border rounded-card">
-              <Select
-                value={newTargetType}
-                onValueChange={(v) => {
-                  setNewTargetType(v as AnalyticsTargetType)
-                  setNewTargetConfig({})
-                }}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="amplitude">Amplitude</SelectItem>
-                  <SelectItem value="google-analytics">Google Analytics</SelectItem>
-                  <SelectItem value="mixpanel">Mixpanel</SelectItem>
-                </SelectContent>
-              </Select>
-
-              {TARGET_CONFIG_FIELDS[newTargetType].map((field) => (
-                <div key={field.key} className="space-y-1">
-                  <Label>{field.label}</Label>
-                  <Input
-                    type="password"
-                    placeholder={field.placeholder}
-                    value={newTargetConfig[field.key] ?? ''}
-                    onChange={(e) => setNewTargetConfig(prev => ({ ...prev, [field.key]: e.target.value }))}
-                  />
-                </div>
-              ))}
-
-              <div className="flex gap-2">
-                <Button size="sm" onClick={handleAddTarget}>
-                  Add
-                </Button>
-                <Button size="sm" variant="outline" onClick={() => { setShowAddForm(false); setNewTargetConfig({}) }}>
-                  Cancel
-                </Button>
               </div>
-            </div>
-          ) : (
-            <Button variant="outline" size="sm" onClick={() => setShowAddForm(true)}>
-              <Plus className="h-4 w-4 mr-2" />
-              Add Analytics Target
-            </Button>
-          )}
+            ) : (
+              <SettingRow
+                name="Send events to your own analytics provider"
+                help="Targets apply to every user of this workspace."
+                right={
+                  <Button variant="soft" size="sm" onClick={() => setShowAddForm(true)}>
+                    <Plus className="h-4 w-4 mr-2" />
+                    Add analytics target
+                  </Button>
+                }
+              />
+            )}
+          </div>
         </div>
       )}
     </div>

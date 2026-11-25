@@ -149,12 +149,12 @@ export function GenericCredentialsInput({ disabled = false }: GenericCredentials
       <div className="flex gap-2">
         {canValidate && (
           <Button size="sm" onClick={handleValidateAndSave} disabled={isBusy}>
-            {isValidating ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Validating...</> : 'Validate & Save'}
+            {isValidating ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Validating...</> : 'Validate & save'}
           </Button>
         )}
         {apiKeyStatus?.source === 'settings' && (
-          <Button size="sm" variant="outline" onClick={handleRemove} disabled={isBusy}>
-            {isRemoving ? 'Removing...' : 'Remove Saved Credentials'}
+          <Button size="sm" variant="soft" onClick={handleRemove} disabled={isBusy}>
+            {isRemoving ? 'Removing...' : 'Remove saved credentials'}
           </Button>
         )}
       </div>

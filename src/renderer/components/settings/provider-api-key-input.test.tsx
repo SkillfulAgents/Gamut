@@ -45,7 +45,7 @@ describe('ProviderApiKeyInput', () => {
       />
     )
 
-    await user.click(screen.getByRole('button', { name: 'Remove Saved Key' }))
+    await user.click(screen.getByRole('button', { name: 'Remove saved key' }))
 
     expect(screen.getByRole('alertdialog')).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Remove Saved Key' })).toBeInTheDocument()
@@ -63,7 +63,7 @@ describe('ProviderApiKeyInput', () => {
       />
     )
 
-    await user.click(screen.getByRole('button', { name: 'Remove Saved Key' }))
+    await user.click(screen.getByRole('button', { name: 'Remove saved key' }))
     await user.click(screen.getByRole('button', { name: 'Cancel' }))
 
     await waitFor(() => {
@@ -83,7 +83,7 @@ describe('ProviderApiKeyInput', () => {
       />
     )
 
-    await user.click(screen.getByRole('button', { name: 'Remove Saved Key' }))
+    await user.click(screen.getByRole('button', { name: 'Remove saved key' }))
     await user.click(screen.getByRole('button', { name: 'Remove' }))
 
     await waitFor(() => {
