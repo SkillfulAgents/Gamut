@@ -8,7 +8,7 @@ vi.mock('@shared/lib/services/agent-members-service', () => ({
   changeMemberRole: (...args: unknown[]) => mockChangeMemberRole(...args),
   removeMember: (...args: unknown[]) => mockRemoveMember(...args),
 }))
-import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach, onTestFinished, type MockInstance } from 'vitest'
 
 // The last-owner guards live in agent-members-service (real-database tests
 // there); the routes only map its outcome to a status and a message.
@@ -9330,6 +9330,28 @@ describe('artifact proxy — subPath uses the raw display-slug URL', () => {
     expect(init.headers).toHaveProperty('content-type', 'application/json')
     expect(init.headers).not.toHaveProperty('content-length')
     expect(new TextDecoder().decode(init.body as ArrayBuffer)).toBe(body)
+  })
+
+  it('delivers a POST body to a real dashboard server with undici loaded', async () => {
+    // The host imports undici, which then serves every fetch in the process.
+    // On Node 22 that fetch rejects a forwarded content-length (SUP-1790).
+    await import('undici')
+    const dashboard = createServer((req, res) => req.pipe(res))
+    await new Promise<void>((resolve) => dashboard.listen(0, '127.0.0.1', resolve))
+    onTestFinished(() => { dashboard.close() })
+    const dashboardUrl = `http://127.0.0.1:${(dashboard.address() as AddressInfo).port}`
+    // The same fetch BaseContainerClient.request makes to the container port.
+    mockContainerFetch.mockImplementation((path: string, init?: RequestInit) => fetch(`${dashboardUrl}${path}`, init))
+    const body = JSON.stringify({ action: 'reply', text: 'hello' })
+
+    const res = await app.request('http://localhost/api/agents/abc1234567/artifacts/dash/api/respond', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'content-length': String(body.length) },
+      body,
+    })
+
+    expect(res.status).toBe(200)
+    expect(await res.text()).toBe(body)
   })
 
   it('canonicalizes display-slug document navigations to match the dashboard router base', async () => {
