@@ -3086,34 +3086,38 @@ agents.get('/:id/sessions/:sessionId', AgentRead(), async (c) => {
     const sessionId = c.req.param('sessionId')
     const actor = agentRegistry.get(agentSlug)
 
-    // One metadata read serves the session, its fork source's name, and the
-    // fields below.
-    const metadataMap = await actor.sessions.readMetadata()
-    const metadataOf = (id: string) => (Object.hasOwn(metadataMap, id) ? metadataMap[id] : null)
-    const metadata = metadataOf(sessionId)
-    const session = await actor.sessions.get(sessionId, { metadata })
+    // The session's one index entry serves the session and the fields below:
+    // this runs on every session open, and an agent can have thousands of
+    // sessions.
+    const found = await actor.sessions.getWithMetadata(sessionId)
 
-    if (!session) {
+    if (!found) {
       return c.json({ error: 'Session not found' }, 404)
     }
+    const { session, metadata } = found
 
-    const live = await actor.sessions.live(sessionId)
-    let effective: Awaited<ReturnType<typeof resolveConnectionRuntimeInherit>> | null = null
-    // One read for the session's display defaults; the next view reads again.
-    const settings = await getSettings()
-    if (settings.llmDefault) {
+    const displayDefaults = async (): Promise<Awaited<ReturnType<typeof resolveConnectionRuntimeInherit>> | null> => {
+      // One read for the session's display defaults; the next view reads again.
+      const settings = await getSettings()
+      if (!settings.llmDefault) return null
       try {
-        effective = await resolveConnectionRuntimeInherit(metadata ?? {}, await readAgentPreferences(agentSlug, settings), effectiveModelsFrom(settings), settings)
+        return await resolveConnectionRuntimeInherit(metadata ?? {}, await readAgentPreferences(agentSlug, settings), effectiveModelsFrom(settings), settings)
       } catch (error) {
         // History remains readable during provider/configuration outages.
         // A new turn still resolves and validates its runtime before sending.
         console.warn('Could not resolve session display defaults:', error)
+        return null
       }
     }
-    const pendingWake = await getPendingWakeForSession(agentSlug, sessionId)
-    const invokingAgent = metadata?.invokedByAgentSlug
-      ? await getAgent(metadata.invokedByAgentSlug)
-      : null
+    // None of these reads needs another's answer, so none waits for another.
+    const [live, effective, pendingWake, invokingAgent, forkSource] = await Promise.all([
+      actor.sessions.live(sessionId),
+      displayDefaults(),
+      getPendingWakeForSession(agentSlug, sessionId),
+      // Only its name is used, which the catalog holds: its instructions are not read.
+      metadata?.invokedByAgentSlug ? getAgentRecord(metadata.invokedByAgentSlug) : null,
+      metadata?.forkedFromSessionId ? actor.sessions.metadata(metadata.forkedFromSessionId) : null,
+    ])
 
     return c.json({
       id: session.id,
@@ -3134,15 +3138,13 @@ agents.get('/:id/sessions/:sessionId', AgentRead(), async (c) => {
       webhookTriggerName: metadata?.webhookTriggerName,
       invokedByAgentSlug: metadata?.invokedByAgentSlug,
       invokedByAgentName: metadata?.invokedByAgentSlug
-        ? invokingAgent?.frontmatter.name ?? metadata.invokedByAgentSlug
+        ? invokingAgent?.name ?? metadata.invokedByAgentSlug
         : undefined,
       mcpInvocation: metadata?.mcpInvocation ? { clientName: metadata.mcpInvocation.clientName } : undefined,
       isWidgetRepair: metadata?.isWidgetRepair,
       widgetRepairSlug: metadata?.widgetRepairSlug,
       forkedFromSessionId: metadata?.forkedFromSessionId,
-      forkedFromSessionName: metadata?.forkedFromSessionId
-        ? metadataOf(metadata.forkedFromSessionId)?.name
-        : undefined,
+      forkedFromSessionName: forkSource?.name,
       effort: metadata?.effort,
       speed: metadata?.speed,
       model: effective?.model ?? metadata?.model,

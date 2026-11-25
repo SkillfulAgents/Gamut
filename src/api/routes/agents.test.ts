@@ -528,6 +528,7 @@ vi.mock('@shared/lib/services/session-service', async (importOriginal) => {
   getSessionMessagesPage: vi.fn(),
   getSessionMessagesDelta: vi.fn(),
   getSession: vi.fn(),
+  getSessionWithMetadata: vi.fn(),
   getSessionMetadata: vi.fn(),
   sessionExists: vi.fn().mockResolvedValue(true),
   sessionIsKnown: vi.fn().mockResolvedValue(true),
@@ -942,8 +943,8 @@ import { attachMount, removeMount, resolveMountPath } from '@shared/lib/services
 import { notificationManager } from '@shared/lib/notifications/notification-manager'
 import { appendMentions } from '@shared/lib/utils/mentions'
 import { appendComputerUseNote } from '@shared/lib/utils/computer-use-note'
-import { listSessions, listSessionsByIds, getSessionMessagesWithCompact, getSessionMessagesPage, getSessionMessagesDelta, getSessionSummary, sessionExists, sessionIsKnown, isSessionRegistered, deleteSession, getSession, getSessionMetadata, updateSessionName, registerSession, readSessionMetadata, updateSessionMetadata } from '@shared/lib/services/session-service'
-import { createScheduledTask, listCompletedOneTimeTasks, listPendingScheduledTasks, listPendingWakesByAgent, updateScheduleExpression } from '@shared/lib/services/scheduled-task-service'
+import { listSessions, listSessionsByIds, getSessionMessagesWithCompact, getSessionMessagesPage, getSessionMessagesDelta, getSessionSummary, sessionExists, sessionIsKnown, isSessionRegistered, deleteSession, getSession, getSessionWithMetadata, getSessionMetadata, updateSessionName, registerSession, readSessionMetadata, updateSessionMetadata } from '@shared/lib/services/session-service'
+import { createScheduledTask, getPendingWakeForSession, listCompletedOneTimeTasks, listPendingScheduledTasks, listPendingWakesByAgent, updateScheduleExpression } from '@shared/lib/services/scheduled-task-service'
 import { listArtifactsFromFilesystem } from '@shared/lib/services/artifact-service'
 import { scanArtifactsIn } from '@shared/lib/services/artifact-scan'
 
@@ -11627,22 +11628,25 @@ describe('session existence guards read metadata, not the transcript', () => {
     createdAt: new Date('2026-03-01T10:00:00.000Z'),
     lastActivityAt: new Date('2026-03-01T10:05:00.000Z'),
   }
+  /** What the single-session read finds in the session's index entry. */
+  const sessionWith = (metadata: Awaited<ReturnType<typeof getSessionMetadata>>) =>
+    vi.mocked(getSessionWithMetadata).mockResolvedValue({ session: SESSION_INFO, metadata })
 
   beforeEach(async () => {
     vi.clearAllMocks()
     app = createApp()
     vi.mocked(sessionIsKnown).mockResolvedValue(true)
     vi.mocked(getSession).mockResolvedValue(SESSION_INFO)
+    sessionWith(null)
+    vi.mocked(getSessionMetadata).mockResolvedValue(null)
     vi.mocked(readSessionMetadata).mockResolvedValue({})
+    vi.mocked(getPendingWakeForSession).mockResolvedValue(null)
+    vi.mocked(getAgentRecord).mockResolvedValue(null)
   })
 
   it('returns x-agent provenance for the session breadcrumb and back bar', async () => {
-    vi.mocked(readSessionMetadata).mockResolvedValue({
-      'sess-1': { invokedByAgentSlug: 'caller-agent' },
-    })
-    vi.mocked(getAgent).mockResolvedValue({
-      frontmatter: { name: 'Caller Agent' },
-    } as any)
+    sessionWith({ invokedByAgentSlug: 'caller-agent' })
+    vi.mocked(getAgentRecord).mockResolvedValue({ slug: 'caller-agent', name: 'Caller Agent' } as any)
 
     const res = await getReq(app, '/api/agents/test-agent/sessions/sess-1')
 
@@ -11652,12 +11656,22 @@ describe('session existence guards read metadata, not the transcript', () => {
       invokedByAgentSlug: 'caller-agent',
       invokedByAgentName: 'Caller Agent',
     })
+    // The name is the catalog's: the calling agent's instructions are not read for it.
+    expect(getAgentRecord).toHaveBeenCalledWith('caller-agent')
+    expect(getAgent).not.toHaveBeenCalled()
+  })
+
+  it('names a calling agent that is gone by its slug', async () => {
+    sessionWith({ invokedByAgentSlug: 'caller-agent' })
+
+    const res = await getReq(app, '/api/agents/test-agent/sessions/sess-1')
+
+    expect(res.status).toBe(200)
+    expect(await res.json()).toMatchObject({ invokedByAgentSlug: 'caller-agent', invokedByAgentName: 'caller-agent' })
   })
 
   it('returns widget repair provenance for the session breadcrumb and back bar', async () => {
-    vi.mocked(readSessionMetadata).mockResolvedValue({
-      'sess-1': { isWidgetRepair: true, widgetRepairSlug: 'weather' },
-    })
+    sessionWith({ isWidgetRepair: true, widgetRepairSlug: 'weather' })
 
     const res = await getReq(app, '/api/agents/test-agent/sessions/sess-1')
 
@@ -11669,13 +11683,13 @@ describe('session existence guards read metadata, not the transcript', () => {
       widgetRepairSlug: 'weather',
     })
     expect(body).not.toHaveProperty('invokedByAgentSlug')
+    expect(body).not.toHaveProperty('invokedByAgentName')
+    expect(getAgentRecord).not.toHaveBeenCalled()
   })
 
   it('returns fork lineage from the parent listing name', async () => {
-    vi.mocked(readSessionMetadata).mockResolvedValue({
-      'sess-1': { forkedFromSessionId: 'src-1' },
-      'src-1': { name: 'Pricing' },
-    })
+    sessionWith({ forkedFromSessionId: 'src-1' })
+    vi.mocked(getSessionMetadata).mockResolvedValue({ name: 'Pricing' })
 
     const res = await getReq(app, '/api/agents/test-agent/sessions/sess-1')
 
@@ -11685,14 +11699,134 @@ describe('session existence guards read metadata, not the transcript', () => {
       forkedFromSessionId: 'src-1',
       forkedFromSessionName: 'Pricing',
     })
-    // One metadata read serves the session and its parent's name, and is
-    // handed to getSession rather than read again there.
-    expect(readSessionMetadata).toHaveBeenCalledTimes(1)
+    // One entry serves the session and its metadata, and one more the parent's
+    // name: the agent's other sessions are not read.
+    expect(getSessionWithMetadata).toHaveBeenCalledTimes(1)
+    expect(getSessionWithMetadata).toHaveBeenCalledWith(expect.objectContaining({ slug: 'test-agent' }), 'sess-1')
+    expect(getSessionMetadata).toHaveBeenCalledTimes(1)
+    expect(getSessionMetadata).toHaveBeenCalledWith(expect.objectContaining({ slug: 'test-agent' }), 'src-1')
+    expect(readSessionMetadata).not.toHaveBeenCalled()
+    expect(getSession).not.toHaveBeenCalled()
+  })
+
+  it('reads one index entry for a session that is not a fork, and none of the agent\'s other sessions', async () => {
+    sessionWith({ name: 'Renamed', model: 'claude-sonnet-5' })
+
+    const res = await getReq(app, '/api/agents/test-agent/sessions/sess-1')
+
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body).toMatchObject({ id: 'sess-1', name: 'Renamed', model: 'claude-sonnet-5' })
+    expect(body).not.toHaveProperty('forkedFromSessionName')
+    expect(getSessionWithMetadata).toHaveBeenCalledTimes(1)
     expect(getSessionMetadata).not.toHaveBeenCalled()
-    expect(getSession).toHaveBeenCalledTimes(1)
-    expect(getSession).toHaveBeenCalledWith(expect.objectContaining({ slug: 'test-agent' }), 'sess-1', {
-      metadata: { forkedFromSessionId: 'src-1' },
+    expect(readSessionMetadata).not.toHaveBeenCalled()
+    expect(getSession).not.toHaveBeenCalled()
+  })
+
+  it('answers 404 for an unknown session without reading anything else', async () => {
+    vi.mocked(getSessionWithMetadata).mockResolvedValue(null)
+    mockRuntimeSettings.mockClear()
+
+    const res = await getReq(app, '/api/agents/test-agent/sessions/sess-1')
+
+    expect(res.status).toBe(404)
+    expect(getPendingWakeForSession).not.toHaveBeenCalled()
+    expect(getSessionMetadata).not.toHaveBeenCalled()
+    expect(getAgentRecord).not.toHaveBeenCalled()
+    expect(mockRuntimeSettings).not.toHaveBeenCalled()
+  })
+
+  it('starts the reads that follow the session\'s entry together', async () => {
+    sessionWith({ invokedByAgentSlug: 'caller-agent', forkedFromSessionId: 'src-1' })
+    const runtime = await import('@shared/lib/llm-provider/connection-runtime')
+    const settings = mockRuntimeSettings()
+    mockRuntimeSettings.mockReturnValue({ ...settings, llmDefault: { model: 'model-a', llmProviderId: 'conn-1' } } as never)
+    // Every read is held open: one that waited for another would never start.
+    const held: Array<() => void> = []
+    const hold = <T,>(value: T) => () => new Promise<T>((resolve) => { held.push(() => resolve(value)) })
+    const inherit = vi.spyOn(runtime, 'resolveConnectionRuntimeInherit').mockImplementation(hold({ model: 'model-a', llmProviderId: 'conn-1' }) as never)
+    vi.mocked(getPendingWakeForSession).mockImplementation(hold(null))
+    vi.mocked(getAgentRecord).mockImplementation(hold({ slug: 'caller-agent', name: 'Caller Agent' }) as never)
+    vi.mocked(getSessionMetadata).mockImplementation(hold({ name: 'Pricing' }))
+    try {
+      const pending = getReq(app, '/api/agents/test-agent/sessions/sess-1')
+      await vi.waitFor(() => expect(held).toHaveLength(4))
+      expect(inherit).toHaveBeenCalledTimes(1)
+      expect(getPendingWakeForSession).toHaveBeenCalledWith('test-agent', 'sess-1')
+      expect(getAgentRecord).toHaveBeenCalledWith('caller-agent')
+      expect(getSessionMetadata).toHaveBeenCalledWith(expect.anything(), 'src-1')
+      // Answered in the reverse of the order they were asked in.
+      for (const release of held.splice(0).reverse()) release()
+      const res = await pending
+      expect(res.status).toBe(200)
+      expect(await res.json()).toMatchObject({
+        model: 'model-a',
+        llmProviderId: 'conn-1',
+        invokedByAgentName: 'Caller Agent',
+        forkedFromSessionName: 'Pricing',
+      })
+    } finally {
+      for (const release of held) release()
+      inherit.mockRestore()
+      mockRuntimeSettings.mockReturnValue(settings)
+    }
+  })
+
+  it('carries a pending wake beside the other fields', async () => {
+    vi.mocked(getPendingWakeForSession).mockResolvedValue({
+      id: 'wake-1', nextExecutionAt: new Date('2026-03-02T09:00:00.000Z'), prompt: 'Check the build', name: 'Build check',
+    } as never)
+
+    const res = await getReq(app, '/api/agents/test-agent/sessions/sess-1')
+
+    expect(res.status).toBe(200)
+    expect(await res.json()).toMatchObject({
+      pendingWakeAt: '2026-03-02T09:00:00.000Z',
+      pendingWakeTaskId: 'wake-1',
+      pendingWakeNote: 'Check the build',
+      pendingWakeSummary: 'Build check',
     })
+  })
+
+  it.each([
+    ['the pending wake', () => { vi.mocked(getPendingWakeForSession).mockRejectedValue(new Error('db down')) }],
+    ['the fork source', () => {
+      sessionWith({ forkedFromSessionId: 'src-1' })
+      vi.mocked(getSessionMetadata).mockRejectedValue(new Error('db down'))
+    }],
+    ['the calling agent', () => {
+      sessionWith({ invokedByAgentSlug: 'caller-agent' })
+      vi.mocked(getAgentRecord).mockRejectedValue(new Error('db down'))
+    }],
+  ])('answers 500 when the read of %s fails, as it did when the reads ran in turn', async (_name, arrange) => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    arrange()
+    try {
+      const res = await getReq(app, '/api/agents/test-agent/sessions/sess-1')
+      expect(res.status).toBe(500)
+      expect(await res.json()).toEqual({ error: 'Failed to fetch session' })
+    } finally {
+      consoleError.mockRestore()
+    }
+  })
+
+  it('still answers when the display defaults cannot be resolved', async () => {
+    sessionWith({ model: 'stored-model', llmProviderId: 'stored-conn' })
+    const runtime = await import('@shared/lib/llm-provider/connection-runtime')
+    const inherit = vi.spyOn(runtime, 'resolveConnectionRuntimeInherit').mockRejectedValue(new Error('provider outage'))
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const settings = mockRuntimeSettings()
+    mockRuntimeSettings.mockReturnValue({ ...settings, llmDefault: { model: 'model-a', llmProviderId: 'conn-1' } } as never)
+    try {
+      const res = await getReq(app, '/api/agents/test-agent/sessions/sess-1')
+      expect(res.status).toBe(200)
+      expect(await res.json()).toMatchObject({ model: 'stored-model', llmProviderId: 'stored-conn' })
+    } finally {
+      inherit.mockRestore()
+      warn.mockRestore()
+      mockRuntimeSettings.mockReturnValue(settings)
+    }
   })
 
   it('resolves the session display defaults from one read of the settings, and the next view reads again', async () => {
@@ -11716,10 +11850,8 @@ describe('session existence guards read metadata, not the transcript', () => {
   })
 
   it('uses the registered listing name, not a transcript-derived title', async () => {
-    vi.mocked(readSessionMetadata).mockResolvedValue({
-      'sess-1': { forkedFromSessionId: 'src-1' },
-      'src-1': { name: 'Pricing' },
-    })
+    sessionWith({ forkedFromSessionId: 'src-1' })
+    vi.mocked(getSessionMetadata).mockResolvedValue({ name: 'Pricing' })
     vi.mocked(getSession).mockImplementation(async (_slug, id) => {
       if (id === 'sess-1') return SESSION_INFO
       if (id === 'src-1') return { ...SESSION_INFO, id: 'src-1', name: 'First user message' }
@@ -11730,13 +11862,11 @@ describe('session existence guards read metadata, not the transcript', () => {
 
     expect(res.status).toBe(200)
     expect((await res.json()).forkedFromSessionName).toBe('Pricing')
-    expect(getSession).toHaveBeenCalledTimes(1)
+    expect(getSession).not.toHaveBeenCalled()
   })
 
   it('omits forkedFromSessionName when the parent listing is gone', async () => {
-    vi.mocked(readSessionMetadata).mockResolvedValue({
-      'sess-1': { forkedFromSessionId: 'src-1' },
-    })
+    sessionWith({ forkedFromSessionId: 'src-1' })
 
     const res = await getReq(app, '/api/agents/test-agent/sessions/sess-1')
 
