@@ -113,7 +113,7 @@ export function PasswordManagersSettings() {
 
   return (
     <div id="password-managers" className="space-y-2" data-testid="password-managers-settings">
-      <h3 className="px-1 text-xs font-medium text-muted-foreground">Password Managers</h3>
+      <h3 className="px-1 text-xs font-medium text-muted-foreground">Password managers</h3>
       {loading && providers.length === 0 ? (
         <div className="flex items-center gap-2 rounded-card border bg-background px-4 py-3 text-xs text-muted-foreground">
           <RefreshCw className="h-3.5 w-3.5 animate-spin" />
@@ -197,7 +197,7 @@ export function PasswordManagersSettings() {
                         <Button
                           type="button"
                           size="xs"
-                          variant="outline"
+                          variant="soft"
                           onClick={() => void openRemediation(provider.remediation!.action!)}
                         >
                           <ExternalLink className="mr-1 h-3 w-3" />
