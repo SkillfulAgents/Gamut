@@ -51,7 +51,24 @@ class AccountMcpConnection implements McpConnection {
     }
     const policy = await resolvePolicy()
     if (policy.decision === 'block') return { ok: false, reason: 'blocked' }
-    const policyOutcome = policy.decision === 'review' ? 'review' : 'allow'
+    // "Allow for this session": a grant of the calling session stands in for
+    // the review the policy asks for. Read as the policy's own answer, so a
+    // rule that requires review still holds the call; a check that fails
+    // leaves the call to its card.
+    const allowedForSession = async (current: { decision: string; matchedScopes: string[] }): Promise<boolean> => {
+      if (current.decision !== 'review' || !call.callerSessionId) return false
+      try {
+        return await agentRegistry.get(this.agentSlug).inputs.reviews.sessionAllows({
+          callerSessionId: call.callerSessionId, kind: 'mcp', targetId: this.row.id, scopes: current.matchedScopes,
+        })
+      } catch (error) {
+        console.warn('[mcp-proxy] Session grant check failed, leaving the call to review:', error)
+        return false
+      }
+    }
+    const sessionGranted = await allowedForSession(policy)
+    const policyOutcome = policy.decision === 'review' && !sessionGranted ? 'review' : 'allow'
+    const allowedAs = sessionGranted ? 'allowed_for_session' : policy.decision
 
     // Proxy rules: a require rule can send an allowed call to review; an
     // allow rule can move a reviewed call to allow.
@@ -67,7 +84,7 @@ class AccountMcpConnection implements McpConnection {
     // so the agent can retry, rather than parking an allowed call for minutes.
     if (gate?.unavailable && policyOutcome === 'allow') return { ok: false, reason: 'rules_unavailable' }
     if (gate?.allowedBy) return { ok: true, policyDecision: 'allowed_by_rule', ruleVersionId, ruleOutcomes }
-    if ((gate?.decision ?? policyOutcome) === 'allow') return { ok: true, policyDecision: policy.decision, ruleOutcomes }
+    if ((gate?.decision ?? policyOutcome) === 'allow') return { ok: true, policyDecision: allowedAs, ruleOutcomes }
     const reviewOutcomes = gate ? reviewRuleOutcomes(gate.evaluations) : []
     const rules = gate ? reportedRules(gate) : []
     try {
@@ -85,7 +102,7 @@ class AccountMcpConnection implements McpConnection {
         reevaluate: async () => {
           const current = await resolvePolicy()
           if (current.decision === 'block') return 'deny'
-          const outcome = current.decision === 'review' ? 'review' : 'allow'
+          const outcome = current.decision === 'review' && !(await allowedForSession(current)) ? 'review' : 'allow'
           const again = await runRules(outcome)
           if (!again) return outcome
           return again.unavailable ? 'review' : again.decision

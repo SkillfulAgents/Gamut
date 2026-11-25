@@ -70,7 +70,7 @@ import type {
   UserInputRequestOutcome,
 } from '@shared/lib/tools/requests/request-schema'
 import type { SettledUserInputRequest } from '@shared/lib/tools/requests/agent-input-requests'
-import type { ReviewDecisionDetail, ReviewOutcome, ReviewRequest } from '@shared/lib/proxy/agent-reviews'
+import type { ReviewDecisionDetail, ReviewOutcome, ReviewRequest, SessionGrantCheck, SessionGrantResult } from '@shared/lib/proxy/agent-reviews'
 import type { ReviewDetails } from '@shared/lib/proxy/review-display'
 import type { AccountReauthDetails, McpReauthDetails, ReauthOutcome } from '@shared/lib/proxy/reauth-waits'
 import type { ScopeLabel } from '@shared/lib/proxy/scope-metadata'
@@ -854,6 +854,10 @@ export interface ReviewOps {
   get(id: string): Promise<({ id: string; displayText: string } & ReviewDetails) | null>
   /** `AgentReviews.submit` — only a review this agent holds can be found. */
   submit(id: string, decision: 'allow' | 'deny', detail?: ReviewDecisionDetail): Promise<boolean>
+  /** `AgentReviews.allowForSession`: "Allow for this session" on a review this agent holds. */
+  allowForSession(id: string): Promise<SessionGrantResult>
+  /** `AgentReviews.sessionAllows`: whether the calling session's grants cover a request. */
+  sessionAllows(check: SessionGrantCheck): Promise<boolean>
   /** `AgentReviews.resolveMatching` */
   resolveMatching(scope: string, decision: 'allow' | 'deny'): Promise<void>
   /** `AgentReviews.resolveMatchingByLabel` */

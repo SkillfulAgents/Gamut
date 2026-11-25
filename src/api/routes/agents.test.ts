@@ -727,12 +727,14 @@ vi.mock('@shared/lib/error-reporting', () => ({
 // mocks are told which agent's reviews were asked.
 const mockPendingReviews = vi.fn((_slug: string) => [] as any[])
 const mockSubmitReview = vi.fn((..._args: unknown[]) => false)
+const mockAllowForSession = vi.fn(async (..._args: unknown[]): Promise<string> => 'granted')
 vi.mock('@shared/lib/proxy/agent-reviews', async (importOriginal) => {
   const { agentReviewsWith } = await import('@shared/lib/agent-actor/testing/agent-store-mocks')
   return agentReviewsWith(await importOriginal<typeof import('@shared/lib/proxy/agent-reviews')>(), (agentSlug) => ({
     pending: () => mockPendingReviews(agentSlug),
     denyAll: vi.fn(),
     submit: (...args) => mockSubmitReview(agentSlug, ...args),
+    allowForSession: (id) => mockAllowForSession(agentSlug, id) as ReturnType<typeof import('@shared/lib/proxy/agent-reviews').AgentReviews.prototype.allowForSession>,
     resolveMatching: vi.fn(),
     resolveMatchingByLabel: vi.fn(),
     resolveMatchingXAgent: vi.fn(),
@@ -9458,6 +9460,32 @@ describe('POST /api/agents/:id/proxy-review/:reviewId (agent rule requests)', ()
       expect((await postJson(app, '/api/agents/my-agent/proxy-review/review-1', { decision: 'allow', pick: { model } })).status).toBe(409)
       expect(mockSubmitReview).not.toHaveBeenCalled()
     })
+  })
+})
+
+describe('POST /api/agents/:id/proxy-review/:reviewId/session', () => {
+  const app = createApp()
+  const post = () => app.request('/api/agents/my-agent/proxy-review/review-1/session', { method: 'POST' })
+
+  beforeEach(() => mockAllowForSession.mockReset())
+
+  it('grants the review\'s request to its session, naming only the review', async () => {
+    mockAllowForSession.mockResolvedValue('granted')
+    const res = await post()
+    expect(res.status).toBe(200)
+    expect(mockAllowForSession).toHaveBeenCalledWith('my-agent', 'review-1')
+  })
+
+  it('answers a review that is gone with the 404 the card reads as settled', async () => {
+    mockAllowForSession.mockResolvedValue('not_found')
+    expect((await post()).status).toBe(404)
+  })
+
+  it('refuses a review that cannot be allowed for a session', async () => {
+    mockAllowForSession.mockResolvedValue('not_offered')
+    const res = await post()
+    expect(res.status).toBe(400)
+    expect(await res.json()).toEqual({ error: 'This request can only be allowed once' })
   })
 })
 

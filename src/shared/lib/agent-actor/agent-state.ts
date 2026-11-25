@@ -131,6 +131,8 @@ export function createAgentState(slug: AgentSlug, hooks: AgentStateHooks): Agent
   // is agent-wide.
   const cardSession = (callerSessionId: string | undefined) =>
     callerSessionId && live.has(callerSessionId) ? callerSessionId : undefined
+  // "Allow for this session" skips the card only for a session at work.
+  const sessionWorking = (sessionId: string) => live.isActive(sessionId) || live.isWaitingBackground(sessionId)
   const idleAlarm = new IdleAlarm({ ...hooks.idle, isBusy: () => live.hasActive() || live.hasAwaitingInput() })
   const containerWatch = new ContainerWatch(hooks.watch)
   let runtime: ContainerRuntime | undefined
@@ -153,7 +155,7 @@ export function createAgentState(slug: AgentSlug, hooks: AgentStateHooks): Agent
     store: hooks.sessions.store,
     sessions: live,
     inputRequests,
-    reviews: new AgentReviews(slug, inputRequests, syncAwaiting, cardSession),
+    reviews: new AgentReviews(slug, inputRequests, syncAwaiting, cardSession, sessionWorking),
     accountReauth: createAccountReauthWaits(slug, inputRequests, syncAwaiting, cardSession),
     mcpReauth: createMcpReauthWaits(slug, inputRequests, syncAwaiting, cardSession),
     computerUse,

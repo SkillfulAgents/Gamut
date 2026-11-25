@@ -596,6 +596,8 @@ function createReviewOps(state: AgentState): ReviewOps {
   return {
     get: async (id) => reviews.pending().find((review) => review.id === id) ?? null,
     submit: async (id, decision, detail) => reviews.submit(id, decision, detail),
+    allowForSession: (id) => reviews.allowForSession(id),
+    sessionAllows: (check) => reviews.sessionAllows(check),
     resolveMatching: async (scope, decision) => reviews.resolveMatching(scope, decision),
     resolveMatchingByLabel: async (label, decision) => reviews.resolveMatchingByLabel(label, decision),
     resolveMatchingXAgent: async (operation, decision) => reviews.resolveMatchingXAgent(operation, decision),

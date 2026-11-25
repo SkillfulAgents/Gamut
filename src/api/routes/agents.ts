@@ -8449,6 +8449,22 @@ agents.post('/:id/proxy-review/:reviewId', AgentUser(), async (c) => {
   return c.json({ ok: true })
 })
 
+// POST /api/agents/:id/proxy-review/:reviewId/session - "Allow for this session"
+// Allows the review and grants its session what the request matched, so that
+// session's later requests like it skip the card. Everything granted comes
+// from the pending review; the client names only which review. Like "Allow
+// once" it saves nothing on the account, so anyone who can decide the review
+// can grant it.
+agents.post('/:id/proxy-review/:reviewId/session', AgentUser(), async (c) => {
+  const result = await agentRegistry.get(getAgentId(c)).inputs.reviews.allowForSession(c.req.param('reviewId'))
+  // The 404 the card already reads as settled elsewhere.
+  if (result === 'not_found') return c.json({ error: 'Review not found or already resolved' }, 404)
+  if (result === 'not_offered') {
+    return c.json({ error: 'This request can only be allowed once' }, 400)
+  }
+  return c.json({ ok: true })
+})
+
 // POST /api/agents/:id/proxy-review/:reviewId/always - Submit decision and save as policy
 agents.post('/:id/proxy-review/:reviewId/always', AgentUser(), async (c) => {
   const reviewId = c.req.param('reviewId')

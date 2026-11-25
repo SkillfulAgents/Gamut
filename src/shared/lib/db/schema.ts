@@ -732,7 +732,7 @@ export const proxyAuditLog = sqliteTable('proxy_audit_log', {
   statusCode: integer('status_code'),
   errorMessage: text('error_message'),
   durationMs: integer('duration_ms'),
-  policyDecision: text('policy_decision'), // allow, block, review, denied_by_user, review_timeout, allowed_by_rule
+  policyDecision: text('policy_decision'), // allow, block, review, denied_by_user, review_timeout, allowed_by_rule, allowed_for_session
   matchedScopes: text('matched_scopes'), // JSON array string of matched scope names
   ruleVersionId: text('rule_version_id'), // proxy rule version that allowed the request
   ruleOutcomes: text('rule_outcomes'), // JSON RuleEvaluation[] for every rule that ran
@@ -797,7 +797,7 @@ export const mcpAuditLog = sqliteTable('mcp_audit_log', {
   statusCode: integer('status_code'),
   errorMessage: text('error_message'),
   durationMs: integer('duration_ms'),
-  policyDecision: text('policy_decision'), // allow, block, review, denied_by_user, review_timeout, allowed_by_rule
+  policyDecision: text('policy_decision'), // allow, block, review, denied_by_user, review_timeout, allowed_by_rule, allowed_for_session
   matchedTool: text('matched_tool'), // tool name for tools/call requests
   ruleVersionId: text('rule_version_id'), // proxy rule version that allowed the request
   ruleOutcomes: text('rule_outcomes'), // JSON RuleEvaluation[] for every rule that ran

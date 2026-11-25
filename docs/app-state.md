@@ -205,6 +205,15 @@ What the user typed for a later sign-in step, and the username the last step wen
 - The identity is a plain `set` with `reset`: 30 minutes from the latest remember, and the latest remember wins.
 
 Who may use what (the agent's grants, the page's origin, whether a saved account is still theirs) is decided by the callers at the host boundary, in `login-host.ts` and the sign-in routes. AppState only scopes the records; a read for a named account returns nothing held for another.
+## Proxy session grants
+
+"Allow for this session" on an API or MCP review card (`src/shared/lib/proxy/session-grants.ts`). The strong namespace `proxy:session-grants` has key parts agent slug and session id: one record per session, listing what it was granted, each grant a scope (API) or a tool (MCP) on one connected account or MCP server. A record holds at most 200 grants, expires 24 hours after its latest one (`reset`), and is deleted with its session (`session-deletion.ts`).
+
+- A grant is made from the pending review, never from what the client sends: the review's session and what its request matched. A card shown to the whole agent, a request that matched no scope, a rule proposal and a request a require rule held offer none.
+- A grant only moves a request from `review` to `allow`, before the proxy rules run: a Block still blocks, and a rule that requires review still holds the request. The audit log records `allowed_for_session`.
+- A request names its session itself (the `/s/<sessionId>` in a session's `PROXY_BASE_URL`, the `x-superagent-session-id` header on an MCP call). That is a claim from the agent's own container, not an authorization check, so another session of the same agent could name a session that holds a grant. The agent's actor adds the other half (`AgentReviews.sessionAllows`): a grant counts only while its session is at work, so a session URL left in a script or a dashboard stops skipping the card when the session stops.
+- A grant check that fails leaves the request to its review card.
+
 ## MCP OAuth pending flows
 
 A remote MCP sign-in is stored from its start until its callback is answered (`src/shared/lib/mcp/oauth-pending-flows.ts`), so the callback can reach any process. The ticket's `oauth:mcp:H(state)` is the strong namespace `oauth:mcp`, with the key part `digestKeyPart(state)`. The record is created with `insertIfAbsent`. It expires 15 minutes after creation (`keep`), and it moves through three states:
