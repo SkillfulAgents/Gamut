@@ -151,6 +151,23 @@ function SlackPreview({ agent }: { agent: IntroAgent }) {
   )
 }
 
+function TeamsPreview({ agent }: { agent: IntroAgent }) {
+  return (
+    <Frame provider="teams" title="Microsoft Teams · General">
+      <Bubble mine className="rounded-lg bg-[#e8e8fa] text-[#333357] dark:bg-[#414166] dark:text-white">
+        <strong>@{agent.name}</strong> what did we decide about the launch?
+      </Bubble>
+      <div className="flex items-start gap-2">
+        <Face agent={agent} />
+        <div className="min-w-0">
+          <p className="text-[11px] text-muted-foreground">{agent.name}</p>
+          <Bubble className="max-w-full rounded-lg">Friday is the launch date. Sam is writing the announcement.</Bubble>
+        </div>
+      </div>
+    </Frame>
+  )
+}
+
 function EmailPreview({ agent }: { agent: IntroAgent }) {
   const address = `${agent.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'agent'}@acme.ongamut.so`
   return (
@@ -250,6 +267,12 @@ export const INTEGRATION_SETUP_INTROS: Record<string, IntegrationSetupIntro> = {
     subline: 'as a teammate.',
     body: 'Your team can DM it or mention it in any channel. Everything it posts comes from its own app, not your account.',
     Preview: SlackPreview,
+  },
+  teams: {
+    headline: 'Give this agent its own Teams app.',
+    subline: 'Chat directly or mention it in a channel.',
+    body: 'Connect a bot from your Microsoft tenant. Your team can message the agent by name and bring it into a conversation with an @mention.',
+    Preview: TeamsPreview,
   },
   imessage: {
     headline: 'Text this agent from your phone.',
