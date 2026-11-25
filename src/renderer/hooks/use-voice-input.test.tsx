@@ -30,7 +30,7 @@ vi.mock('@renderer/context/analytics-context', () => ({
   useAnalyticsTracking: () => ({ track: vi.fn() }),
 }))
 
-import { useVoiceConversationProblem, useVoiceInput } from './use-voice-input'
+import { useIsVoiceConfigured, useVoiceConversationProblem, useVoiceInput } from './use-voice-input'
 
 /** A speech adapter whose socket never opens unless the test says so. */
 class FakeAdapter implements SttAdapter {
@@ -101,7 +101,9 @@ function arrange(adapter: FakeAdapter, status: Record<string, unknown> = { confi
   const onTranscriptUpdate = vi.fn()
   const onDictated = vi.fn()
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  const hook = renderHook(() => useVoiceInput({ onTranscriptUpdate, onDictated }), {
+  // `statusIn` reads the same status query in the same render, so once it is
+  // true the hook has the status too.
+  const hook = renderHook(() => ({ ...useVoiceInput({ onTranscriptUpdate, onDictated }), statusIn: useIsVoiceConfigured() }), {
     wrapper: ({ children }: { children: ReactNode }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>,
   })
   return { hook, onTranscriptUpdate, onDictated }
@@ -306,10 +308,16 @@ describe('useVoiceInput instant start', () => {
     return { arrive: (response: unknown = json(TOKEN)) => act(async () => { release(response) }) }
   }
 
+  /**
+   * Waits for the status to reach the hook, not just for its request: the
+   * query hands its result to the component on a timer (React Query's
+   * notifyManager), which one act() does not always outlast on a loaded
+   * machine. Until it lands, the hook does not know the protocol and the
+   * microphone waits for the token.
+   */
   async function arrangeKnown(adapter: FakeAdapter) {
     const arranged = arrange(adapter, KNOWN)
-    await waitFor(() => expect(api.apiFetch).toHaveBeenCalledWith('/api/voice/configured'))
-    await act(async () => {}) // the status lands in the hook
+    await waitFor(() => expect(arranged.hook.result.current.statusIn).toBe(true))
     return arranged
   }
 
