@@ -84,6 +84,12 @@ describe('user-settings-service', () => {
     expect(await getUserSettings('u1')).toEqual(updated)
   })
 
+  it('computes an updater\'s write from the settings stored when it runs', async () => {
+    await updateUserSettings('u1', { theme: 'dark' })
+    const updated = await updateUserSettings('u1', (current) => ({ autoCheckUpdates: current.theme !== 'dark' }))
+    expect(updated).toMatchObject({ theme: 'dark', autoCheckUpdates: false })
+  })
+
   it('keeps every field when two updates overlap', async () => {
     // Each update reads, merges and writes with awaits in between. Without a
     // compare-and-swap the second read sees the first's snapshot and its

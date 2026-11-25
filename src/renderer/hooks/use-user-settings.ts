@@ -16,9 +16,10 @@ async function fetchUserSettings(): Promise<UserSettingsData> {
  * How long fetched user settings count as fresh. This window's own writes go
  * straight into the cache (`useUpdateUserSettings`), so a new observer has no
  * reason to read again on every navigation, as the 5 s default made it.
- * Nothing tells this window about a write from the same user's other tab or
- * device, and there is no poll, so the window stays finite: the first mount
- * after it reads again.
+ * An agent's change to the sidebar sections arrives as `user_settings_changed`
+ * on the global feed, which refetches. Nothing tells this window about a write
+ * from the same user's other tab or device, and there is no poll, so the window
+ * stays finite: the first mount after it reads again.
  */
 const USER_SETTINGS_STALE_MS = 5 * 60_000
 

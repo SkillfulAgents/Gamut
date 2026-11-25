@@ -16,6 +16,11 @@ export interface FileHookChangeResult {
   warning?: string
 }
 
+/** The session whose tool call a hook runs for. */
+export interface FileHookContext {
+  sessionId: string
+}
+
 /**
  * Base class for file-specific hooks that intercept Read, Write, and Edit
  * tool calls for particular files. Subclasses define which files they match
@@ -40,6 +45,13 @@ export abstract class FileHook {
    * Called after a Read tool call for a matching file, with what the Read returned.
    * Return additional context to append to the tool result.
    */
+  /**
+   * Called before a Read tool call for a matching file, so a hook can write the
+   * file fresh first. An error refuses the Read with that reason. Optional: for
+   * files that are a copy of state kept elsewhere.
+   */
+  beforeRead?(filePath: string, context: FileHookContext): Promise<Pick<FileHookWriteResult, 'error'>>
+
   onRead(_filePath: string, _response?: unknown): FileHookReadResult {
     return {}
   }
@@ -72,10 +84,11 @@ export abstract class FileHook {
    * Called after a Write or Edit tool call changed a matching file, with its
    * content before the call (null when it did not exist) and after. For hooks
    * that act on what the change did rather than on the content alone; the
-   * change has landed, so it cannot be rejected here. Optional: the file is
-   * read before the call only for hooks that define it.
+   * change has landed, so it cannot be rejected here. `after` is what that
+   * call wrote, not the file read back. Optional: the file is read before the
+   * call only for hooks that define it.
    */
-  onChange?(filePath: string, before: string | null, after: string): FileHookChangeResult
+  onChange?(filePath: string, before: string | null, after: string, context: FileHookContext): FileHookChangeResult | Promise<FileHookChangeResult>
 }
 
 /**

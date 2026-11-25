@@ -2248,6 +2248,20 @@ describe('exportAgentFull', () => {
     expect(zipBuffer.length).toBeGreaterThan(0)
   })
 
+  it('leaves out the workspace copy of a person\'s sidebar, and keeps a sidebar.json in a subfolder', async () => {
+    const workspaceDir = path.join(testDir, 'agents', 'full-agent', 'workspace')
+    fs.mkdirSync(path.join(workspaceDir, 'site'), { recursive: true })
+    fs.writeFileSync(path.join(workspaceDir, 'AGENTS.md'), MINIMAL_INSTRUCTIONS)
+    fs.writeFileSync(path.join(workspaceDir, 'sidebar.json'), '[]')
+    fs.writeFileSync(path.join(workspaceDir, 'site', 'sidebar.json'), '{}')
+
+    const reader = await openZipFromBuffer(await exportAgentFull('full-agent'))
+    const entryNames = reader.entries.map((e) => e.fileName)
+    reader.close()
+    expect(entryNames).not.toContain('sidebar.json')
+    expect(entryNames).toContain('site/sidebar.json')
+  })
+
   it('returns a readable zip stream', async () => {
     const workspaceDir = path.join(testDir, 'agents', 'full-agent', 'workspace')
     fs.mkdirSync(workspaceDir, { recursive: true })

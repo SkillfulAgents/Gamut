@@ -45,6 +45,17 @@ export const listAgentMembersResultSchema = z.object({
   })),
 })
 
+const sidebarSectionsSchema = z.array(z.object({ id: z.string(), name: z.string(), agents: z.array(z.string()) }))
+
+/** A write's reply: what the app applied. */
+export const sidebarFileWriteResultSchema = z.object({ sections: sidebarSectionsSchema })
+
+/** A read's reply: the sections, or why there are none to show. */
+export const sidebarFileReadResultSchema = z.union([
+  sidebarFileWriteResultSchema,
+  z.object({ sections: z.null(), reason: z.string() }),
+])
+
 export const createAgentResultSchema = z.object({
   slug: z.string(),
   name: z.string(),

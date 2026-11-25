@@ -38,6 +38,7 @@ import {
   openDeliveredFile,
 } from '@shared/lib/services/x-agent/operations'
 import { invokeAgent } from '@shared/lib/services/x-agent/invoke'
+import { readSidebarFile, writeSidebarFile } from '@shared/lib/services/x-agent/sidebar-sections'
 
 // Kept here for the route's tests, which pin the env override's bounds.
 export { resolveSyncWaitTimeoutMs } from '@shared/lib/services/x-agent/sync-wait'
@@ -66,6 +67,32 @@ xAgent.post('/list', zValidator('json', z.object({ _callerSessionId: z.string().
   const result = await listVisibleAgents(agentXAgentCaller(getCallerSlug(c), c.req.valid('json')._callerSessionId))
   if (!result.ok) return c.json({ error: result.error }, result.status)
   return c.json(result.value)
+})
+
+// ----------------------------------------------------------------------------
+// POST /api/x-agent/sidebar-sections - the person's left-nav sections as the
+// agent's sidebar.json. No `after` reads the file, gated as list_agents is.
+// `after` applies a change to it, only on an unchanged `before`; not reviewed,
+// only that person's own sidebar moves.
+// ----------------------------------------------------------------------------
+
+const sidebarFileBodySchema = z.object({
+  before: z.string().max(500_000).nullable().optional(),
+  after: z.string().max(500_000).optional(),
+  _callerSessionId: z.string().optional(),
+})
+
+xAgent.post('/sidebar-sections', zValidator('json', sidebarFileBodySchema), async (c) => {
+  const { _callerSessionId, before, after } = c.req.valid('json')
+  const caller = agentXAgentCaller(getCallerSlug(c), _callerSessionId)
+  if (after === undefined) {
+    const read = await readSidebarFile(caller)
+    if (!read.ok) return c.json({ error: read.error }, read.status)
+    return c.json(read.value)
+  }
+  const result = await writeSidebarFile(caller, before ?? null, after)
+  if (!result.ok) return c.json({ error: result.error }, result.status)
+  return c.json({ sections: result.value.sections })
 })
 
 // ----------------------------------------------------------------------------

@@ -10,12 +10,17 @@ const HINT = 'This file has unresolved conflict markers from a GitHub drive: a t
 const readResponseSchema = z.object({ file: z.object({ content: z.string() }) })
 const editReplySchema = z.object({ originalFile: z.string(), oldString: z.string(), newString: z.string(), replaceAll: z.boolean().optional() })
 
-/** The file after an Edit, rebuilt from the tool's reply so a file on a drive is not read back. Null when the reply has no original. */
-export function editedContent(reply: unknown): string | null {
+/** The file before and after an Edit, rebuilt from the tool's reply so the file is not read back. Null when the reply has no original. */
+export function editedFile(reply: unknown): { before: string; after: string } | null {
   const edit = editReplySchema.safeParse(reply)
   if (!edit.success) return null
   const { originalFile, oldString, newString, replaceAll } = edit.data
-  return replaceAll ? originalFile.split(oldString).join(newString) : originalFile.replace(oldString, () => newString)
+  return { before: originalFile, after: replaceAll ? originalFile.split(oldString).join(newString) : originalFile.replace(oldString, () => newString) }
+}
+
+/** The file after an Edit, rebuilt from the tool's reply. Null when the reply has no original. */
+export function editedContent(reply: unknown): string | null {
+  return editedFile(reply)?.after ?? null
 }
 
 /** Checks the text the agent already has, so no tool call costs an extra read. */

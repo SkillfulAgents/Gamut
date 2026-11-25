@@ -124,6 +124,7 @@ import { userXAgentCaller, agentXAgentCaller, type XAgentCaller } from './caller
 import { getTargetSessions, getTargetTranscript, listVisibleAgents, openDeliveredFile, toListedAgent, toListedSections } from './operations'
 import { invokeAgent } from './invoke'
 import { effectiveSyncWaitMs, readLastAssistantMessage, readLastAssistantReply } from './sync-wait'
+import { applySidebarFile, SectionChangeRefused, sidebarFileOf, type SidebarScope } from './sidebar-sections'
 
 async function seedRole(userId: string, agentSlug: string, role: AgentRole) {
   await testDb.insert(schema.agentAcl).values({ id: randomUUID(), userId, agentSlug, role, createdAt: new Date() })
@@ -543,5 +544,67 @@ describe('toListedSections', () => {
       personName: 'Jeremy',
       sections: [{ name: 'Your Agents', agents: ['research-def456'] }, { name: 'Sales ## Team', agents: ['sales-desk-abc123'] }],
     })
+  })
+})
+
+describe('applySidebarFile', () => {
+  // agent-c is in the person's sidebar but the caller cannot list it.
+  const scope: SidebarScope = {
+    sidebar: ['agent-a', 'agent-b', 'agent-c'].map((slug) => ({ slug, createdAt: new Date(0) })),
+    shown: new Map([['agent-a', 'a-shown'], ['agent-b', 'b-shown']]),
+  }
+  const stored = (fields: object) => ({ ...getDefaultUserSettings(), ...fields })
+  const current = stored({
+    agentFolders: [{ id: 'f-sales', name: 'Sales \n Team' }, { id: 'f-ops', name: 'Ops' }],
+    agentFolderAssignments: { 'agent-a': 'f-sales', 'agent-c': 'f-ops' },
+    agentListOrder: ['agent-folder::root', 'agent-folder::f-sales', 'agent-folder::f-ops'],
+  })
+  const refusal = (run: () => unknown) => {
+    try {
+      run()
+    } catch (error) {
+      if (error instanceof SectionChangeRefused) return error.status
+      throw error
+    }
+    return 'applied'
+  }
+
+  it('shows the person their sections with one-line names and only the agents the caller can list', () => {
+    expect(sidebarFileOf(scope, current)).toEqual([
+      { id: 'root', name: 'Your Agents', agents: ['b-shown'] },
+      { id: 'f-sales', name: 'Sales Team', agents: ['a-shown'] },
+      { id: 'f-ops', name: 'Ops', agents: [] },
+    ])
+  })
+
+  it('applies a move, a new section and a reorder, keeping an untouched stored name and a hidden agent in place', () => {
+    const before = sidebarFileOf(scope, current)
+    const write = applySidebarFile(scope, current, before, [
+      { id: 'f-ops', name: 'Ops', agents: ['b-shown'] },
+      { id: 'root', name: 'Your Agents', agents: [] },
+      { id: 'f-sales', name: 'Sales Team', agents: [] },
+      { id: 'new-1', name: 'Later', agents: ['a-shown'] },
+    ])
+    expect(write.agentFolders).toEqual([{ id: 'f-ops', name: 'Ops' }, { id: 'f-sales', name: 'Sales \n Team' }, { id: 'new-1', name: 'Later' }])
+    expect(write.agentFolderAssignments).toEqual({ 'agent-c': 'f-ops', 'agent-b': 'f-ops', 'agent-a': 'new-1' })
+    expect(write.agentListOrder).toEqual(['agent-folder::f-ops', 'agent-folder::root', 'agent-folder::f-sales', 'agent-folder::new-1'])
+  })
+
+  it('sends an agent left out of the file to Your Agents, as deleting its section does', () => {
+    const write = applySidebarFile(scope, current, sidebarFileOf(scope, current), [
+      { id: 'root', name: 'Your Agents', agents: ['b-shown'] },
+      { id: 'f-ops', name: 'Ops', agents: [] },
+    ])
+    expect(write.agentFolders).toEqual([{ id: 'f-ops', name: 'Ops' }])
+    expect(write.agentFolderAssignments).toEqual({ 'agent-c': 'f-ops' })
+    expect(write.agentOrder).toEqual(['agent-b', 'agent-a', 'agent-c'])
+  })
+
+  it('refuses a stale copy, an agent the caller cannot list, and deleting a section that holds one', () => {
+    const before = sidebarFileOf(scope, current)
+    expect(refusal(() => applySidebarFile(scope, current, null, before))).toBe(409)
+    expect(refusal(() => applySidebarFile(scope, current, [...before].reverse(), before))).toBe(409)
+    expect(refusal(() => applySidebarFile(scope, current, before, [{ ...before[0], agents: ['b-shown', 'agent-c'] }, before[1], before[2]]))).toBe(404)
+    expect(refusal(() => applySidebarFile(scope, current, before, [before[0], before[1]]))).toBe(409)
   })
 })
