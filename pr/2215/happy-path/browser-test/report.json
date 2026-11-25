@@ -1,0 +1,23 @@
+{
+  "storyId": "browser-test",
+  "passed": true,
+  "reason": "Ran the 5-step agent chat check: open the QA agent, send a browser-title request, and confirm the reply contains \"Example Domain\". All steps passed.",
+  "steps": [
+    "Step 1: Navigated to http://localhost:47891. The Gamut app loaded (page title \"Gamut\") and listed the agents in the sidebar, including QA-20261125-171017-n78e.",
+    "Step 2: Clicked the QA-20261125-171017-n78e agent in the sidebar. The agent page opened at /agents/qa-20261125-171017-n78e-nk1j33e5qu, showing status \"idle\" and an empty message input.",
+    "Step 3: Typed \"Open a browser and go to https://example.com. Tell me the page title.\" and clicked Send. A new session \"Browser Page Title Check\" started, the message appeared in the thread, and the status changed to \"working\".",
+    "Step 4: Waited for the text \"Example Domain\" to appear. The wait succeeded; the reply appeared with \"Worked for 4s · 3 tool calls\" and the agent returned to \"idle\" within the 3-minute limit.",
+    "Step 5: Verified the response. It reads \"The page title at https://example.com is \"Example Domain\". I closed the browser afterwards.\" A viewport screenshot was taken and shows this reply. No bugs were observed."
+  ],
+  "bugs": [],
+  "durationMs": 77572,
+  "sessionId": "9a00658d-0263-48fe-a326-e11358e5f85c",
+  "cost": {
+    "inputTokens": 7806,
+    "outputTokens": 5207,
+    "cacheCreationTokens": 56063,
+    "cacheReadTokens": 613239,
+    "model": "claude-haiku-5-5",
+    "totalCostUsd": 0.165244
+  }
+}
