@@ -89,7 +89,7 @@ describe('VoiceTab', () => {
     state.isAdmin = false
     renderWithProviders(<VoiceTab />)
     expect(screen.getByTestId('personal-voice-section')).toBeInTheDocument()
-    expect(screen.getByText('Your Voice')).toBeInTheDocument()
+    expect(screen.getByText('Your voice')).toBeInTheDocument()
     expect(screen.getByLabelText('Speed')).toBeInTheDocument()
     expect(screen.queryByLabelText('Provider')).toBeNull()
     expect(screen.queryByTestId('default-voice-section')).toBeNull()
@@ -119,7 +119,7 @@ describe('VoiceTab', () => {
 
   it('a local install has one person, so there is no separate default voice', () => {
     renderWithProviders(<VoiceTab />)
-    expect(screen.getByText('Text-to-Speech')).toBeInTheDocument()
+    expect(screen.getByText('Text-to-speech')).toBeInTheDocument()
     expect(screen.getByLabelText('Provider')).toBeInTheDocument()
     expect(screen.queryByTestId('default-voice-section')).toBeNull()
   })
@@ -159,7 +159,7 @@ describe('VoiceTab', () => {
     expect(screen.getByRole('option', { name: /Platform/ })).toHaveTextContent('GPT-Live')
     expect(screen.getByText(/Uses OpenAI voice via your platform connection/)).toBeInTheDocument()
     expect(screen.getByText(/No API key required/)).toBeInTheDocument()
-    expect(screen.queryByText('API Key')).toBeNull()
+    expect(screen.queryByText('API key')).toBeNull()
   })
 
   it('offers OpenAI read-aloud voices while explaining the separate Live voice', () => {
