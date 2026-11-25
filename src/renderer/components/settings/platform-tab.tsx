@@ -1,5 +1,5 @@
 import { formatCents } from '@renderer/lib/currency'
-import { useState, type ReactNode } from 'react'
+import { useState } from 'react'
 import { ArrowUpRight, BadgeX, Check, ChevronsUpDown, Loader2, RefreshCw } from 'lucide-react'
 
 import { Alert, AlertDescription } from '@renderer/components/ui/alert'
@@ -25,35 +25,14 @@ import { openExternalUrl } from '@renderer/lib/open-external'
 import { cn } from '@shared/lib/utils'
 import { SUBSCRIPTION_CREDIT_COPY, subscriptionCreditScope } from '@shared/lib/services/platform-billing-copy'
 import type { ParsedPlatformBillingInfo, SubscriptionCreditScope } from '@shared/lib/types/skillset-schema'
+import { SETTINGS_CARD_CLASS, SETTINGS_SECTION_HEADING, SettingRow } from './setting-row'
 
 interface PlatformTabProps {
   readOnly?: boolean
 }
 
-interface SettingRowProps {
-  name: string
-  subtitle?: ReactNode
-  right: ReactNode
-}
-
-function SettingRow({ name, subtitle, right }: SettingRowProps) {
-  return (
-    <div className="py-3 px-4">
-      <div className="flex items-center gap-3">
-        <div className="min-w-0 flex-1">
-          <div className="text-xs font-medium truncate">{name}</div>
-          {subtitle && (
-            <div className="text-[11px] text-muted-foreground mt-0.5">{subtitle}</div>
-          )}
-        </div>
-        <div className="flex items-center gap-2 shrink-0">{right}</div>
-      </div>
-    </div>
-  )
-}
-
-const CARD_CLASS = 'rounded-card border bg-background divide-y divide-border/50 overflow-hidden'
-const SECTION_HEADING = 'text-xs font-medium text-muted-foreground px-1'
+const CARD_CLASS = SETTINGS_CARD_CLASS
+const SECTION_HEADING = SETTINGS_SECTION_HEADING
 
 function seatPercentRemaining(seat: NonNullable<ParsedPlatformBillingInfo['seat']>): number {
   if (seat.startingBalanceCents <= 0) return 0
@@ -146,12 +125,12 @@ function PlatformBillingCard({
           // Legacy / pre-billing org with no billing workspace yet.
           <SettingRow
             name="Subscription"
-            subtitle="No billing set up for this organization"
+            status="No billing set up for this organization"
             right={
               canManageBilling ? (
                 <Button
                   size="sm"
-                  variant="outline"
+                  variant="soft"
                   onClick={() => void handleManageBilling()}
                   disabled={!platformBaseUrl || !orgId}
                 >
@@ -167,12 +146,12 @@ function PlatformBillingCard({
             {billing.plan ? (
               <SettingRow
                 name="Plan"
-                subtitle={<PlanDetails billing={billing} excluded={data?.excludedModels ?? null} />}
+                status={<PlanDetails billing={billing} excluded={data?.excludedModels ?? null} />}
                 right={
                   <>
                     <span className={VALUE_CLASS} data-testid="billing-plan-name">{planLabel(billing, billing.plan)}</span>
                     {canManageBilling && (
-                      <Button size="sm" variant="outline" onClick={() => openPlanUpgrade()} data-testid="billing-change-plan">
+                      <Button size="sm" variant="soft" onClick={() => openPlanUpgrade()} data-testid="billing-change-plan">
                         Change plan
                       </Button>
                     )}
@@ -199,7 +178,7 @@ function PlatformBillingCard({
             )}
             <SettingRow
               name="Organization credits"
-              subtitle={
+              help={
                 subscriptionCreditScope(billing) === 'org'
                   ? 'Shared pool used after your team plan credits'
                   : 'Shared pool used after your seat quota'
@@ -212,7 +191,7 @@ function PlatformBillingCard({
                 right={
                   <Button
                     size="sm"
-                    variant="outline"
+                    variant="soft"
                     className="group gap-0"
                     onClick={() => void handleManageBilling()}
                     disabled={!platformBaseUrl || !orgId}
@@ -255,7 +234,7 @@ function CloudWorkspaceCard({
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between px-1">
-        <h3 className="text-xs font-medium text-muted-foreground">Cloud Agents</h3>
+        <h3 className="text-xs font-medium text-muted-foreground">Cloud agents</h3>
         <Button
           size="sm"
           variant="ghost"
@@ -277,7 +256,7 @@ function CloudWorkspaceCard({
         ) : data?.found && data.deploymentUrl ? (
           <SettingRow
             name="Cloud agents"
-            subtitle={data.deploymentUrl}
+            status={data.deploymentUrl}
             right={
               <Button
                 size="sm"
@@ -295,11 +274,11 @@ function CloudWorkspaceCard({
           // to create a second one.
           <SettingRow
             name="Cloud agents"
-            subtitle="Couldn't check for cloud agents right now"
+            status="Couldn't check for cloud agents right now"
             right={
               <Button
                 size="sm"
-                variant="outline"
+                variant="soft"
                 onClick={() => void refetch()}
                 disabled={isFetching}
               >
@@ -312,11 +291,11 @@ function CloudWorkspaceCard({
           // dashboard.
           <SettingRow
             name="Cloud agents"
-            subtitle="No cloud agents yet for this organization"
+            status="No cloud agents yet for this organization"
             right={
               <Button
                 size="sm"
-                variant="outline"
+                variant="soft"
                 className="group gap-0"
                 onClick={() => {
                   if (!platformBaseUrl || !orgId) return
@@ -357,7 +336,7 @@ function SubscriptionCreditsRow({
   return (
     <div className="py-3 px-4 space-y-1.5" data-testid="subscription-credits-row" data-scope={scope}>
       <div className="flex items-center justify-between">
-        <span className="text-xs font-medium">{SUBSCRIPTION_CREDIT_COPY[scope].credits}</span>
+        <span className="text-xs font-normal">{SUBSCRIPTION_CREDIT_COPY[scope].credits}</span>
         <span className="text-xs text-muted-foreground">{Math.round(pct)}% remaining</span>
       </div>
       <Progress percent={pct} thresholds={{ warning: 20, critical: 5 }} />
@@ -509,7 +488,7 @@ function NotConnectedEmptyState({ readOnly, isLaunching, canCancel, onConnect, o
                   cancelSide="right"
                   cancelTestId="platform-cancel-connect"
                 />
-                <Button size="sm" variant="outline" onClick={() => setShowKeyInput(true)}>
+                <Button size="sm" variant="soft" onClick={() => setShowKeyInput(true)}>
                   Add access key
                 </Button>
               </div>
@@ -545,15 +524,12 @@ function ReconnectRow({ readOnly, isLaunching, canCancel, connectLabel, onReconn
     <div className="py-3 px-4">
       <div className="flex items-center gap-3">
         <div className="min-w-0 flex-1">
-          <div className="text-xs font-medium truncate">Issues? Try reconnecting</div>
-          <div className="text-[11px] text-muted-foreground mt-0.5">
-            Sign in to your account on the web or add an access key.
-          </div>
+          <div className="text-xs font-normal truncate">Having issues? Reconnect your account</div>
         </div>
         <div className="flex items-center gap-2 shrink-0">
           <LoginButton
             size="sm"
-            variant="outline"
+            variant="soft"
             onClick={onReconnect}
             disabled={readOnly}
             className="group"
@@ -566,7 +542,7 @@ function ReconnectRow({ readOnly, isLaunching, canCancel, connectLabel, onReconn
             cancelTestId="platform-cancel-reconnect"
           />
           {!readOnly && (
-            <Button size="sm" variant="outline" onClick={() => setShowInput(true)}>
+            <Button size="sm" variant="soft" onClick={() => setShowInput(true)}>
               Add key
             </Button>
           )}
@@ -644,7 +620,7 @@ export function PlatformTab({ readOnly = false }: PlatformTabProps) {
       {/* Headed so it reads as its own section under the profile, not as
           more of it — this card is the Gamut platform account, not the login. */}
       <div className="space-y-2">
-        <h3 className={SECTION_HEADING}>Gamut Account</h3>
+        <h3 className={SECTION_HEADING}>Gamut account</h3>
         {isConnected ? (
           <div className={CARD_CLASS}>
             <SettingRow
@@ -683,7 +659,7 @@ export function PlatformTab({ readOnly = false }: PlatformTabProps) {
                   }}
                   disabled={!data?.platformBaseUrl}
                 >
-                  Go to Account
+                  Go to account
                   <HoverArrow />
                 </Button>
               }

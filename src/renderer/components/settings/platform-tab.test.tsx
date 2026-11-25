@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 
 const openPlanUpgradeMock = vi.hoisted(() => vi.fn())
@@ -70,7 +70,7 @@ describe('PlatformTab profile section', () => {
     render(<PlatformTab readOnly />)
     const section = screen.getByTestId('profile-section')
     expect(section.parentElement?.firstElementChild).toBe(section)
-    expect(screen.getByText('Gamut Account')).toBeInTheDocument()
+    expect(screen.getByText('Gamut account')).toBeInTheDocument()
     expect(screen.getByText('Example workspace')).toBeInTheDocument()
     expect(screen.getByText(/Platform access is managed by this deployment/)).toBeInTheDocument()
   })
@@ -79,7 +79,7 @@ describe('PlatformTab profile section', () => {
     useUserMock.mockReturnValue({ ...authUser, isAdmin })
     render(<PlatformTab readOnly />)
     expect(screen.getByTestId('profile-section')).toBeInTheDocument()
-    expect(screen.queryByText('Gamut Account')).not.toBeInTheDocument()
+    expect(screen.queryByText('Gamut account')).not.toBeInTheDocument()
     expect(screen.queryByText('No Gamut account connected to this workspace')).not.toBeInTheDocument()
     expect(screen.queryByText(/Platform access is managed by this deployment/)).not.toBeInTheDocument()
   })
@@ -88,7 +88,7 @@ describe('PlatformTab profile section', () => {
     useUserMock.mockReturnValue(localUser)
     render(<PlatformTab />)
     expect(screen.queryByTestId('profile-section')).not.toBeInTheDocument()
-    expect(screen.getByText('Gamut Account')).toBeInTheDocument()
+    expect(screen.getByText('Gamut account')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Connect Account' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Add access key' })).toBeInTheDocument()
   })
@@ -128,7 +128,7 @@ describe('PlatformTab billing card', () => {
     billingInfoMock.mockReturnValue({ data: undefined, isLoading: false, isFetching: false, error: null, refetch: vi.fn() })
   })
 
-  it('shows a per-seat org exactly as before', () => {
+  it('shows a per-seat org exactly as before', async () => {
     billingInfoMock.mockReturnValue({ data: snapshot('seat'), isLoading: false, isFetching: false, error: null, refetch: vi.fn() })
     render(<PlatformTab />)
     const row = screen.getByTestId('subscription-credits-row')
@@ -137,11 +137,12 @@ describe('PlatformTab billing card', () => {
     expect(row).toHaveTextContent('38% remaining')
     expect(row).toHaveTextContent('$150.00 of $400.00')
     expect(row).not.toHaveTextContent(/shared|resets/)
-    expect(screen.getByText('Shared pool used after your seat quota')).toBeInTheDocument()
+    fireEvent.focus(screen.getByRole('button', { name: 'About Organization credits' }))
+    expect((await screen.findAllByText('Shared pool used after your seat quota')).length).toBeGreaterThan(0)
     expect(screen.queryByText(/Team plan/)).not.toBeInTheDocument()
   })
 
-  it('calls a pooled org\'s bar the shared team plan credit and says when it resets', () => {
+  it('calls a pooled org\'s bar the shared team plan credit and says when it resets', async () => {
     billingInfoMock.mockReturnValue({ data: snapshot('org'), isLoading: false, isFetching: false, error: null, refetch: vi.fn() })
     render(<PlatformTab />)
     const row = screen.getByTestId('subscription-credits-row')
@@ -150,7 +151,8 @@ describe('PlatformTab billing card', () => {
     expect(row).toHaveTextContent('38% remaining')
     expect(row).toHaveTextContent(/\$150\.00 of \$400\.00 · shared by your whole organization, resets Oct 2[78]/)
     expect(row).not.toHaveTextContent('Seat credits')
-    expect(screen.getByText('Shared pool used after your team plan credits')).toBeInTheDocument()
+    fireEvent.focus(screen.getByRole('button', { name: 'About Organization credits' }))
+    expect((await screen.findAllByText('Shared pool used after your team plan credits')).length).toBeGreaterThan(0)
   })
 
   it('names the unsubscribed row by scope too', () => {
