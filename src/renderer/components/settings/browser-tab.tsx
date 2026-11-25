@@ -21,6 +21,7 @@ import { SettingsModelSelect } from '@renderer/components/settings/settings-mode
 import { PasswordManagersSettings } from './password-managers-settings'
 import { useSteelCredentials, type SteelCredentialsForm } from '@renderer/hooks/use-steel-credentials'
 import { useTabtenderCredentials, type TabtenderCredentialsForm } from '@renderer/hooks/use-tabtender-credentials'
+import { SETTINGS_CARD_CLASS, SETTINGS_SECTION_HEADING, SettingField, SettingRow } from './setting-row'
 
 // Value used for "Container (built-in)" — no host browser provider
 const CONTAINER_VALUE = '__container__'
@@ -28,8 +29,8 @@ const CONTAINER_VALUE = '__container__'
 // Preset tiers for the max-tabs picker. No 1: popup/OAuth flows need a second tab.
 const MAX_TABS_OPTIONS = [5, 10, 20]
 
-const CARD_CLASS = 'rounded-card border bg-background divide-y divide-border/50 overflow-hidden'
-const SECTION_HEADING = 'text-xs font-medium text-muted-foreground px-1'
+const CARD_CLASS = SETTINGS_CARD_CLASS
+const SECTION_HEADING = SETTINGS_SECTION_HEADING
 
 const HOST_DESCRIPTIONS: Record<string, ReactNode> = {
   [CONTAINER_VALUE]: 'Built-in headless browser that runs inside each agent’s container.',
@@ -58,46 +59,6 @@ const HOST_DESCRIPTIONS: Record<string, ReactNode> = {
       {' '}server.
     </>
   ),
-}
-
-interface FieldRowProps {
-  name: string
-  subtitle?: ReactNode
-  right: ReactNode
-  htmlFor?: string
-  /** Stack the control under the label below `md` — for wide controls (selects,
-      text inputs) that would otherwise crush the label on mobile. */
-  stack?: boolean
-}
-
-/** The row anatomy shared by card rows and expanded-card fields: name +
-    supporting line on the left, control on the right. */
-function FieldRow({ name, subtitle, right, htmlFor, stack }: FieldRowProps) {
-  const Name = htmlFor ? 'label' : 'div'
-  return (
-    <div className={cn('flex gap-3', stack ? 'flex-col items-stretch md:flex-row md:items-center' : 'items-center')}>
-      <div className="min-w-0 flex-1">
-        <Name htmlFor={htmlFor} className={cn('text-xs font-medium truncate block', htmlFor ? 'cursor-pointer' : 'cursor-default')}>{name}</Name>
-        {subtitle && <div className="text-[11px] text-muted-foreground mt-0.5">{subtitle}</div>}
-      </div>
-      <div className={cn('flex items-center gap-2 shrink-0', stack && 'w-full md:w-auto')}>{right}</div>
-    </div>
-  )
-}
-
-interface SettingRowProps {
-  name: string
-  subtitle: ReactNode
-  right: ReactNode
-  htmlFor?: string
-}
-
-function SettingRow({ name, subtitle, right, htmlFor }: SettingRowProps) {
-  return (
-    <div className="py-3 px-4">
-      <FieldRow name={name} subtitle={subtitle} right={right} htmlFor={htmlFor} />
-    </div>
-  )
 }
 
 interface HostCardProps {
@@ -230,11 +191,10 @@ export function BrowserTab() {
   return (
     <div className="space-y-6">
       <div className="space-y-2">
-        <h3 className={SECTION_HEADING}>Browser Agent</h3>
+        <h3 className={SECTION_HEADING}>Browser agent</h3>
         <div className={CARD_CLASS}>
           <SettingRow
-            name="Browser Agent Model"
-            subtitle="Model used for the web browser subagent"
+            name="Browser agent model"
             right={
               <SettingsModelSelect
                 variant="row"
@@ -245,8 +205,7 @@ export function BrowserTab() {
             }
           />
           <SettingRow
-            name="Max Browser Tabs"
-            subtitle="Maximum number of browser tabs the agent can have open at once (default: 10)"
+            name="Max open tabs per agent"
             htmlFor="max-browser-tabs"
             right={
               <Select
@@ -280,7 +239,7 @@ export function BrowserTab() {
 
       {/* Host selection — radio cards, expanded card shows provider settings */}
       <div className="space-y-2">
-        <h3 className={SECTION_HEADING}>Browser Host</h3>
+        <h3 className={SECTION_HEADING}>Browser host</h3>
         <div role="radiogroup" aria-label="Browser host" className="space-y-3">
           <HostCard
             id={CONTAINER_VALUE}
@@ -290,9 +249,9 @@ export function BrowserTab() {
             disabled={isLoading}
             onSelect={() => handleSelectProvider(CONTAINER_VALUE)}
           >
-            <FieldRow
-              name="High-Resolution Rendering"
-              subtitle="Render pages at 2x for a sharper live preview. Uses more CPU and bandwidth, and websites see a 2x display. Applies the next time an agent starts."
+            <SettingField
+              name="Render pages at 2x resolution"
+              help="A sharper live preview. Uses more CPU and bandwidth, and websites see a 2x display. Applies the next time an agent starts."
               htmlFor="container-browser-high-dpi"
               right={
                 <Switch
@@ -322,9 +281,8 @@ export function BrowserTab() {
                 onSelect={() => handleSelectProvider(provider.id)}
               >
                 {provider.id === 'chrome' ? (
-                  <FieldRow
-                    name="Headless Mode"
-                    subtitle="Run Chrome without a visible window. Prevents Chrome from stealing focus."
+                  <SettingField
+                    name="Run Chrome without a visible window"
                     htmlFor="chrome-headless"
                     right={
                       <Switch
@@ -470,7 +428,8 @@ interface ProxyLocation {
 interface ProxySettingsProps {
   /** Prefix of the controls' ids: `${idPrefix}-proxies`, `${idPrefix}-proxy-country`, … */
   idPrefix: string
-  subtitle: ReactNode
+  /** What the proxies buy and cost on this provider, behind the row's help icon. */
+  help: ReactNode
   locationHint: string
   enabled: boolean
   location: ProxyLocation
@@ -489,7 +448,7 @@ const PROXY_LOCATION_FIELDS: Array<{ part: keyof ProxyLocation; label: string; p
 /** A cloud browser's proxy switch and, while it is on, the optional proxy location (Browserbase, Steel). */
 function ProxySettings({
   idPrefix,
-  subtitle,
+  help,
   locationHint,
   enabled,
   location,
@@ -499,9 +458,9 @@ function ProxySettings({
 }: ProxySettingsProps) {
   return (
     <>
-      <FieldRow
-        name="Enable Proxies"
-        subtitle={subtitle}
+      <SettingField
+        name="Route traffic through residential proxies"
+        help={help}
         htmlFor={`${idPrefix}-proxies`}
         right={
           <Switch
@@ -571,9 +530,9 @@ function BrowserbaseSessionSettings({
 }: BrowserbaseSessionSettingsProps) {
   return (
     <div className="space-y-4">
-      <FieldRow
-        name="Advanced Stealth Mode"
-        subtitle="Uses a custom Chromium browser to avoid bot detection. Requires Scale plan."
+      <SettingField
+        name="Advanced stealth mode"
+        help="Uses a custom Chromium browser to avoid bot detection. Requires Browserbase's Scale plan."
         htmlFor="bb-stealth"
         right={
           <Switch
@@ -593,9 +552,8 @@ function BrowserbaseSessionSettings({
 
       {/* OS Selection (only when stealth is on) */}
       {advancedStealth && (
-        <FieldRow
-          name="Operating System"
-          subtitle="Changes the user agent and browser environment signals to match the selected platform"
+        <SettingField
+          name="Operating system shown to websites"
           htmlFor="bb-stealth-os"
           right={
             <Select
@@ -626,7 +584,7 @@ function BrowserbaseSessionSettings({
 
       <ProxySettings
         idPrefix="bb"
-        subtitle="Route traffic through residential proxies for higher CAPTCHA success rates and geo-targeting"
+        help="Raises CAPTCHA success rates and lets you choose where traffic appears to come from."
         locationHint="Optionally specify a proxy location. Leave empty for best-effort US proxy."
         enabled={proxies}
         location={{ country: proxyCountry, state: proxyState, city: proxyCity }}
@@ -716,16 +674,14 @@ export function BrowserbaseSettings({
 
       {rows ? (
         <>
-          <FieldRow
-            name="API Key"
-            subtitle="Secret key from your Browserbase dashboard"
+          <SettingField
+            name="Browserbase API key"
             htmlFor="browserbase-api-key"
             stack
             right={apiKeyInput}
           />
-          <FieldRow
-            name="Project ID"
-            subtitle="Found in your Browserbase project settings"
+          <SettingField
+            name="Browserbase project ID"
             htmlFor="browserbase-project-id"
             stack
             right={projectIdInput}
@@ -760,11 +716,11 @@ export function BrowserbaseSettings({
         {hasSavedCredentials && (
           <Button
             size="sm"
-            variant="outline"
+            variant="soft"
             onClick={onRemove}
             disabled={isValidating}
           >
-            Remove Saved Credentials
+            Remove saved credentials
           </Button>
         )}
       </div>
@@ -810,9 +766,9 @@ function SteelSessionSettings({
 }: SteelSessionSettingsProps) {
   return (
     <div className="space-y-4">
-      <FieldRow
-        name="CAPTCHA Solving"
-        subtitle="Steel solves CAPTCHAs it finds on a page. On Steel's Launch plan this needs paid credits."
+      <SettingField
+        name="Solve CAPTCHAs automatically"
+        help="On Steel's Launch plan this needs paid credits."
         htmlFor="steel-captcha"
         right={
           <Switch
@@ -826,7 +782,7 @@ function SteelSessionSettings({
 
       <ProxySettings
         idPrefix="steel"
-        subtitle="Route traffic through Steel's residential proxies for geo-targeting and fewer blocks. On Steel's Launch plan this needs paid credits."
+        help="Fewer blocks, and you can choose where traffic appears to come from. On Steel's Launch plan this needs paid credits."
         locationHint="Optionally specify a proxy location. Leave empty to let Steel choose. State applies to the US only."
         enabled={proxies}
         location={{ country: proxyCountry, state: proxyState, city: proxyCity }}
@@ -890,9 +846,8 @@ export function SteelSettings({
       )}
 
       {layout === 'rows' ? (
-        <FieldRow
-          name="API Key"
-          subtitle="From the API Keys page of your Steel dashboard"
+        <SettingField
+          name="Steel API key"
           htmlFor="steel-api-key"
           stack
           right={apiKeyInput}
@@ -918,8 +873,8 @@ export function SteelSettings({
           </Button>
         )}
         {hasSavedCredentials && credentialSource !== 'env' && (
-          <Button size="sm" variant="outline" onClick={remove} disabled={isValidating}>
-            Remove Saved Key
+          <Button size="sm" variant="soft" onClick={remove} disabled={isValidating}>
+            Remove saved key
           </Button>
         )}
       </div>
@@ -998,16 +953,16 @@ export function TabtenderSettings({
 
       {rows ? (
         <>
-          <FieldRow
-            name="Server URL"
-            subtitle="Where this app reaches your Tab Tender server, e.g. its tunnel URL"
+          <SettingField
+            name="Tab Tender server URL"
+            help="Where this app reaches your Tab Tender server, for example its tunnel URL."
             htmlFor="tabtender-url"
             stack
             right={urlInput}
           />
-          <FieldRow
-            name="API Key"
-            subtitle="From Tab Tender's Settings → API Key"
+          <SettingField
+            name="Tab Tender API key"
+            help="From Tab Tender's Settings → API Key."
             htmlFor="tabtender-api-key"
             stack
             right={apiKeyInput}
@@ -1040,8 +995,8 @@ export function TabtenderSettings({
           </Button>
         )}
         {hasSavedCredentials && credentialSource !== 'env' && (
-          <Button size="sm" variant="outline" onClick={remove} disabled={isValidating}>
-            Remove Server
+          <Button size="sm" variant="soft" onClick={remove} disabled={isValidating}>
+            Remove server
           </Button>
         )}
       </div>
