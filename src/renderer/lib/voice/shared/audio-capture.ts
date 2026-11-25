@@ -133,26 +133,68 @@ export async function acquireMicStream(): Promise<MediaStream> {
 }
 
 /**
+ * Whether the microphone can be opened without asking: the browser says so, or
+ * it already opened once on this page. A caller that shows "listening" the
+ * moment it is asked to checks this first, so a permission prompt is not
+ * sitting under a recording indicator.
+ */
+let micGranted = false
+let micPermissionWatched = false
+
+export function watchMicPermission(): void {
+  if (micPermissionWatched || typeof navigator === 'undefined') return
+  micPermissionWatched = true
+  navigator.permissions?.query?.({ name: 'microphone' as PermissionName }).then((status) => {
+    micGranted = status.state === 'granted'
+    status.onchange = () => { micGranted = status.state === 'granted' }
+  }).catch(() => {}) // No Permissions API for the microphone (Safari, Firefox): learned from the first open instead.
+}
+
+export function isMicPermissionGranted(): boolean {
+  return micGranted
+}
+
+/**
  * Set up microphone capture and pipe 16-bit PCM chunks to `sink` (an STT
  * adapter), at the sink's sample rate (16 kHz unless it says otherwise). Returns handles for the resources and a cleanup function. The
  * caller owns the passed-in stream (acquire via acquireMicStream) and is
  * responsible for releasing it if this rejects; on success the returned
  * cleanup() stops it.
+ *
+ * `stream` may still be on its way: the audio graph is built while the
+ * microphone opens, so the first sample is captured as soon as the hardware
+ * delivers it rather than a context and a worklet later.
  */
 export async function startAudioCapture(
   sink: AudioSink & { readonly sampleRate?: number },
-  stream: MediaStream,
+  stream: MediaStream | Promise<MediaStream>,
   options?: { withAnalyser?: boolean },
 ): Promise<AudioCaptureHandle> {
   const sampleRate = sink.sampleRate ?? 16000
 
   const audioContext = new AudioContext({ sampleRate })
-  // The context may start suspended if created outside a synchronous user-gesture
-  // handler (e.g. after awaiting network requests). Explicitly resume it.
-  if (audioContext.state === 'suspended') {
-    await audioContext.resume()
+  let currentSink: AudioSink | null = sink
+  const prepareNode = async () => {
+    // The context may start suspended if created outside a synchronous user-gesture
+    // handler (e.g. after awaiting network requests). Explicitly resume it.
+    if (audioContext.state === 'suspended') {
+      await audioContext.resume()
+    }
+    return createCaptureNode(audioContext, (samples) => {
+      currentSink?.sendAudio(float32ToInt16(samples).buffer as ArrayBuffer)
+    })
   }
-  const source = audioContext.createMediaStreamSource(stream)
+
+  let micStream: MediaStream
+  let capture: CaptureNode
+  try {
+    ;[micStream, capture] = await Promise.all([stream, prepareNode()])
+  } catch (error) {
+    void audioContext.close().catch(() => {})
+    throw error
+  }
+  micGranted = true
+  const source = audioContext.createMediaStreamSource(micStream)
 
   const analyser = audioContext.createAnalyser()
   if (options?.withAnalyser) {
@@ -161,10 +203,6 @@ export async function startAudioCapture(
     source.connect(analyser)
   }
 
-  let currentSink: AudioSink | null = sink
-  const capture = await createCaptureNode(audioContext, (samples) => {
-    currentSink?.sendAudio(float32ToInt16(samples).buffer as ArrayBuffer)
-  })
   source.connect(capture.node)
   capture.node.connect(audioContext.destination)
 
@@ -172,11 +210,11 @@ export async function startAudioCapture(
     currentSink = null
     capture.disconnect()
     audioContext.close()
-    stream.getTracks().forEach(t => t.stop())
+    micStream.getTracks().forEach(t => t.stop())
   }
 
   return {
-    stream,
+    stream: micStream,
     audioContext,
     analyser,
     captureKind: capture.kind,

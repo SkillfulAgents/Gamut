@@ -2,14 +2,17 @@ import { useState, useRef, useCallback, useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { apiFetch } from '@renderer/lib/api'
 import { useAnalyticsTracking } from '@renderer/context/analytics-context'
-import { acquireMicStream, startAudioCapture, type AudioCaptureHandle, type CaptureKind } from '@renderer/lib/voice/shared/audio-capture'
+import { acquireMicStream, isMicPermissionGranted, startAudioCapture, watchMicPermission, type AudioCaptureHandle, type CaptureKind } from '@renderer/lib/voice/shared/audio-capture'
 import { createSttAdapter } from '@renderer/lib/voice/registry/stt'
 import { type SttAdapter, type VoiceProvider } from '@renderer/lib/voice/contracts/stt'
-import { resolveSttProtocol, type VoiceTokenResponse } from '@shared/lib/voice/stt-protocol'
+import { resolveSttProtocol, type SttProtocol, type VoiceTokenResponse } from '@shared/lib/voice/stt-protocol'
 import { addRendererBreadcrumb, captureRendererException, captureRendererMessage } from '@renderer/lib/error-reporting'
 import type { VoiceConversationEngine } from '@shared/lib/voice/conversation-types'
 import type { TtsVoiceInfo } from '@shared/lib/voice/tts-preferences'
 
+// 'connecting': the microphone is opening behind a permission prompt, or the
+// host is too old to say which speech protocol to open it for. Otherwise a
+// dictation is 'recording' from the click.
 // 'finalizing': mic released, but we're flushing buffered audio and awaiting the
 // server's trailing transcripts before the final text is ready.
 export type VoiceInputState = 'idle' | 'connecting' | 'recording' | 'finalizing'
@@ -22,6 +25,17 @@ export type VoiceInputState = 'idle' | 'connecting' | 'recording' | 'finalizing'
  */
 interface DictationSession {
   provider: VoiceProvider
+  protocol: SttProtocol
+  /**
+   * Settles once the adapter has been told to connect (or never will be).
+   * Capture starts before the token is in, so a stop that comes first waits
+   * for this: finishing an adapter that has no socket yet drops what it heard.
+   */
+  connectRequested: Promise<void>
+  markConnectRequested: () => void
+  connectWasRequested: boolean
+  /** Stopped before anything was heard: there is nothing to connect for. */
+  discarded: boolean
   /** Ordinal of this attempt within the page, so retries can be told apart. */
   attempt: number
   startedAt: number
@@ -45,6 +59,15 @@ const NO_TRANSCRIPT_REPORT_MIN_SECONDS = 1.5
  * silence: the person did not speak, or the OS handed us a muted device.
  */
 const SILENT_PEAK_SAMPLE = 500
+
+/** How long a stop waits for the token of a dictation that has already heard something. */
+const STOP_WAITS_FOR_TOKEN_MS = 4_000
+
+/** What a dictation connects with: enough to open the microphone at the right rate. */
+interface SttTarget {
+  provider: VoiceProvider
+  protocol: SttProtocol
+}
 
 /** Denied or missing mic permission is the person's choice, not a defect. */
 function isMicPermissionRefusal(err: unknown): boolean {
@@ -130,6 +153,9 @@ interface UseVoiceInputOptions {
 type SttCredentials = VoiceTokenResponse
 
 interface VoiceConfiguredStatus {
+  /** The dictation provider and its wire protocol. Absent on an older host. */
+  sttProvider?: VoiceProvider
+  sttProtocol?: SttProtocol
   conversationEngine?: VoiceConversationEngine | null
   configured: boolean
   supportsTts: boolean
@@ -254,6 +280,13 @@ export function useVoiceInput({ onTranscriptUpdate, onDictated }: UseVoiceInputO
 
   const isSupported = typeof navigator !== 'undefined' && !!navigator.mediaDevices?.getUserMedia
 
+  // What the host says a dictation connects with, read ahead of the click so
+  // the click itself waits for nothing.
+  const { sttProvider, sttProtocol } = useVoiceConfiguredStatus()
+  const targetRef = useRef<SttTarget | null>(null)
+  targetRef.current = sttProvider && sttProtocol ? { provider: sttProvider, protocol: sttProtocol } : null
+  useEffect(() => { watchMicPermission() }, [])
+
   const cleanup = useCallback(() => {
     // Tearing down invalidates the current attempt, so an in-flight startRecording
     // whose awaits resolve afterward sees a stale generation and bails.
@@ -264,6 +297,7 @@ export function useVoiceInput({ onTranscriptUpdate, onDictated }: UseVoiceInputO
 
     adapterRef.current?.close()
     adapterRef.current = null
+    sessionRef.current?.markConnectRequested()
     sessionRef.current = null
   }, [])
 
@@ -277,6 +311,7 @@ export function useVoiceInput({ onTranscriptUpdate, onDictated }: UseVoiceInputO
     const st = stateRef.current
     if (stoppingRef.current || (st !== 'recording' && st !== 'connecting')) return undefined
     stoppingRef.current = true
+    stateRef.current = 'finalizing'
     setState('finalizing')
 
     // Release the mic right away; keep the adapter to flush + await finals.
@@ -290,6 +325,20 @@ export function useVoiceInput({ onTranscriptUpdate, onDictated }: UseVoiceInputO
     adapterRef.current = null
     const session = sessionRef.current
     sessionRef.current = null
+    if (adapter && session && !session.connectWasRequested) {
+      if ((adapter.stats?.bytesReceived ?? 0) === 0) {
+        // Stopped before a sample arrived: nothing to transcribe, nothing to wait for.
+        session.discarded = true
+        adapter.close()
+      } else {
+        // Words were spoken before the token came back. They are buffered in
+        // the adapter; give it its socket before asking it to finish.
+        await Promise.race([
+          session.connectRequested,
+          new Promise<void>((resolve) => setTimeout(resolve, STOP_WAITS_FOR_TOKEN_MS)),
+        ])
+      }
+    }
     await adapter?.finish().catch(() => {}) // finish() never rejects; guard anyway
 
     // Include both finalized and any pending interim text
@@ -313,6 +362,11 @@ export function useVoiceInput({ onTranscriptUpdate, onDictated }: UseVoiceInputO
       track('dictation_used', { length: transcribed.length })
       onDictated?.()
     }
+    // The attempt is over. A start whose token is still on its way (or fails
+    // late) finds itself stale, and neither connects nor puts back the text the
+    // attempt began with over whatever has been typed since.
+    generationRef.current++
+    stateRef.current = 'idle'
     setState('idle')
     stoppingRef.current = false
     return finalText
@@ -332,15 +386,17 @@ export function useVoiceInput({ onTranscriptUpdate, onDictated }: UseVoiceInputO
     finalizedRef.current = ''
     interimRef.current = ''
 
-    setState('connecting')
+    // Listening from this moment whenever nothing stands between the click and
+    // the microphone: the protocol is known, and opening it will not ask.
+    const known = targetRef.current
+    const initial: VoiceInputState = known && isMicPermissionGranted() ? 'recording' : 'connecting'
+    stateRef.current = initial
+    setState(initial)
 
-    // Request the mic right away so permission/hardware spin-up runs in
-    // parallel with the token round-trip instead of after it.
-    const streamPromise = acquireMicStream()
-    // Observe the rejection synchronously: a fast getUserMedia failure (denied
-    // permission, no device) during the token round-trip would otherwise fire an
-    // unhandledrejection before a handler is attached below. The error is still
-    // surfaced via the awaits/releaseStream that consume the promise.
+    // Open the mic now, alongside the token round-trip rather than after it.
+    // Rejections are observed here so a fast failure (denied permission, no
+    // device) cannot surface as an unhandledrejection before it is awaited.
+    let streamPromise = acquireMicStream()
     streamPromise.catch(() => {})
     const releaseStream = () => {
       streamPromise.then((stream) => {
@@ -348,31 +404,54 @@ export function useVoiceInput({ onTranscriptUpdate, onDictated }: UseVoiceInputO
       }).catch(() => {})
     }
 
-    let provider: VoiceProvider | undefined
-    try {
-      // 1. Get API key from backend
-      const credRes = await apiFetch('/api/voice/token')
-      const credData: SttCredentials | { error: string } = await credRes.json()
-      if (!credRes.ok) {
-        throw new Error(('error' in credData ? credData.error : null) || 'Failed to get STT credentials')
-      }
-      const credentials = credData as SttCredentials
-      provider = credentials.provider
-      const token = credentials.token
-      addRendererBreadcrumb('dictation', 'credentials received', { provider })
+    let provider: VoiceProvider | undefined = known?.provider
+    let session: DictationSession | null = null
+    let stage: 'credentials' | 'capture' = 'credentials'
+    let failed = false
 
-      // Bail if a stop/restart or unmount happened while fetching the token.
-      // Cast needed because TS narrows the ref, but callbacks can mutate it during awaits.
-      if (isStale() || (stateRef.current as VoiceInputState) !== 'connecting') {
-        releaseStream()
-        return
-      }
+    const fail = (err: unknown) => {
+      releaseStream()
+      if (failed || isStale()) return
+      failed = true
+      const message = err instanceof Error ? err.message : 'Failed to start recording'
+      console.error('Voice input error:', err)
+      reportSessionFailure(session, provider, stage, err)
+      setError(message)
+      // A stop already under way owns the text and the state; it is waiting on
+      // this session's adapter, which closing releases.
+      const stopping = stoppingRef.current
+      session?.adapter.close()
+      session?.markConnectRequested()
+      cleanup()
+      if (stopping) return
+      // Restore original text that was in the textarea before recording started
+      onTranscriptUpdate(existingText)
+      prefixRef.current = ''
+      finalizedRef.current = ''
+      interimRef.current = ''
+      stateRef.current = 'idle'
+      setState('idle')
+    }
 
-      // 2. Create adapter and wire transcript events
-      const adapter = createSttAdapter(resolveSttProtocol(credentials), provider)
+    /** Create the adapter and wire its events. It buffers audio until it is connected. */
+    const openSession = (target: SttTarget): DictationSession => {
+      const adapter = createSttAdapter(target.protocol, target.provider)
+      let markConnectRequested!: () => void
+      const connectRequested = new Promise<void>((resolve) => { markConnectRequested = resolve })
+      const opened: DictationSession = {
+        provider: target.provider,
+        protocol: target.protocol,
+        attempt: ++attemptsRef.current,
+        startedAt: Date.now(),
+        adapter,
+        failed: false,
+        connectRequested,
+        markConnectRequested,
+        connectWasRequested: false,
+        discarded: false,
+      }
       adapterRef.current = adapter
-      const session: DictationSession = { provider, attempt: ++attemptsRef.current, startedAt: Date.now(), adapter, failed: false }
-      sessionRef.current = session
+      sessionRef.current = opened
 
       adapter.onTranscript((event) => {
         switch (event.type) {
@@ -393,60 +472,117 @@ export function useVoiceInput({ onTranscriptUpdate, onDictated }: UseVoiceInputO
       adapter.onError((err) => {
         if (adapterRef.current !== adapter) return // stale/orphaned adapter — don't touch the live session
         console.error('STT adapter error:', err)
-        reportSessionFailure(session, provider, 'stream', err)
+        reportSessionFailure(opened, target.provider, 'stream', err)
         setError(err.message)
         stopRecording()
       })
+      return opened
+    }
 
-      // 3. Connect in the background — the adapter buffers audio sent before
-      // the socket opens, so recording can start while the handshake is in flight.
-      adapter.connect(token).catch((err: unknown) => {
-        if (adapterRef.current !== adapter) return // recording already stopped
-        const message = err instanceof Error ? err.message : 'Failed to connect'
-        console.error('STT connect error:', err)
-        reportSessionFailure(session, provider, 'connect', err)
-        setError(message)
-        stopRecording()
-      })
-
-      // 4. Start mic capture and pipe audio to the adapter
-      const capture = await startAudioCapture(adapter, await streamPromise, { withAnalyser: true })
-      // Stale (restart/unmount) or superseded: tear down everything we acquired —
-      // nobody else holds these, so we own the cleanup.
-      if (isStale() || adapterRef.current !== adapter || (stateRef.current as VoiceInputState) !== 'connecting') {
+    /**
+     * Mic capture into the session's adapter. The audio graph is built while
+     * the microphone opens; whatever is heard before the socket is up waits in
+     * the adapter's own buffer.
+     */
+    const startCapture = async (target: DictationSession): Promise<void> => {
+      const capture = await startAudioCapture(target.adapter, streamPromise, { withAnalyser: true })
+      // Stale (restart/unmount), stopped or replaced: whoever moved on has dealt
+      // with the adapter; the capture is ours to release.
+      if (isStale() || adapterRef.current !== target.adapter) {
         capture.cleanup()
-        adapter.close()
-        if (adapterRef.current === adapter) adapterRef.current = null
-        if (sessionRef.current === session) sessionRef.current = null
-        releaseStream()
         return
       }
       captureRef.current = capture
       analyserRef.current = capture.analyser
-      session.captureKind = capture.captureKind
-      session.contextSampleRate = capture.audioContext.sampleRate
-      session.track = describeTrack(capture.stream)
+      target.captureKind = capture.captureKind
+      target.contextSampleRate = capture.audioContext.sampleRate
+      target.track = describeTrack(capture.stream)
       addRendererBreadcrumb('dictation', 'capture started', {
-        provider,
-        captureKind: session.captureKind,
-        contextSampleRate: session.contextSampleRate,
-        track: session.track,
+        provider: target.provider,
+        captureKind: target.captureKind,
+        contextSampleRate: target.contextSampleRate,
+        track: target.track,
+        startMs: Date.now() - target.startedAt,
       })
-
+      stateRef.current = 'recording'
       setState('recording')
+    }
+
+    try {
+      // 1. With the protocol known, capture starts now and the token catches up.
+      let capturing: Promise<void> | null = null
+      if (known) {
+        session = openSession(known)
+        capturing = startCapture(session)
+        // A refused mic should not wait for the token to say so.
+        capturing.catch((err: unknown) => { stage = 'capture'; fail(err) })
+      }
+
+      // 2. Get a token from the backend
+      const credRes = await apiFetch('/api/voice/token')
+      const credData: SttCredentials | { error: string } = await credRes.json()
+      if (!credRes.ok) {
+        throw new Error(('error' in credData ? credData.error : null) || 'Failed to get STT credentials')
+      }
+      const credentials = credData as SttCredentials
+      provider = credentials.provider
+      const target: SttTarget = { provider, protocol: resolveSttProtocol(credentials) }
+      addRendererBreadcrumb('dictation', 'credentials received', { provider })
+      stage = 'capture'
+
+      // Bail if a restart, a failure or an unmount happened while fetching the token.
+      if (isStale()) {
+        releaseStream()
+        return
+      }
+
+      if (session && (session.provider !== target.provider || session.protocol !== target.protocol)) {
+        // The voice settings changed after the status was read: what has been
+        // captured is at the wrong rate for this token. Start over with it.
+        const stopped = adapterRef.current !== session.adapter
+        session.adapter.close()
+        session.markConnectRequested()
+        if (stopped) return
+        captureRef.current?.cleanup()
+        captureRef.current = null
+        analyserRef.current = null
+        adapterRef.current = null
+        sessionRef.current = null
+        session = null
+        streamPromise = acquireMicStream()
+        streamPromise.catch(() => {})
+      }
+
+      if (!session) {
+        // Stopped while there was nothing but the token to wait for.
+        // Cast needed because TS narrows the ref, but callbacks can mutate it during awaits.
+        if ((stateRef.current as VoiceInputState) !== 'connecting' && (stateRef.current as VoiceInputState) !== 'recording') {
+          releaseStream()
+          return
+        }
+        session = openSession(target)
+        capturing = startCapture(session)
+      }
+
+      // 3. Connect in the background — the adapter buffers audio sent before
+      // the socket opens, so recording does not wait for the handshake.
+      if (!session.discarded) {
+        const connecting = session
+        connecting.connectWasRequested = true
+        connecting.adapter.connect(credentials.token).catch((err: unknown) => {
+          if (adapterRef.current !== connecting.adapter) return // recording already stopped
+          const message = err instanceof Error ? err.message : 'Failed to connect'
+          console.error('STT connect error:', err)
+          reportSessionFailure(connecting, provider, 'connect', err)
+          setError(message)
+          stopRecording()
+        })
+      }
+      session.markConnectRequested()
+
+      await capturing
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to start recording'
-      console.error('Voice input error:', err)
-      reportSessionFailure(sessionRef.current, provider, sessionRef.current ? 'capture' : 'credentials', err)
-      setError(message)
-      releaseStream()
-      cleanup()
-      // Restore original text that was in the textarea before recording started
-      onTranscriptUpdate(existingText)
-      prefixRef.current = ''
-      finalizedRef.current = ''
-      interimRef.current = ''
-      setState('idle')
+      fail(err)
     }
   }, [cleanup, onTranscriptUpdate, stopRecording])
 
