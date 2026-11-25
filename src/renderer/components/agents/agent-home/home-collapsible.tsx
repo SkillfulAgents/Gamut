@@ -55,6 +55,8 @@ export interface HomeCardLook {
   section: string
   media: string
   label: string
+  /** The text size of a row picker's value, where it differs from the picker's own (a settings row's). */
+  value?: string
   defaultOpen: boolean
   /** Agent Home groups persisted section rows; other surfaces keep standalone cards. */
   grouped?: boolean
@@ -65,6 +67,7 @@ export const HomeCardLookContext = createContext<HomeCardLook>({
   section: '',
   media: '',
   label: 'text-[12px]/5 text-muted-foreground',
+  value: 'text-[12px]/5',
   defaultOpen: false,
   grouped: true,
 })

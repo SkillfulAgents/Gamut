@@ -1,4 +1,5 @@
 import * as React from 'react'
+import { createPortal } from 'react-dom'
 import { ChevronRight, ExternalLink } from 'lucide-react'
 import {
   Sidebar,
@@ -22,6 +23,7 @@ import { useIsMobile } from '@renderer/hooks/use-mobile'
 import { isElectron, getPlatform } from '@renderer/lib/env'
 import { useFullScreen } from '@renderer/hooks/use-fullscreen'
 import { openExternalUrl } from '@renderer/lib/open-external'
+import { cn } from '@shared/lib/utils/cn'
 
 export interface SettingsPageSection {
   id: string
@@ -39,6 +41,12 @@ export interface SettingsPageSectionGroup {
   label?: string
   sections: SettingsPageSection[]
 }
+
+/**
+ * The page under the settings cards: a step darker than the cards (`bg-background`) in both themes, so they lift
+ * off it. Light is the canvas under Agent Home (#fafafa); dark sits under its 10% cards, which that canvas matches.
+ */
+const SETTINGS_PAGE_BG = 'bg-canvas dark:bg-[#141414]'
 
 /**
  * Lets the active section suppress the default SettingsPage header (title +
@@ -60,6 +68,23 @@ export function useHideSettingsHeader(hidden: boolean): void {
     setHidden(hidden)
     return () => setHidden(false)
   }, [setHidden, hidden])
+}
+
+/**
+ * Where the page title's row keeps a section's own actions. `undefined` outside a SettingsPage, `null` while the
+ * title is not on screen.
+ */
+const SettingsHeaderActionsSlotContext = React.createContext<HTMLElement | null | undefined>(undefined)
+
+/**
+ * Draws its children on the page title's row, right-aligned: for a section whose actions depend on its own state
+ * (Container Runtime's Save and Reset). A section whose actions are fixed passes `headerActions` instead. Rendered
+ * outside a SettingsPage (a test, another host), the children stay where they are written.
+ */
+export function SettingsHeaderActions({ children }: { children: React.ReactNode }) {
+  const slot = React.useContext(SettingsHeaderActionsSlotContext)
+  if (slot === undefined) return <>{children}</>
+  return slot ? createPortal(children, slot) : null
 }
 
 /**
@@ -137,6 +162,7 @@ function SettingsPageContent({
   navTestIdPrefix,
 }: Omit<SettingsPageProps, 'data-testid'>) {
   const isMobile = useIsMobile()
+  const [headerActionsSlot, setHeaderActionsSlot] = React.useState<HTMLElement | null>(null)
 
   const allSections = React.useMemo(() => groups.flatMap((g) => g.sections), [groups])
   // External items open a URL; they are not selectable content panes.
@@ -277,7 +303,7 @@ function SettingsPageContent({
     }
 
     return (
-      <div className="flex h-screen w-full flex-col bg-background pt-[env(safe-area-inset-top)]">
+      <div className={cn('flex h-screen w-full flex-col pt-[env(safe-area-inset-top)]', SETTINGS_PAGE_BG)}>
         <div className="flex items-center h-12 shrink-0 px-2 border-b">
           <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setMobileView('menu')}>
             <AnimatedNavIcon name="back" className="h-4 w-4" />
@@ -288,9 +314,12 @@ function SettingsPageContent({
           {activeSection?.headerActions && (
             <div className="shrink-0">{activeSection.headerActions}</div>
           )}
+          <div ref={setHeaderActionsSlot} className="flex shrink-0 items-center gap-2 empty:hidden" />
         </div>
         <SettingsPageContainer>
-          {activeSection?.render()}
+          <SettingsHeaderActionsSlotContext.Provider value={headerActionsSlot}>
+            {activeSection?.render()}
+          </SettingsHeaderActionsSlotContext.Provider>
         </SettingsPageContainer>
       </div>
     )
@@ -361,20 +390,28 @@ function SettingsPageContent({
           ))}
         </SidebarContent>
       </Sidebar>
-      <SidebarInset className="min-w-0">
+      <SidebarInset className={cn('min-w-0', SETTINGS_PAGE_BG)}>
         <div className="h-12 shrink-0 app-drag-region" />
         <SettingsPageContainer fullWidth={contentFullWidth}>
           {!headerHidden && (
             <PageTitle
               title={activeSection?.label ?? 'Settings'}
-              actions={activeSection?.headerActions}
+              actions={
+                <div className="flex items-center gap-2">
+                  {activeSection?.headerActions}
+                  {/* The section's own actions (SettingsHeaderActions) land here. */}
+                  <div ref={setHeaderActionsSlot} className="flex items-center gap-2 empty:hidden" />
+                </div>
+              }
             />
           )}
-          <SettingsPageHeaderContext.Provider value={setHeaderHidden}>
-            <SettingsPageContentWidthContext.Provider value={setContentFullWidth}>
-              {activeSection?.render()}
-            </SettingsPageContentWidthContext.Provider>
-          </SettingsPageHeaderContext.Provider>
+          <SettingsHeaderActionsSlotContext.Provider value={headerActionsSlot}>
+            <SettingsPageHeaderContext.Provider value={setHeaderHidden}>
+              <SettingsPageContentWidthContext.Provider value={setContentFullWidth}>
+                {activeSection?.render()}
+              </SettingsPageContentWidthContext.Provider>
+            </SettingsPageHeaderContext.Provider>
+          </SettingsHeaderActionsSlotContext.Provider>
         </SettingsPageContainer>
       </SidebarInset>
     </>

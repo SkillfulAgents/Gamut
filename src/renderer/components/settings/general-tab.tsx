@@ -7,7 +7,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@renderer/components/ui/tooltip'
-import { cn } from '@shared/lib/utils/cn'
+import { SegmentedControl, type SegmentedOption } from '@renderer/components/ui/segmented-control'
 import { TimezonePicker } from '@renderer/components/ui/timezone-picker'
 import { useUserSettings, useUpdateUserSettings } from '@renderer/hooks/use-user-settings'
 import { useSettings, useUpdateSettings } from '@renderer/hooks/use-settings'
@@ -20,11 +20,10 @@ import { ApiLogAutoDeleteSelect } from './api-log-auto-delete-select'
 import { applyWebFavicon, getWebFaviconHref } from '@renderer/lib/favicon'
 import { agentsRunInAppSandbox, appUpdatesItself, keepsMacAwake } from '@renderer/lib/capabilities'
 import { SandboxNotice } from './sandbox-notice'
+import { SETTINGS_CARD_CLASS, SETTINGS_SECTION_HEADING, SettingRow } from './setting-row'
 import {
-  Wand2,
   TriangleAlert,
   Download,
-  RefreshCw,
   CheckCircle2,
   Loader2,
   Monitor,
@@ -34,27 +33,11 @@ import {
   Trash2,
 } from 'lucide-react'
 
-interface SettingRowProps {
-  name: string
-  subtitle: ReactNode
-  right: ReactNode
-  htmlFor?: string
-}
-
-function SettingRow({ name, subtitle, right, htmlFor }: SettingRowProps) {
-  const Name = htmlFor ? 'label' : 'div'
-  return (
-    <div className="py-3 px-4">
-      <div className="flex items-center gap-3">
-        <div className="min-w-0 flex-1">
-          <Name htmlFor={htmlFor} className="text-xs font-medium truncate block cursor-default">{name}</Name>
-          <div className="text-[11px] text-muted-foreground mt-0.5">{subtitle}</div>
-        </div>
-        <div className="flex items-center gap-2 shrink-0">{right}</div>
-      </div>
-    </div>
-  )
-}
+const THEME_OPTIONS: readonly SegmentedOption<'system' | 'light' | 'dark'>[] = [
+  { value: 'system', label: 'System', icon: Monitor, ariaLabel: 'System theme' },
+  { value: 'light', label: 'Light', icon: Sun, ariaLabel: 'Light theme' },
+  { value: 'dark', label: 'Dark', icon: Moon, ariaLabel: 'Dark theme' },
+]
 
 interface KeepAwakeRowProps {
   enabled: boolean
@@ -68,23 +51,19 @@ interface KeepAwakeRowProps {
  */
 function KeepAwakeRow({ enabled, onToggle, disabled }: KeepAwakeRowProps) {
   return (
-    <div className="py-3 px-4">
-      <div className="flex items-center gap-3">
-        <div className="min-w-0 flex-1">
-          <label htmlFor="keep-awake" className="text-xs font-medium truncate block cursor-default">Keep Awake</label>
-          <div className="text-[11px] text-muted-foreground mt-0.5">
-            Prevent your Mac from sleeping with the lid closed. Requires administrator access.
-          </div>
-        </div>
-        <div className="flex items-center gap-2 shrink-0">
-          <Switch
-            id="keep-awake"
-            checked={enabled}
-            onCheckedChange={onToggle}
-            disabled={disabled}
-          />
-        </div>
-      </div>
+    <SettingRow
+      name="Keep Awake"
+      help="Stops your Mac from sleeping while its lid is closed. Turning it on asks for administrator access."
+      htmlFor="keep-awake"
+      right={
+        <Switch
+          id="keep-awake"
+          checked={enabled}
+          onCheckedChange={onToggle}
+          disabled={disabled}
+        />
+      }
+    >
       {enabled && (
         <div className="flex gap-2 mt-2 rounded-item bg-yellow-500/10 px-2.5 py-2 text-[11px] text-yellow-700 dark:text-yellow-500/90 leading-relaxed">
           <TriangleAlert className="h-3.5 w-3.5 mt-0.5 shrink-0" />
@@ -93,12 +72,12 @@ function KeepAwakeRow({ enabled, onToggle, disabled }: KeepAwakeRowProps) {
           </p>
         </div>
       )}
-    </div>
+    </SettingRow>
   )
 }
 
-const CARD_CLASS = 'rounded-card border bg-background divide-y divide-border/50 overflow-hidden'
-const SECTION_HEADING = 'text-xs font-medium text-muted-foreground px-1'
+const CARD_CLASS = SETTINGS_CARD_CLASS
+const SECTION_HEADING = SETTINGS_SECTION_HEADING
 const FAVICON_ACCEPT = 'image/png,image/jpeg,image/webp,image/x-icon,image/vnd.microsoft.icon,image/svg+xml,.ico'
 const FAVICON_MAX_BYTES = 256 * 1024
 const FAVICON_ALLOWED_TYPES = new Set([
@@ -225,54 +204,18 @@ export function GeneralTab({ onOpenWizard }: GeneralTabProps) {
         <div className={CARD_CLASS}>
           <SettingRow
             name="Appearance"
-            subtitle="Choose light or dark theme, or follow your system setting"
             right={
-              <TooltipProvider delayDuration={0}>
-                {/* Single-select segmented control. Intentionally NOT Radix Tabs:
-                    a theme picker has no tab panels, so TabsTrigger's aria-controls
-                    would dangle (critical aria-valid-attr-value violation). */}
-                <div
-                  role="radiogroup"
-                  aria-label="Appearance"
-                  className="inline-flex h-8 items-center justify-center rounded-control bg-muted p-0.5 text-muted-foreground"
-                >
-                  {(
-                    [
-                      { value: 'system', label: 'System', Icon: Monitor },
-                      { value: 'light', label: 'Light', Icon: Sun },
-                      { value: 'dark', label: 'Dark', Icon: Moon },
-                    ] as const
-                  ).map(({ value, label, Icon }) => {
-                    const selected = (userSettings?.theme ?? 'system') === value
-                    return (
-                      <Tooltip key={value}>
-                        <TooltipTrigger asChild>
-                          <button
-                            type="button"
-                            role="radio"
-                            aria-checked={selected}
-                            aria-label={`${label} theme`}
-                            disabled={isUserSettingsLoading}
-                            onClick={() => updateUserSettings.mutate({ theme: value })}
-                            className={cn(
-                              'inline-flex h-7 w-8 items-center justify-center rounded-control text-sm font-medium ring-offset-background transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50',
-                              selected && 'bg-background text-foreground shadow',
-                            )}
-                          >
-                            <Icon className="h-3.5 w-3.5" />
-                          </button>
-                        </TooltipTrigger>
-                        <TooltipContent>{label}</TooltipContent>
-                      </Tooltip>
-                    )
-                  })}
-                </div>
-              </TooltipProvider>
+              <SegmentedControl
+                aria-label="Appearance"
+                value={userSettings?.theme ?? 'system'}
+                options={THEME_OPTIONS}
+                onChange={(theme) => updateUserSettings.mutate({ theme })}
+                disabled={isUserSettingsLoading}
+              />
             }
           />
           <SettingRow
-            name="Timezone"
-            subtitle="Used for interpreting scheduled task times"
+            name="Time zone for scheduled tasks"
             right={
               <TimezonePicker
                 variant="row"
@@ -286,8 +229,7 @@ export function GeneralTab({ onOpenWizard }: GeneralTabProps) {
           />
           {isElectronApp && (
             <SettingRow
-              name="Show in Menu Bar"
-              subtitle={`Display agent status icon in the ${isMacElectron ? 'menu bar' : 'system tray'}`}
+              name={`Show agent status in ${isMacElectron ? 'menu bar' : 'system tray'}`}
               htmlFor="show-menu-bar-icon"
               right={
                 <Switch
@@ -318,13 +260,10 @@ export function GeneralTab({ onOpenWizard }: GeneralTabProps) {
         <div className="space-y-2">
           <h3 className={SECTION_HEADING}>Branding</h3>
           <div className={CARD_CLASS}>
-            <div className="py-3 px-4">
-              <div className="flex items-center gap-3">
-                <div className="min-w-0 flex-1">
-                  <div className="text-xs font-medium truncate block cursor-default">Web Icon</div>
-                  <div className="text-[11px] text-muted-foreground mt-0.5">Shown in browser tabs for web deployments</div>
-                </div>
-                <div className="flex items-center gap-2 shrink-0">
+            <SettingRow
+              name="Browser tab icon"
+              right={
+                <>
                   <div className="flex h-9 w-9 items-center justify-center overflow-hidden rounded-control border bg-muted">
                     <img src={faviconPreviewSrc} alt="" className="h-6 w-6 object-contain" />
                   </div>
@@ -337,7 +276,7 @@ export function GeneralTab({ onOpenWizard }: GeneralTabProps) {
                   />
                   <Button
                     type="button"
-                    variant="outline"
+                    variant="soft"
                     size="sm"
                     onClick={() => faviconInputRef.current?.click()}
                     disabled={!globalSettings || faviconSaving}
@@ -365,12 +304,13 @@ export function GeneralTab({ onOpenWizard }: GeneralTabProps) {
                       </Tooltip>
                     </TooltipProvider>
                   )}
-                </div>
-              </div>
+                </>
+              }
+            >
               {faviconError && (
                 <p className="mt-2 text-[11px] text-destructive">{faviconError}</p>
               )}
-            </div>
+            </SettingRow>
           </div>
         </div>
       )}
@@ -384,8 +324,7 @@ export function GeneralTab({ onOpenWizard }: GeneralTabProps) {
             {!isAuthMode && (
               <>
                 <SettingRow
-                  name="Share Error Reports"
-                  subtitle="Send error reports to help us diagnose and fix issues faster"
+                  name="Share error reports"
                   htmlFor="share-error-reports"
                   right={
                     <Switch
@@ -399,8 +338,7 @@ export function GeneralTab({ onOpenWizard }: GeneralTabProps) {
                   }
                 />
                 <SettingRow
-                  name="Share Anonymous Analytics"
-                  subtitle="Help improve Gamut by sharing anonymous usage data"
+                  name="Share anonymous usage data"
                   htmlFor="share-analytics"
                   right={
                     <Switch
@@ -416,8 +354,8 @@ export function GeneralTab({ onOpenWizard }: GeneralTabProps) {
               </>
             )}
             <SettingRow
-              name="Session Auto-Delete"
-              subtitle="Automatically delete sessions inactive for this duration. Starred sessions are preserved."
+              name="Auto-delete inactive sessions"
+              help="Starred sessions are never deleted."
               right={
                 <AutoDeleteSelect
                   value={globalSettings?.app?.autoDeleteInactiveDays}
@@ -428,8 +366,7 @@ export function GeneralTab({ onOpenWizard }: GeneralTabProps) {
               }
             />
             <SettingRow
-              name="API Log Auto-Delete"
-              subtitle="Automatically delete API and MCP request logs older than this."
+              name="Auto-delete API and MCP logs"
               right={
                 <ApiLogAutoDeleteSelect
                   value={globalSettings?.app?.apiLogAutoDeleteDays}
@@ -446,12 +383,10 @@ export function GeneralTab({ onOpenWizard }: GeneralTabProps) {
       {showAdminFeatures && (
         <div className={CARD_CLASS}>
           <SettingRow
-            name="Setup Wizard"
-            subtitle="Re-run the getting started wizard to reconfigure your setup"
+            name="Setup wizard"
             right={
-              <Button variant="outline" size="sm" onClick={onOpenWizard} data-testid="rerun-wizard-button">
-                <Wand2 className="h-4 w-4 mr-2" />
-                Re-run Wizard
+              <Button variant="soft" size="sm" onClick={onOpenWizard} data-testid="rerun-wizard-button">
+                Re-run wizard
               </Button>
             }
           />
@@ -480,7 +415,8 @@ function UpdatesCard() {
     window.electronAPI?.installUpdate()
   }, [])
 
-  let statusText: ReactNode = 'Check for available updates'
+  // Idle has nothing to report: the button already says what the row does.
+  let statusText: ReactNode = null
   if (status.state === 'checking') statusText = 'Checking for updates…'
   else if (status.state === 'not-available') statusText = 'You are on the latest version'
   else if (status.state === 'available') statusText = `Version ${status.version} is available`
@@ -496,32 +432,31 @@ function UpdatesCard() {
   return (
     <div className={CARD_CLASS}>
       <SettingRow
-        name="Software Updates"
-        subtitle={statusText}
+        name="Software updates"
+        status={statusText}
         right={
           <>
             {(status.state === 'idle' ||
               status.state === 'not-available' ||
               status.state === 'error') && (
-              <Button variant="outline" size="sm" onClick={handleCheck}>
-                <RefreshCw className="h-4 w-4 mr-2" />
-                Check for Updates
+              <Button variant="soft" size="sm" onClick={handleCheck}>
+                Check for updates
               </Button>
             )}
             {status.state === 'checking' && (
-              <Button variant="outline" size="sm" disabled>
+              <Button variant="soft" size="sm" disabled>
                 <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                 Checking…
               </Button>
             )}
             {status.state === 'available' && (
-              <Button variant="outline" size="sm" onClick={handleDownload}>
+              <Button variant="soft" size="sm" onClick={handleDownload}>
                 <Download className="h-4 w-4 mr-2" />
                 Download
               </Button>
             )}
             {status.state === 'downloading' && (
-              <Button variant="outline" size="sm" disabled>
+              <Button variant="soft" size="sm" disabled>
                 <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                 <span className="tabular-nums">{Math.round(status.progress ?? 0)}%</span>
               </Button>
@@ -529,7 +464,7 @@ function UpdatesCard() {
             {status.state === 'downloaded' && (
               <Button size="sm" onClick={handleInstall}>
                 <CheckCircle2 className="h-4 w-4 mr-2" />
-                Restart & Update
+                Restart & update
               </Button>
             )}
           </>
@@ -537,7 +472,6 @@ function UpdatesCard() {
       />
       <SettingRow
         name="Automatically check for updates"
-        subtitle="Check on startup and periodically while the app is running"
         htmlFor="auto-check-updates"
         right={
           <Switch
@@ -551,7 +485,6 @@ function UpdatesCard() {
       />
       <SettingRow
         name="Include pre-release versions"
-        subtitle="Get early access to release candidates and beta versions"
         htmlFor="prerelease-updates"
         right={
           <Switch
