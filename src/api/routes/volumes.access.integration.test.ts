@@ -1,3 +1,4 @@
+// @libsql-must-pass
 /**
  * /api/volumes with the real proxy tokens, IsAgent() and mount lookup: which
  * agent a volume id serves, and how many statements a WebDAV request costs.

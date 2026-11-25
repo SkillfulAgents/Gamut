@@ -1,3 +1,4 @@
+// @libsql-must-pass
 /**
  * A session's whole life against a real workspace directory and a real
  * database: created, written, renamed, starred, active, read after a

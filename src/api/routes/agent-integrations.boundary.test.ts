@@ -1,3 +1,4 @@
+// @libsql-must-pass
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { Hono } from 'hono'
 import { chatIntegrations } from '@shared/lib/db/schema'

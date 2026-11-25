@@ -1,3 +1,4 @@
+// @libsql-must-pass
 /**
  * What the app keeps about a session must never be silently lost.
  *

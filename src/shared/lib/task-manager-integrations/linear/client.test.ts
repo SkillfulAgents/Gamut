@@ -1,3 +1,4 @@
+// @libsql-must-pass
 /**
  * Token renewal across processes. Each `instance()` is a fresh copy of the
  * client module, with its own in-process maps, sharing this test's database

@@ -1,3 +1,4 @@
+// @libsql-must-pass
 /**
  * `/mcp` in an auth-mode deployment before OAuth lands: not served at all,
  * whatever is sent, and the settings route says it is unavailable.

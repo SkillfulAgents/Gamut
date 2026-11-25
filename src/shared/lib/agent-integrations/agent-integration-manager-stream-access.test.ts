@@ -1,3 +1,4 @@
+// @libsql-must-pass
 /**
  * What one session event costs on its way to an integration, and when output
  * stops, against a real database: the manager reads the installation once per

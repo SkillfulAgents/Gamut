@@ -1,3 +1,4 @@
+// @libsql-must-pass
 /**
  * The x-agent service seen from its callers: the per-call sync wait, and the
  * user caller's authorization (its own agent_acl role, no policy, no review).

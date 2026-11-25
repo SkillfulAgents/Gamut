@@ -1,3 +1,4 @@
+// @libsql-must-pass
 /**
  * The installation token across processes: two handles on one database file
  * stand in for two processes of a deployment. Whatever one process does to

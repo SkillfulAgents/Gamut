@@ -1,3 +1,4 @@
+// @libsql-must-pass
 /**
  * The settings read shared inside one API request: one read per request, and
  * the rules that keep it from being a cache (ends with the request, dropped by

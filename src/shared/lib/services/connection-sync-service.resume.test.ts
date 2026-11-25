@@ -1,3 +1,4 @@
+// @libsql-must-pass
 /**
  * Resuming the calls parked on a reconnected connection, over a real
  * database: the mapping tables decide which agents are told.

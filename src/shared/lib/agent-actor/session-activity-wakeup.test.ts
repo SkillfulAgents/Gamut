@@ -1,3 +1,4 @@
+// @libsql-must-pass
 /**
  * What recording a turn's activity costs a local agent's index in writes to
  * `agent_sessions`, on the real storage and the real task manager: about one

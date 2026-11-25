@@ -1,3 +1,4 @@
+// @libsql-must-pass
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest'
 import type { AgentIntegrationRecord, IntegrationEvent, IntegrationInputContext, IntegrationInputEvent, IntegrationSessionContext } from '../agent-integrations/types'
 import { pendingUserInputRequestSchema } from '@shared/lib/tools/requests/request-schema'

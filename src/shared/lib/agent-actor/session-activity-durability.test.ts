@@ -1,3 +1,4 @@
+// @libsql-must-pass
 /**
  * What a local agent's recorded session activity survives. Storing it is
  * delayed to save writes (session-activity-wakeup.test.ts pins how many), and

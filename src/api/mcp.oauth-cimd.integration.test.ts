@@ -1,3 +1,4 @@
+// @libsql-must-pass
 /**
  * A client that identifies itself with a Client ID Metadata Document: its
  * `client_id` is an https URL, and the server fetches and validates the

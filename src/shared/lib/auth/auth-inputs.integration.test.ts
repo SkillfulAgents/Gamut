@@ -1,3 +1,4 @@
+// @libsql-must-pass
 /**
  * getAuth() reads what the Better Auth instance is built from on every call, and every
  * authenticated request waits for it. Settings and the secret are read together, not one

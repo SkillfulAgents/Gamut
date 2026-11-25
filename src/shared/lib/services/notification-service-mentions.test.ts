@@ -1,3 +1,4 @@
+// @libsql-must-pass
 /**
  * Mentions are the one targeted notification: a row per person tagged, seen
  * and read by that person alone. Shared rows keep their shared read state

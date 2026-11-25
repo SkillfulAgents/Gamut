@@ -1,3 +1,4 @@
+// @libsql-must-pass
 import { afterEach, beforeEach, expect, it } from 'vitest'
 import { createTestDatabase, type TestDatabase } from '../testing/create-test-database'
 import { llmConnections } from '../schema'

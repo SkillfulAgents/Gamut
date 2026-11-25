@@ -1,3 +1,4 @@
+// @libsql-must-pass
 /**
  * Exercise the real Better Auth HTTP endpoints, adapter and application hooks.
  * The database fixture runs on both SQLite and libsql. Only the two failure

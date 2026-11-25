@@ -1,3 +1,4 @@
+// @libsql-must-pass
 /**
  * `/mcp` as the real app mounts it (src/api/index.ts), without auth mode:
  * the installation token, the admin switch, both protocol eras over raw

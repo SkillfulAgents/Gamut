@@ -1,3 +1,4 @@
+// @libsql-must-pass
 /**
  * The run tools against a test database (people, agents, roles: auth mode)
  * and a fake agent actor whose sessions settle, keep running or wait on the

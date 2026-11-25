@@ -1,3 +1,4 @@
+// @libsql-must-pass
 vi.mock('../../services/connection-sync-service', () => ({ syncRemoteMcpAgents: vi.fn(async () => true) }))
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest'
 import { createTestDatabase, type TestDatabase } from '../../db/testing/create-test-database'

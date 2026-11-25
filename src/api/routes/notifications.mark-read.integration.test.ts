@@ -1,3 +1,4 @@
+// @libsql-must-pass
 /**
  * POST /api/notifications/:id/read against a real database and the real
  * middlewares: how many statements one click costs, and that who is let in,

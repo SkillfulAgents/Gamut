@@ -1,3 +1,4 @@
+// @libsql-must-pass
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { perTestDatabase } from '@shared/lib/db/testing/per-test-database'
 

@@ -1,3 +1,4 @@
+// @libsql-must-pass
 /**
  * The settings routes' changes are an admin's: in auth mode a member who is
  * not an admin is refused, an admin passes the gate: they can turn the

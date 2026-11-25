@@ -1,3 +1,4 @@
+// @libsql-must-pass
 /**
  * What the agent already has, read from the mapping tables of a real database
  * and marked on the services its search returns.

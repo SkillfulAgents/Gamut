@@ -1,3 +1,4 @@
+// @libsql-must-pass
 /**
  * `POST /llm-runtime/resolve` starts its four independent reads (is the
  * session known, its metadata, the agent's preferences, the settings)
