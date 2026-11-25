@@ -8,7 +8,7 @@ import { settingsPagesFor, useSettingsAudience } from '@renderer/components/sett
 import { AgentAvatarWithBadge } from '@renderer/components/agents/agent-avatar/agent-avatar-with-badge'
 import { WorkingDots } from '@renderer/components/agents/status-indicators'
 import { useAgents, type ApiAgent } from '@renderer/hooks/use-agents'
-import { useSearch, useSearchOpen } from '@renderer/context/search-context'
+import { isSearchShortcut, useSearch, useSearchOpen } from '@renderer/context/search-context'
 import { useDialogs } from '@renderer/context/dialog-context'
 import { useIsMobile } from '@renderer/hooks/use-mobile'
 import { allSessionsQueryOptions } from '@renderer/hooks/use-sessions'
@@ -37,10 +37,24 @@ const NO_SESSIONS: ApiSession[] = []
  */
 export function SearchDialog() {
   const open = useSearchOpen()
-  const { closeSearch } = useSearch()
+  const { openSearch, closeSearch } = useSearch()
   // The keys are handled on the dialog's content element, where they always
   // were, by the palette inside it, which knows the rows.
   const keyHandler = useRef<KeyHandler | null>(null)
+
+  const handleKeyDown: KeyHandler = (e) => {
+    // `DialogContent` keeps its keys from `window`, where the provider listens
+    // for cmd/ctrl-K, so it is toggled here. That includes the moment the
+    // content is still up after closing (its exit animation, with focus still
+    // in the field), when a cmd/ctrl-K must open search again.
+    if (isSearchShortcut(e)) {
+      e.preventDefault()
+      if (open) closeSearch()
+      else openSearch()
+      return
+    }
+    keyHandler.current?.(e)
+  }
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) closeSearch() }}>
@@ -51,7 +65,7 @@ export function SearchDialog() {
         // A fixed 640 by 560 box (narrower or shorter only when the window is), so it
         // holds still as results come and go; the list scrolls inside it.
         className="search-anim flex h-[560px] max-w-[640px] flex-col p-0 gap-0 overflow-hidden top-4 translate-y-0 mt-[env(safe-area-inset-top)] md:top-[50%] md:-translate-y-1/2 md:mt-0 [&>button]:top-6 [&>button]:right-5 md:[&>button]:hidden"
-        onKeyDown={(e) => keyHandler.current?.(e)}
+        onKeyDown={handleKeyDown}
         aria-label="Search agents, sessions, dashboards, and settings"
       >
         <DialogTitle className="sr-only">Search agents, sessions, dashboards, and settings</DialogTitle>

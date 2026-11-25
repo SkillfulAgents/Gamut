@@ -7,36 +7,29 @@ on:
   # not only the one at the bottom of the stack that targets main.
   pull_request:
 
+# A new push to a PR makes the run still going on its previous commit moot, so
+# that run is cancelled (about one PR run in five was overtaken this way).
+# Pushes to main are grouped by commit, so every commit on main is tested.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   # Typecheck, lint and the unit tests are separate jobs so they run side by
-  # side: back to back in one job they took ~7.5 min. tsc and ESLint 8 are
-  # single-threaded, so more cores would not speed them up; vitest is the one
-  # that scales with cores, so it gets the big runner.
+  # side: back to back in one job they took ~7.5 min. ESLint 8 is
+  # single-threaded, so more cores would not speed it up, and the typecheck
+  # (TypeScript 7, native) takes seconds; vitest is the one that scales with
+  # cores, so it gets the big runner.
   typecheck:
     runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: 'npm'
-
-      # 11.14.1 = newest npm with min-release-age support (needs >=11.10) where
-      # `npm ls --json --long` still works (broken in 11.15+, breaks electron-builder)
-      - name: Upgrade npm (pinned)
-        run: npm install -g npm@11.14.1
-
       - name: Install dependencies
-        run: npm ci
+        uses: ./.github/actions/install-deps
 
-      # A full check needs just over Node's default 4 GB heap (it ran out on
-      # the MCP branches, at ~1.6M types); the runner has the memory.
       - name: Run typecheck
-        env:
-          NODE_OPTIONS: --max-old-space-size=8192
         run: npm run typecheck
 
 
@@ -73,19 +66,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: 'npm'
-
-      # 11.14.1 = newest npm with min-release-age support (needs >=11.10) where
-      # `npm ls --json --long` still works (broken in 11.15+, breaks electron-builder)
-      - name: Upgrade npm (pinned)
-        run: npm install -g npm@11.14.1
-
       - name: Install dependencies
-        run: npm ci
+        uses: ./.github/actions/install-deps
 
       - name: Run lint
         run: npm run lint
@@ -99,19 +81,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: 'npm'
-
-      # 11.14.1 = newest npm with min-release-age support (needs >=11.10) where
-      # `npm ls --json --long` still works (broken in 11.15+, breaks electron-builder)
-      - name: Upgrade npm (pinned)
-        run: npm install -g npm@11.14.1
-
       - name: Install dependencies
-        run: npm ci
+        uses: ./.github/actions/install-deps
 
       # vitest.config.ts switches to CI reporters when GITHUB_ACTIONS is set:
       # dot output, a GitHub annotation per failure, and the JSON report the
@@ -141,19 +112,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: 'npm'
-
-      # 11.14.1 = newest npm with min-release-age support (needs >=11.10) where
-      # `npm ls --json --long` still works (broken in 11.15+, breaks electron-builder)
-      - name: Upgrade npm (pinned)
-        run: npm install -g npm@11.14.1
-
       - name: Install dependencies
-        run: npm ci
+        uses: ./.github/actions/install-deps
 
       - name: Run the libsql must-pass tests
         run: npm run test:libsql
@@ -161,26 +121,16 @@ jobs:
   # The same unit tests with every agent actor behind the serializing test
   # transport, as a caller across a wire would reach it (SUP-1253). Every file
   # runs but the few in scripts/actor-transport-exceptions.txt, a list that
-  # only shrinks.
+  # only shrinks. Nearly the whole suite, so the same big runner as unit-tests:
+  # on 8 cores the tests took ~4.3 min, one of the last jobs to finish.
   unit-tests-actor-transport:
-    runs-on: blacksmith-8vcpu-ubuntu-2404
+    runs-on: blacksmith-32vcpu-ubuntu-2404
     steps:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: 'npm'
-
-      # 11.14.1 = newest npm with min-release-age support (needs >=11.10) where
-      # `npm ls --json --long` still works (broken in 11.15+, breaks electron-builder)
-      - name: Upgrade npm (pinned)
-        run: npm install -g npm@11.14.1
-
       - name: Install dependencies
-        run: npm ci
+        uses: ./.github/actions/install-deps
 
       - name: Run the unit tests through the actor transport
         run: npm run test:actor-transport
@@ -196,19 +146,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: 'npm'
-
-      # 11.14.1 = newest npm with min-release-age support (needs >=11.10) where
-      # `npm ls --json --long` still works (broken in 11.15+, breaks electron-builder)
-      - name: Upgrade npm (pinned)
-        run: npm install -g npm@11.14.1
-
       - name: Install dependencies
-        run: npm ci
+        uses: ./.github/actions/install-deps
 
       - name: Build server bundle
         run: npm run build:api
@@ -259,16 +198,50 @@ jobs:
         env:
           SDK_TEST_ANTHROPIC_API_KEY: ${{ secrets.SDK_TEST_ANTHROPIC_API_KEY }}
 
+  # Builds the agent container image and drives its browser endpoints. The
+  # image is built from agent-container/ alone, so a PR that changes nothing
+  # there (about nine in ten) skips the build and the tests; pushes to main
+  # always run them. The build starts from the layer cache main's image builds
+  # leave in the registry (agent-container-image.yml), which needs no login to
+  # read, and only reads it.
   container-integration:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v6
 
+      # When the file list cannot be read, the tests run.
+      - name: Check whether this PR changes the agent container
+        id: changes
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FILES: repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files
+        run: |
+          if ! files=$(gh api --paginate "$FILES" --jq '.[].filename'); then
+            echo "container=true" >> "$GITHUB_OUTPUT"
+          elif grep -qE '^(agent-container/|\.github/workflows/test\.yml$)' <<< "$files"; then
+            echo "container=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "container=false" >> "$GITHUB_OUTPUT"
+            echo "No change under agent-container/: the image build and its tests were skipped." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Set up Docker Buildx
+        if: steps.changes.outputs.container != 'false'
+        uses: docker/setup-buildx-action@v4
+
       - name: Build container image
-        run: docker build -t superagent-container ./agent-container
+        if: steps.changes.outputs.container != 'false'
+        uses: docker/build-push-action@v7
+        with:
+          context: ./agent-container
+          tags: superagent-container
+          load: true
+          cache-from: type=registry,ref=ghcr.io/skillfulagents/superagent-agent-container-base:buildcache-amd64
 
       - name: Run browser integration tests
+        if: steps.changes.outputs.container != 'false'
         run: ./agent-container/test-browser-integration.sh superagent-container
 
   # The shared-server Chromium suite, split across runners. Each shard starts
@@ -286,19 +259,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: 'npm'
-
-      # 11.14.1 = newest npm with min-release-age support (needs >=11.10) where
-      # `npm ls --json --long` still works (broken in 11.15+, breaks electron-builder)
-      - name: Upgrade npm (pinned)
-        run: npm install -g npm@11.14.1
-
       - name: Install dependencies
-        run: npm ci
+        uses: ./.github/actions/install-deps
 
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium
@@ -332,35 +294,31 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-  # Suites that need a server and data dir of their own, run back to back.
+  # Suites that need a server and data dir of their own, in three groups that
+  # run side by side, one job each; within a group the suites run back to back
+  # on one port. All in one job they took ~7 min, the second-slowest job.
   e2e-isolated-suites:
+    name: e2e-isolated-suites (${{ matrix.group }})
     runs-on: blacksmith-16vcpu-ubuntu-2404
-    # 20 before the MCP suite; it adds a server boot, two conformance runs and two CLI installs.
-    # The MCP OAuth suite adds another server boot and the same again (~5 more).
-    timeout-minutes: 32
+    # Each group takes 2-3 min; this bounds a hang.
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        group: [wizard-graph, sidebar-radix, mcp]
     steps:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: 'npm'
-
-      # 11.14.1 = newest npm with min-release-age support (needs >=11.10) where
-      # `npm ls --json --long` still works (broken in 11.15+, breaks electron-builder)
-      - name: Upgrade npm (pinned)
-        run: npm install -g npm@11.14.1
-
       - name: Install dependencies
-        run: npm ci
+        uses: ./.github/actions/install-deps
 
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium
 
       - name: Run Wizard E2E suite
         id: wizard_e2e
+        if: matrix.group == 'wizard-graph'
         env:
           PORT: '3000'
           SUPERAGENT_DATA_DIR: .e2e-data/wizard
@@ -373,8 +331,7 @@ jobs:
       # re-solving mid-gesture (the previous shared-server arrangement was the
       # suite's top flake source).
       - name: Run graph E2E suite
-        id: graph_e2e
-        if: ${{ !cancelled() && (success() || steps.wizard_e2e.outcome == 'failure') }}
+        if: ${{ matrix.group == 'wizard-graph' && !cancelled() && (success() || steps.wizard_e2e.outcome == 'failure') }}
         env:
           PORT: '3000'
           SUPERAGENT_DATA_DIR: .e2e-data/graph
@@ -389,7 +346,7 @@ jobs:
       # Other specs creating agents used to move those targets mid-gesture.
       - name: Run sidebar E2E suite
         id: sidebar_e2e
-        if: ${{ !cancelled() && (success() || steps.wizard_e2e.outcome == 'failure' || steps.graph_e2e.outcome == 'failure') }}
+        if: matrix.group == 'sidebar-radix'
         env:
           PORT: '3000'
           SUPERAGENT_DATA_DIR: .e2e-data/sidebar
@@ -400,7 +357,7 @@ jobs:
           npm run test:e2e:sidebar 2>&1 | tee /tmp/sidebar-e2e-results.txt
 
       - name: Run Radix Chromium interaction and touch suites
-        if: ${{ !cancelled() && (success() || steps.wizard_e2e.outcome == 'failure' || steps.graph_e2e.outcome == 'failure' || steps.sidebar_e2e.outcome == 'failure') }}
+        if: ${{ matrix.group == 'sidebar-radix' && !cancelled() && (success() || steps.sidebar_e2e.outcome == 'failure') }}
         env:
           E2E_PORT: '3000'
           SUPERAGENT_DATA_DIR: .e2e-data/radix-chromium
@@ -417,12 +374,11 @@ jobs:
       # Codex binaries (pinned below) against a stub model: no account, no secret,
       # no model call.
       - name: Install pinned agent CLIs for the MCP suite
-        id: mcp_clis
-        if: ${{ !cancelled() }}
+        if: ${{ matrix.group == 'mcp' && !cancelled() }}
         run: npm install --no-save --no-package-lock --prefix "$RUNNER_TEMP/agent-clis" @anthropic-ai/claude-code@2.1.325 @openai/codex@0.167.0
 
       - name: Run MCP server E2E suite
-        if: ${{ !cancelled() }}
+        if: ${{ matrix.group == 'mcp' && !cancelled() }}
         env:
           PORT: '3000'
           SUPERAGENT_DATA_DIR: .e2e-data/mcp
@@ -444,7 +400,7 @@ jobs:
       # signing in by OAuth. Both CLIs register with metadata documents on
       # claude.ai and chatgpt.com, which the server under test fetches.
       - name: Run MCP OAuth E2E suite
-        if: ${{ !cancelled() }}
+        if: ${{ matrix.group == 'mcp' && !cancelled() }}
         env:
           PORT: '3015'
           MCP_OAUTH_CIMD_PORT: '3016'
@@ -463,7 +419,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: e2e-playwright-artifacts-isolated
+          name: e2e-playwright-artifacts-isolated-${{ matrix.group }}
           path: |
             test-results/
             playwright-report/
@@ -480,7 +436,8 @@ jobs:
   # catch a regression with ~88% confidence per push. (Retries stay off —
   # each retry would give a probabilistic failure another chance to pass.)
   # The three repeats run on three Macs at once, one pass of the suite each;
-  # run back to back on one Mac they took ~6 min.
+  # run back to back on one Mac they took ~6 min. The WebKit suites that need
+  # only one pass run in e2e-webkit-macos-suites below.
   # WebKit traces record no screenshots (webkitTrace in the Playwright configs),
   # and no --trace flag here, which would override that and turn them back on:
   # every trace screenshot holds a WindowServer surface until the screen redraws,
@@ -498,25 +455,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: 'npm'
-
-      # 11.14.1 = newest npm with min-release-age support (needs >=11.10) where
-      # `npm ls --json --long` still works (broken in 11.15+, breaks electron-builder)
-      - name: Upgrade npm (pinned)
-        run: npm install -g npm@11.14.1
-
       - name: Install dependencies
-        run: npm ci
+        uses: ./.github/actions/install-deps
 
       - name: Install Playwright WebKit
         run: npx playwright install webkit
 
       - name: Enable keyboard navigation for Playwright WebKit
-        id: webkit_setup
         # macOS otherwise skips buttons on plain Tab. Enable Keyboard Navigation
         # for this test app only, preserving native Tab and Radix's focus-loop
         # assertions (FocusScope deliberately ignores Option+Tab).
@@ -526,7 +471,6 @@ jobs:
           defaults read org.webkit.Playwright AppleKeyboardUIMode
 
       - name: Run WebKit regression suite
-        id: webkit_e2e
         env:
           PORT: '3000'
           SUPERAGENT_DATA_DIR: .e2e-data/webkit
@@ -540,8 +484,50 @@ jobs:
           mkdir -p test-results
           E2E_MOCK=true npx playwright test --project=web-webkit --retries=0 2>&1 | tee test-results/webkit.log
 
+      - name: Upload Playwright artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-webkit-artifacts-${{ matrix.repeat }}
+          path: |
+            test-results/
+            playwright-report/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # The WebKit suites that need one pass: the navigation contracts, and the
+  # same real app controls the Chromium jobs drive (Radix, graph, auth forms),
+  # with their touch projects. They used to run after the regression suite in
+  # repeat 1, which made it twice as long as the other repeats and the last
+  # job to finish on most runs. Two Macs: the navigation contracts (~2 min)
+  # on one, the interaction suites (~2.5 min) on the other. Same trace rule as
+  # above: no --trace flag.
+  e2e-webkit-macos-suites:
+    runs-on: blacksmith-6vcpu-macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        group: [navigation, interactions]
+    name: e2e-webkit-macos (${{ matrix.group }})
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install dependencies
+        uses: ./.github/actions/install-deps
+
+      - name: Install Playwright WebKit
+        run: npx playwright install webkit
+
+      - name: Enable keyboard navigation for Playwright WebKit
+        id: webkit_setup
+        # See e2e-webkit-macos.
+        run: |
+          defaults write org.webkit.Playwright AppleKeyboardUIMode -int 2
+          defaults read org.webkit.Playwright AppleKeyboardUIMode
+
       - name: Run WebKit navigation contracts
-        if: ${{ matrix.repeat == 1 && !cancelled() && steps.webkit_setup.outcome == 'success' }}
+        if: matrix.group == 'navigation'
         env:
           E2E_PORT: '3000'
           SUPERAGENT_DATA_DIR: .e2e-data/webkit-navigation
@@ -553,11 +539,8 @@ jobs:
           mkdir -p test-results
           E2E_MOCK=true npx playwright test --project=web-webkit-navigation --retries=0 2>&1 | tee test-results/webkit-navigation.log
 
-      # Exercise the same real app controls on Apple's WebKit, including the
-      # touch project. These deterministic interaction tests need one pass;
-      # the compositor regression suite above keeps its three independent runs.
       - name: Run Radix WebKit interaction and touch suites
-        if: ${{ matrix.repeat == 1 && !cancelled() && steps.webkit_setup.outcome == 'success' }}
+        if: matrix.group == 'interactions'
         env:
           E2E_PORT: '3000'
           SUPERAGENT_DATA_DIR: .e2e-data/radix-webkit
@@ -569,7 +552,7 @@ jobs:
           E2E_MOCK=true npx playwright test --config=playwright.radix.config.ts --project=radix-webkit --project=radix-webkit-touch --retries=0 2>&1 | tee test-results/radix-webkit.log
 
       - name: Run graph WebKit interaction and touch suites
-        if: ${{ matrix.repeat == 1 && !cancelled() && steps.webkit_setup.outcome == 'success' }}
+        if: ${{ matrix.group == 'interactions' && !cancelled() && steps.webkit_setup.outcome == 'success' }}
         env:
           E2E_PORT: '3000'
           SUPERAGENT_DATA_DIR: .e2e-data/graph-webkit
@@ -581,7 +564,7 @@ jobs:
           E2E_MOCK=true npx playwright test --config=playwright.graph.config.ts --project=graph-webkit --project=graph-webkit-touch 2>&1 | tee test-results/graph-webkit.log
 
       - name: Run auth forms on WebKit and touch
-        if: ${{ matrix.repeat == 1 && !cancelled() && steps.webkit_setup.outcome == 'success' }}
+        if: ${{ matrix.group == 'interactions' && !cancelled() && steps.webkit_setup.outcome == 'success' }}
         env:
           E2E_PORT: '3000'
           SUPERAGENT_DATA_DIR: .e2e-data/forms-webkit
@@ -596,7 +579,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: e2e-webkit-artifacts-${{ matrix.repeat }}
+          name: e2e-webkit-artifacts-${{ matrix.group }}
           path: |
             test-results/
             playwright-report/
@@ -614,19 +597,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: 'npm'
-
-      # 11.14.1 = newest npm with min-release-age support (needs >=11.10) where
-      # `npm ls --json --long` still works (broken in 11.15+, breaks electron-builder)
-      - name: Upgrade npm (pinned)
-        run: npm install -g npm@11.14.1
-
       - name: Install dependencies
-        run: npm ci
+        uses: ./.github/actions/install-deps
 
       - name: Install Playwright browsers
         id: auth_browser_setup
@@ -675,19 +647,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: 'npm'
-
-      # 11.14.1 = newest npm with min-release-age support (needs >=11.10) where
-      # `npm ls --json --long` still works (broken in 11.15+, breaks electron-builder)
-      - name: Upgrade npm (pinned)
-        run: npm install -g npm@11.14.1
-
       - name: Install dependencies
-        run: npm ci
+        uses: ./.github/actions/install-deps
 
       # Only for the shared libraries Electron needs on a bare runner; this job
       # drives Electron over CDP and never launches a Playwright browser.
@@ -822,19 +783,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: 'npm'
-
-      # 11.14.1 = newest npm with min-release-age support (needs >=11.10) where
-      # `npm ls --json --long` still works (broken in 11.15+, breaks electron-builder)
-      - name: Upgrade npm (pinned)
-        run: npm install -g npm@11.14.1
-
       - name: Install dependencies
-        run: npm ci
+        uses: ./.github/actions/install-deps
 
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium

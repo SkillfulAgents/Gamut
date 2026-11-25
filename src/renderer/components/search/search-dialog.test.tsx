@@ -135,6 +135,52 @@ it('opens a settings page with one click', async () => {
   expect(openSettings).toHaveBeenCalledExactlyOnceWith('llm')
 })
 
+it('closes on cmd/ctrl-K pressed in its own field, which the window never hears', async () => {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  client.setQueryData(['agents'], [])
+  renderSearch(client)
+
+  fireEvent.keyDown(screen.getByTestId('search-input'), { key: 'k', ctrlKey: true })
+  await waitFor(() => expect(screen.queryByTestId('search-input')).toBeNull())
+})
+
+it('opens again on cmd/ctrl-K pressed while it is still fading out', async () => {
+  // jsdom runs no animations, so Radix unmounts a closed dialog at once. Give
+  // its parts an exit animation, so the closed content stays up (focus still
+  // in its field) until that animation ends, as it does for 200ms in a browser.
+  const realStyle = window.getComputedStyle.bind(window)
+  const style = vi.spyOn(window, 'getComputedStyle').mockImplementation((el, pseudo) => {
+    const computed = realStyle(el, pseudo)
+    if (!(el instanceof HTMLElement) || !el.hasAttribute('data-state')) return computed
+    return new Proxy(computed, {
+      get(target, prop) {
+        if (prop === 'animationName') return el.getAttribute('data-state') === 'closed' ? 'exit' : 'enter'
+        const value = Reflect.get(target, prop)
+        return typeof value === 'function' ? value.bind(target) : value
+      },
+    })
+  })
+  try {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    client.setQueryData(['agents'], [])
+    renderSearch(client)
+    const input = screen.getByTestId('search-input')
+    fireEvent.change(input, { target: { value: 'model providers' } })
+
+    fireEvent.keyDown(input, { key: 'Escape' })
+    const dialog = screen.getByRole('dialog', { hidden: true })
+    expect(dialog).toHaveAttribute('data-state', 'closed')
+    expect(input).toBeInTheDocument()
+
+    fireEvent.keyDown(input, { key: 'k', metaKey: true })
+    expect(dialog).toHaveAttribute('data-state', 'open')
+    // Opened afresh: the old query is gone.
+    await waitFor(() => expect(input).toHaveValue(''))
+  } finally {
+    style.mockRestore()
+  }
+})
+
 it('offers only the settings pages the viewer has', async () => {
   viewer.isAuthMode = true
   try {
