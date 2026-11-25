@@ -30,6 +30,12 @@ The OpenAI conversation implementation is split into a contract adapter (`conver
 
 Safari's output handling belongs to the shared speech player because it applies to every source of PCM audio. HTTP synthesis also stays shared: vendor credentials and synthesis details are handled by the host API.
 
+## Dictation starts on the click
+
+`useVoiceInput` shows "recording" and opens the microphone in the same tick as the click or the shortcut. `/api/voice/configured` names the dictation provider and protocol ahead of time, so the adapter is created and capture runs into it at once; the token round-trip and the socket handshake catch up, and the adapter's pre-open buffer holds what was said meanwhile. A stop that beats the token waits for it, so a short utterance is not dropped. A host too old to name the protocol, or a microphone that may still prompt, shows "connecting" first.
+
+The shortcut is Control+M on every platform (`lib/dictation-shortcut.ts` says why, and which mic it means when several are mounted). While dictating, the same shortcut stops and keeps the text, and Enter stops and sends on a surface that passes `onSend` to `VoiceInputButton`; the button shows both as a hint.
+
 ## Extending a provider
 
 Implement the relevant contracts in the provider directory, add the provider to each registry record (the compiler lists the ones you missed), add its settings metadata to `catalog.ts`, and keep provider tests beside the implementation. Generic session and UI code should not need new protocol branches.
