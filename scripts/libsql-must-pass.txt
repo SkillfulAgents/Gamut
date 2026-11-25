@@ -163,3 +163,4 @@ src/api/mcp.oauth-cimd.integration.test.ts
 src/api/mcp.reach.test.ts
 src/api/routes/mcp-server-settings.test.ts
 src/shared/lib/mcp-server/mcp-server-settings.test.ts
+src/shared/lib/services/home-reads-one-wave.test.ts
