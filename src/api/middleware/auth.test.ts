@@ -21,7 +21,8 @@ vi.mock('@shared/lib/auth/index', () => ({
 
 const mockLimit = vi.fn()
 const mockWhere = vi.fn(() => ({ limit: mockLimit }))
-const mockFrom = vi.fn(() => ({ where: mockWhere }))
+// HasNotificationAccess joins the viewer's role onto the row it reads.
+const mockFrom = vi.fn(() => ({ where: mockWhere, leftJoin: () => ({ where: mockWhere }) }))
 const mockSelect = vi.fn((..._args: unknown[]) => ({ from: mockFrom }))
 
 vi.mock('@shared/lib/db', () => ({
@@ -918,7 +919,7 @@ describe('Auth Middleware', () => {
     })
 
     it('allows admin users without agent access check', async () => {
-      mockLimit.mockResolvedValueOnce([{ agentSlug: 'test-agent', recipientUserId: null }])
+      mockLimit.mockResolvedValueOnce([{ agentSlug: 'test-agent', recipientUserId: null, role: null }])
       const app = new Hono()
       setUser(app, { id: 'admin-1', role: 'admin' })
       app.get('/:id', HasNotificationAccess(), (c) => c.json({ ok: true }))
@@ -942,8 +943,7 @@ describe('Auth Middleware', () => {
     })
 
     it('allows the recipient of a mention', async () => {
-      mockLimit.mockResolvedValueOnce([{ agentSlug: 'test-agent', recipientUserId: 'user-1' }])
-      mockLimit.mockResolvedValueOnce([{ role: 'viewer' }])
+      mockLimit.mockResolvedValueOnce([{ agentSlug: 'test-agent', recipientUserId: 'user-1', role: 'viewer' }])
       const app = new Hono()
       setUser(app, { id: 'user-1', role: 'user' })
       app.get('/:id', HasNotificationAccess(), (c) => c.json({ ok: true }))
@@ -953,10 +953,8 @@ describe('Auth Middleware', () => {
     })
 
     it('allows when user has access to notification agent', async () => {
-      // First query returns notification with agentSlug
-      mockLimit.mockResolvedValueOnce([{ agentSlug: 'test-agent' }])
-      // Second query returns user's role on that agent
-      mockLimit.mockResolvedValueOnce([{ role: 'user' }])
+      // One query returns the notification's agentSlug with the user's role on that agent
+      mockLimit.mockResolvedValueOnce([{ agentSlug: 'test-agent', role: 'user' }])
 
       const app = new Hono()
       setUser(app, { id: 'user-1', role: 'user' })
@@ -967,10 +965,8 @@ describe('Auth Middleware', () => {
     })
 
     it('returns 403 when user has no access to notification agent', async () => {
-      // First query returns notification with agentSlug
-      mockLimit.mockResolvedValueOnce([{ agentSlug: 'test-agent' }])
-      // Second query returns no role (no access)
-      mockLimit.mockResolvedValueOnce([])
+      // The notification exists; the join found no role (no access)
+      mockLimit.mockResolvedValueOnce([{ agentSlug: 'test-agent', role: null }])
 
       const app = new Hono()
       setUser(app, { id: 'user-1', role: 'user' })
