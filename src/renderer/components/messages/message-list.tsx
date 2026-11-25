@@ -13,6 +13,7 @@ import {
 import { isTurnStartingUserMessage, type PendingMessage } from './pending-message'
 import { classifyUserMessage, classifyUserText } from './user-message-kinds'
 import { MessageItem, hasWorkflowCall } from './message-item'
+import { GhostMessageItem } from './ghost-message-item'
 import { currentRoutedProviderError } from '@renderer/components/provider-error/provider-error-placement'
 import { ToolCallItem, StreamingToolCallItem } from './tool-call-item'
 import { ThinkingBlockItem } from './thinking-block-item'
@@ -931,16 +932,12 @@ export function MessageList({ sessionId, agentSlug, pendingUserMessages, pending
   }) => (
     <MessageErrorBoundary key={ghost.key} kind="message" raw={ghost} itemId={`ghost-${ghost.key}`}>
       <div className={ghost.queued ? 'opacity-60' : undefined} data-testid={ghost.testId}>
-        <MessageItem
-          message={{
-            id: ghost.key,
-            type: 'user',
-            content: { text: ghost.text },
-            toolCalls: [],
-            createdAt: new Date(ghost.sentAt),
-            sender: ghost.sender,
-            integration: ghost.integration,
-          }}
+        <GhostMessageItem
+          id={ghost.key}
+          text={ghost.text}
+          sentAt={ghost.sentAt}
+          sender={ghost.sender}
+          integration={ghost.integration}
           agentSlug={agentSlug}
         />
         {ghost.queued ? (
