@@ -94,11 +94,11 @@ const MAC_SYMBOLS: Record<string, string> = {
   Super: '⌘',
 }
 
-/** Render an accelerator as friendly chips (⌃⇧Space on mac, Ctrl+Shift+Space elsewhere; "" → "Disabled"). */
-export function formatAccelerator(accel: string, platform: string): string {
-  if (!accel) return 'Disabled'
+/** An accelerator's keys as the platform names them, one per key (⌃, ⇧, Space on mac; Ctrl, Shift, Space elsewhere). */
+export function acceleratorKeys(accel: string, platform: string): string[] {
+  if (!accel) return []
   const isMac = platform === 'darwin'
-  const tokens = accel.split('+').map((tok) => {
+  return accel.split('+').map((tok) => {
     if (isMac && MAC_SYMBOLS[tok]) return MAC_SYMBOLS[tok]
     if (!isMac) {
       if (tok === 'CommandOrControl' || tok === 'Control') return 'Ctrl'
@@ -106,5 +106,10 @@ export function formatAccelerator(accel: string, platform: string): string {
     }
     return tok
   })
-  return tokens.join(isMac ? ' ' : '+')
+}
+
+/** Render an accelerator as one string (⌃ ⇧ Space on mac, Ctrl+Shift+Space elsewhere; "" → "Disabled"). */
+export function formatAccelerator(accel: string, platform: string): string {
+  if (!accel) return 'Disabled'
+  return acceleratorKeys(accel, platform).join(platform === 'darwin' ? ' ' : '+')
 }

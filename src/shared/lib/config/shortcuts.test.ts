@@ -5,6 +5,7 @@ import {
   codeToKey,
   eventToAccelerator,
   formatAccelerator,
+  acceleratorKeys,
   type KeyComboEvent,
 } from './shortcuts'
 
@@ -81,6 +82,14 @@ describe('eventToAccelerator', () => {
   it('returns null without a modifier or without a mappable key', () => {
     expect(eventToAccelerator(ev({ code: 'KeyA' }), 'darwin')).toBeNull() // no modifier
     expect(eventToAccelerator(ev({ metaKey: true, code: 'Comma' }), 'darwin')).toBeNull() // no key
+  })
+})
+
+describe('acceleratorKeys', () => {
+  it('names each key the way the platform does', () => {
+    expect(acceleratorKeys(DEFAULT_GLOBAL_DISPATCH_SHORTCUT, 'darwin')).toEqual(['⌃', '⇧', 'Space'])
+    expect(acceleratorKeys(DEFAULT_GLOBAL_DISPATCH_SHORTCUT, 'win32')).toEqual(['Ctrl', 'Shift', 'Space'])
+    expect(acceleratorKeys('', 'darwin')).toEqual([])
   })
 })
 
