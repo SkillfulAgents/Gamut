@@ -92,10 +92,14 @@ debug.get('/runtime', async (c) => {
   })
 })
 
+/** The runners that are a command on this machine. The others keep their containers elsewhere, so there are none to list here. */
+const COMMAND_LINE_RUNNERS: ReadonlySet<ContainerRunner> = new Set(['apple-container', 'docker', 'podman', 'lima', 'wsl2'])
+
 // GET /api/debug/containers — list all containers from the runtime
 debug.get('/containers', async (c) => {
   const settings = await getSettings()
   const runner = settings.container.containerRunner as ContainerRunner
+  if (!COMMAND_LINE_RUNNERS.has(runner)) return c.json({ containers: [] })
 
   let runnerCmd: string
   if (runner === 'lima') {

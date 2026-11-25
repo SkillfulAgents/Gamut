@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Hono } from 'hono'
 
 const mockExecWithPath = vi.fn()
@@ -14,7 +14,8 @@ vi.mock('@shared/lib/agent-actor', () => ({
   agentRegistry: { get: (slug: string) => ({ sessions: { readMetadata: () => mockReadMetadata(slug) } }) },
 }))
 vi.mock('@shared/lib/container/client-factory', () => ({ checkAllRunnersAvailability: async () => [] }))
-vi.mock('@shared/lib/config/settings', () => ({ getSettings: () => ({ container: { containerRunner: 'lima' } }) }))
+const settings = vi.hoisted(() => ({ containerRunner: 'lima' }))
+vi.mock('@shared/lib/config/settings', () => ({ getSettings: () => ({ container: { containerRunner: settings.containerRunner } }) }))
 vi.mock('@shared/lib/container/base-container-client', () => ({
   execWithPath: (...args: unknown[]) => mockExecWithPath(...args),
 }))
@@ -64,6 +65,24 @@ describe('debug routes on the Lima runner', () => {
       "LIMACTL shell vm-under-test -- sudo nerdctl ps -a --format '{{json .}}'",
       'LIMACTL shell vm-under-test -- sudo nerdctl logs --tail 5 superagent-abc',
     ])
+  })
+})
+
+describe('debug container list on a runner that is not a command on this machine', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    settings.containerRunner = 'lambda-microvm'
+  })
+  afterEach(() => {
+    settings.containerRunner = 'lima'
+  })
+
+  it('answers an empty list and runs no command', async () => {
+    const res = await createApp().request('http://localhost/api/debug/containers')
+
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ containers: [] })
+    expect(commands()).toEqual([])
   })
 })
 
