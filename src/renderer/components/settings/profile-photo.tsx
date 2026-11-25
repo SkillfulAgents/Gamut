@@ -69,7 +69,7 @@ export function ProfilePhoto() {
           <p className="text-[11px] text-muted-foreground mt-0.5">Your photo in this workspace. Photos are cropped to a square.</p>
         </div>
         <div className="flex flex-col items-end gap-1">
-          <Button size="sm" variant="outline" disabled={pending} onClick={() => input.current?.click()}>
+          <Button size="sm" variant="soft" disabled={pending} onClick={() => input.current?.click()}>
             {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Change photo'}
           </Button>
           {user.avatarOverride && <Button size="sm" variant="ghost" disabled={pending} onClick={() => void save(null)}>Use account photo</Button>}

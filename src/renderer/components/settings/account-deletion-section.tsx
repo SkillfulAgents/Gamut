@@ -14,10 +14,11 @@ import {
 import { Button } from '@renderer/components/ui/button'
 import { RequestError } from '@shared/lib/tools/requests/request-error'
 import { useAccountDeletionStatus, useRequestAccountDeletion } from '@renderer/hooks/use-account-deletion'
+import { SETTINGS_CARD_CLASS, SETTINGS_SECTION_HEADING } from './setting-row'
 
 // Shared with the Account tab's other sections.
-const CARD_CLASS = 'rounded-card border bg-background divide-y divide-border/50 overflow-hidden'
-const SECTION_HEADING = 'text-xs font-medium text-muted-foreground px-1'
+const CARD_CLASS = SETTINGS_CARD_CLASS
+const SECTION_HEADING = SETTINGS_SECTION_HEADING
 
 interface AccountDeletionSectionProps {
   /** The connected Gamut account's id: the account the request names. */
@@ -61,7 +62,7 @@ export function AccountDeletionSection({ userId, email }: AccountDeletionSection
               ) : (
                 <Button
                   size="sm"
-                  variant="outline"
+                  variant="soft"
                   className="text-destructive hover:text-destructive"
                   disabled={request.isPending}
                   onClick={() => setConfirming(true)}
