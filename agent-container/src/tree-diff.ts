@@ -542,7 +542,7 @@ export function formatUnknownRef(ref: string, wasText: string, current: TreeRefs
 
 /**
  * The last tree the agent was shown, kept so the next action can be diffed
- * against it. One per browser — the active tab's — and only for the document
+ * against it. One per browser session — its tab's — and only for the document
  * it was read on: refs are per document. A document is known by its load
  * start (the observer's docStart), so an SPA that changes its URL without a
  * page load keeps its baseline; without one, by URL.
@@ -560,10 +560,6 @@ export interface TreeBaseline {
   acknowledged: Map<string, string | null>
 }
 
-let baseline: TreeBaseline | null = null
-/** The last baseline of the previous document, kept to explain its refs after a load. */
-let previousDocument: TreeBaseline | null = null
-
 /** Cap on remembered lines per page — a long infinite scroll must not grow without bound. */
 const SEEN_MAX = 20_000
 
@@ -573,38 +569,46 @@ function sameDocumentAs(b: TreeBaseline, url: string, docStart: number): boolean
   return b.url === url
 }
 
-export function setTreeBaseline(url: string, tree: string, source: TreeBaseline['source'], now = Date.now(), docStart = 0): void {
-  if (!url) { baseline = null; return }
-  const refs = parseTreeRefs(tree)
-  // A copy: a caller may still be diffing against the previous baseline's map.
-  const seen = baseline && sameDocumentAs(baseline, url, docStart) ? new Map(baseline.seen) : new Map<string, string>()
-  for (const [ref, line] of refs.lines) {
-    seen.delete(ref)
-    seen.set(ref, line.text)
+/** One browser session's baseline, and the one of the document before it. */
+export class TreeBaselines {
+  private baseline: TreeBaseline | null = null
+  /** The last baseline of the previous document, kept to explain its refs after a load. */
+  private previousDocument: TreeBaseline | null = null
+
+  set(url: string, tree: string, source: TreeBaseline['source'], now = Date.now(), docStart = 0): void {
+    if (!url) { this.baseline = null; return }
+    const refs = parseTreeRefs(tree)
+    const baseline = this.baseline
+    // A copy: a caller may still be diffing against the previous baseline's map.
+    const seen = baseline && sameDocumentAs(baseline, url, docStart) ? new Map(baseline.seen) : new Map<string, string>()
+    for (const [ref, line] of refs.lines) {
+      seen.delete(ref)
+      seen.set(ref, line.text)
+    }
+    while (seen.size > SEEN_MAX) seen.delete(seen.keys().next().value as string)
+    if (baseline && !sameDocumentAs(baseline, url, docStart)) this.previousDocument = baseline
+    this.baseline = { url, refs, takenAt: now, source, docStart, seen, acknowledged: new Map() }
   }
-  while (seen.size > SEEN_MAX) seen.delete(seen.keys().next().value as string)
-  if (baseline && !sameDocumentAs(baseline, url, docStart)) previousDocument = baseline
-  baseline = { url, refs, takenAt: now, source, docStart, seen, acknowledged: new Map() }
-}
 
-/** The baseline for this document (`docStart`, else `url`), or null when there is none. */
-export function getTreeBaseline(url: string, docStart = 0): TreeBaseline | null {
-  return baseline && sameDocumentAs(baseline, url, docStart) ? baseline : null
-}
+  /** The baseline for this document (`docStart`, else `url`), or null when there is none. */
+  get(url: string, docStart = 0): TreeBaseline | null {
+    return this.baseline && sameDocumentAs(this.baseline, url, docStart) ? this.baseline : null
+  }
 
-/** The agent was told `ref`'s value (null: told it changed, value not comparable). */
-export function acknowledgeTreeValue(url: string, ref: string, value: string | null, docStart = 0): void {
-  const b = getTreeBaseline(url, docStart)
-  if (b) b.acknowledged.set(ref.replace(/^@/, ''), value)
-}
+  /** The agent was told `ref`'s value (null: told it changed, value not comparable). */
+  acknowledge(url: string, ref: string, value: string | null, docStart = 0): void {
+    const b = this.get(url, docStart)
+    if (b) b.acknowledged.set(ref.replace(/^@/, ''), value)
+  }
 
-export function resetTreeBaseline(): void {
-  baseline = null
-  previousDocument = null
-}
+  reset(): void {
+    this.baseline = null
+    this.previousDocument = null
+  }
 
-/** What `ref` was on the document before the current one, or null. */
-export function lineFromPreviousDocument(ref: string): { text: string; url: string } | null {
-  const text = previousDocument?.seen.get(ref.replace(/^@/, ''))
-  return text && previousDocument ? { text, url: previousDocument.url } : null
+  /** What `ref` was on the document before the current one, or null. */
+  fromPreviousDocument(ref: string): { text: string; url: string } | null {
+    const text = this.previousDocument?.seen.get(ref.replace(/^@/, ''))
+    return text && this.previousDocument ? { text, url: this.previousDocument.url } : null
+  }
 }

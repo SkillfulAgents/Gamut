@@ -515,6 +515,7 @@ somewhere else.
 | Reveal a workspace folder in Finder/Explorer (`folder-host-actions.tsx`) | The folder panel's header action. Same reasoning as revealing a file: the deployment returns *its* host path. The Copy-path action beside it stays everywhere, since a path is just text |
 | Computer Use — the settings tab (`global-settings-page.tsx`, through `offersComputerUseSettings()`) and the System Settings recovery link (`computer-use-request-item.tsx`) | It drives the machine the agent runs on, and its whole UI is written for that being yours. The missing-permission *list* still shows remotely; only the button that would fix the wrong computer is withdrawn |
 | The dispatch launcher's computer-use toggle (`quick-dispatch.tsx`, through `offersLauncherComputerUse()`) | It screenshots this computer and grants the session its apps; remotely the agent would get a picture of one machine and permission on another |
+| The MCP Server page's wording (`mcp-server-tab.tsx`, through `mcpServerRunsOnThisComputer()`) | Says the server is this computer's (tools here reach it, hosted apps cannot) only when it is; on a web deployment the server is another machine. Wording only: the page itself is shown wherever `/mcp` is served |
 | Dropped/picked folder paths (`file-utils.ts`, `use-message-composer.ts`, `todo-draft-dialog.tsx`), through `usesHostFolderPaths()` | A `folderPath` exists only to be mounted or read by the agent's machine. Remotely, the web route — enumerate and upload the bytes — is the only one that works, and the mount/upload choice is not offered |
 
 The ones marked "through" ask a narrower capability built on this one, which
@@ -534,6 +535,7 @@ above.
 | The wizard's runtime step (`stepsForPath` in `getting-started-wizard.tsx`) | Self-hosted web onboarding has to set up its own runtime |
 | The container-setup modal (`container-setup-handler.tsx`) | Same, outside the wizard |
 | Firewall detection (`use-firewall-status.ts`) | A web deployment can be behind its own firewall |
+| The MCP Server page's "Who can connect" choice (`mcp-server-tab.tsx`, through `offersMcpReachChoice()`, a server fact: the API runs inside the desktop app) | Not `canUseHostFeatures()` either way: it is about the server checking request sources, which only the desktop app's API does (`checksLoopbackSource()`); a web deployment's network setup decides instead, so it is withheld there |
 | The login form (`hasInteractiveLogin()` in `auth-mode.ts`) | A web auth-mode deployment has a password to type; a cloud workspace's credential is the proxy's bearer, held by main |
 
 What disqualifies these in cloud mode is that the machine is out of reach — its

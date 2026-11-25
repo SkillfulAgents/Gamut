@@ -1,3 +1,4 @@
+// @libsql-must-pass
 /** Issuer policy against real discovery, signed tokens and both callback transports. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createTestDatabase, type TestDatabase } from '../db/testing/create-test-database'

@@ -1,10 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest'
 
-import {
-  ACCOUNT_REAUTH_TIMEOUT_MS,
-  AccountReauthManager,
-} from './account-reauth-manager'
-import { userInputRequestManager } from '@shared/lib/tools/requests/request-manager'
+import { ACCOUNT_REAUTH_TIMEOUT_MS } from '@shared/lib/proxy/reauth-waits'
+import { AccountReauthManager } from '@shared/lib/agent-actor/testing/routers/account-reauth-manager'
+import { userInputRequestManager } from '@shared/lib/agent-actor/testing/routers/request-manager'
 import {
   attachInMemoryAgentState,
   type InMemoryAgentStateDirectory,

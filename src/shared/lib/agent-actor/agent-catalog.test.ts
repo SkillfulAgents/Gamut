@@ -1,3 +1,4 @@
+// @libsql-must-pass
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as fs from 'fs'
 import * as os from 'os'
@@ -12,7 +13,6 @@ let handle: TestDatabase
 vi.mock('@shared/lib/db', () => ({ get db() { return testDb } }))
 
 import { createAgentCatalog, existingAgentSlugsQuery, resolveAgentRecordWithRole, resolveAgentSlugs } from './agent-catalog'
-import { setWorkspaceRemoval } from './workspace-removal'
 import { agentAvatarSchema } from '@shared/lib/types/agent-avatar'
 import * as avatarAssignment from './agent-avatar'
 import { AGENT_ID_LENGTH, ensureDirectory, getAgentDir, getAgentInstructionsPath } from '@shared/lib/utils/file-storage'
@@ -172,104 +172,24 @@ describe('records', () => {
 })
 
 describe('removing an agent', () => {
-  it('removes the row and the directory of a local agent', async () => {
+  it('removes the row, and leaves what the agent stored to its actor', async () => {
     await writeAgentDirectory('gone', '---\nname: Gone\n---\nBody')
     await catalog.insert({ slug: 'gone', name: 'Gone', createdAt: new Date() })
+    await testDb.insert(schema.agentSessions).values({ agentSlug: 'gone', sessionId: 's1', metadata: '{"name":"Its session"}' }).run()
 
     await catalog.remove('gone')
 
     expect(await rowFor('gone')).toBeUndefined()
-    expect(fs.existsSync(getAgentDir('gone'))).toBe(false)
-  })
-
-  it('removes the agent\'s session index, so a later agent with the slug starts without sessions', async () => {
-    const sessionsOf = (slug: string) =>
-      testDb.select().from(schema.agentSessions).where(eq(schema.agentSessions.agentSlug, slug)).all()
-    await writeAgentDirectory('gone', '---\nname: Gone\n---\nBody')
-    await catalog.insert({ slug: 'gone', name: 'Gone', createdAt: new Date() })
-    await testDb.insert(schema.agentSessions).values([
-      { agentSlug: 'gone', sessionId: 's1', metadata: '{"name":"Its session"}' },
-      { agentSlug: 'gone', sessionId: 's2', metadata: null, transcriptMtimeMs: 1, transcriptBirthtimeMs: 0, transcriptSize: 1 },
-      { agentSlug: 'kept', sessionId: 's1', metadata: '{"name":"Another agent\'s"}' },
-    ]).run()
-
-    await catalog.remove('gone')
-
-    expect(await sessionsOf('gone')).toEqual([])
-    expect(await sessionsOf('kept')).toHaveLength(1)
-  })
-
-  it('removes only the row of an agent placed elsewhere, and touches no directory', async () => {
-    await testDb.insert(schema.agents).values({
-      slug: 'remote', name: 'Remote', createdAt: new Date(), runtime: 'modal', workspaceHandle: 'superagent-remote',
-    }).run()
-    await writeAgentDirectory('remote', null)
-
-    await catalog.remove('remote')
-
-    expect(await rowFor('remote')).toBeUndefined()
-    expect(fs.existsSync(getAgentDir('remote'))).toBe(true)
-  })
-
-  it("removes the workspace the deployment's own way when it set one, and touches no directory", async () => {
-    await writeAgentDirectory('hosted', '---\nname: Hosted\n---\nBody')
-    await catalog.insert({ slug: 'hosted', name: 'Hosted', createdAt: new Date() })
-    const removed: string[] = []
-    setWorkspaceRemoval(async (slug) => {
-      removed.push(slug)
-    })
-
-    try {
-      await catalog.remove('hosted')
-    } finally {
-      setWorkspaceRemoval(null)
-    }
-
-    expect(removed).toEqual(['hosted'])
-    expect(await rowFor('hosted')).toBeUndefined()
-    expect(fs.existsSync(getAgentDir('hosted'))).toBe(true)
-  })
-
-  it("keeps the agent when the deployment's removal fails, so the delete can be retried", async () => {
-    await catalog.insert({ slug: 'hosted', name: 'Hosted', createdAt: new Date() })
-    setWorkspaceRemoval(async () => {
-      throw new Error('The workspace store is unavailable')
-    })
-
-    try {
-      await expect(catalog.remove('hosted')).rejects.toThrow('The workspace store is unavailable')
-    } finally {
-      setWorkspaceRemoval(null)
-    }
-
-    expect(await catalog.exists('hosted')).toBe(true)
+    expect(fs.existsSync(getAgentDir('gone'))).toBe(true)
+    expect(await testDb.select().from(schema.agentSessions).where(eq(schema.agentSessions.agentSlug, 'gone')).all()).toHaveLength(1)
   })
 
   it('does nothing for a slug that is not an agent', async () => {
-    await writeAgentDirectory('stray', '---\nname: Stray\n---\nBody')
+    await catalog.insert({ slug: 'kept', name: 'Kept', createdAt: new Date() })
+
     await catalog.remove('stray')
-    expect(fs.existsSync(getAgentDir('stray'))).toBe(true)
-  })
 
-  it('keeps the row when the workspace cannot be removed, so the delete can be retried', async () => {
-    await writeAgentDirectory('stuck', '---\nname: Stuck\n---\nBody')
-    await catalog.insert({ slug: 'stuck', name: 'Stuck', createdAt: new Date() })
-    // A read-only parent refuses to unlink the agent directory itself.
-    const agentsDir = path.dirname(getAgentDir('stuck'))
-    await fs.promises.chmod(agentsDir, 0o555)
-
-    try {
-      await expect(catalog.remove('stuck')).rejects.toThrow()
-      expect(await rowFor('stuck')).toBeDefined()
-      expect(await catalog.exists('stuck')).toBe(true)
-      expect(fs.existsSync(getAgentDir('stuck'))).toBe(true)
-    } finally {
-      await fs.promises.chmod(agentsDir, 0o755)
-    }
-
-    await catalog.remove('stuck')
-    expect(await rowFor('stuck')).toBeUndefined()
-    expect(fs.existsSync(getAgentDir('stuck'))).toBe(false)
+    expect(await rowFor('kept')).toBeDefined()
   })
 })
 

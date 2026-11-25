@@ -6,7 +6,6 @@
 
 import * as net from 'net';
 import * as path from 'path';
-import { browserCommand } from './browser-gate';
 
 const DEFAULT_MAX_TABS = 10;
 
@@ -34,7 +33,6 @@ export interface NewTabResult {
 }
 
 class TabManager {
-  private lastKnownTabCount = 1;
   private maxTabs = DEFAULT_MAX_TABS;
 
   // --- State ---
@@ -47,39 +45,36 @@ class TabManager {
     return this.maxTabs;
   }
 
-  resetTabCount(): void {
-    this.lastKnownTabCount = 1;
-  }
-
-  getTabCount(): number {
-    return this.lastKnownTabCount;
-  }
-
   // --- Daemon Queries ---
 
-  /** Query the agent-browser daemon for its tab list via Unix socket: a command like any other (browser-gate.ts). */
-  queryTabs(): Promise<TabInfo[]> {
-    return browserCommand(() => this.queryDaemonTabs());
+  /** An agent-browser instance's Unix socket, by its `--session` name. */
+  socketPath(session: string): string {
+    const socketDir = process.env.AGENT_BROWSER_SOCKET_DIR
+      || (process.env.XDG_RUNTIME_DIR ? path.join(process.env.XDG_RUNTIME_DIR, 'agent-browser') : null)
+      || path.join(process.env.HOME || '/home/claude', '.agent-browser');
+    return path.join(socketDir, `${session}.sock`);
   }
 
-  private async queryDaemonTabs(): Promise<TabInfo[]> {
-    const tabs = (await this.daemonTabList()).data?.tabs;
+  /**
+   * Ask a session's agent-browser instance (its `--session` name) for its tab
+   * list via Unix socket. It lists every tab of the browser, and marks the
+   * session's own as active. A read: it waits for no saved-session operation
+   * (browser-gate.ts), which cannot move a pinned instance off its tab.
+   */
+  async queryTabs(session: string): Promise<TabInfo[]> {
+    const tabs = (await this.daemonTabList(session)).data?.tabs;
     if (!tabs) throw new Error('No tabs');
     return tabs;
   }
 
-  /** A `tab_list` over the daemon's Unix socket, with what else the command carries (`pinTab`). */
-  private daemonTabList(extra: Record<string, unknown> = {}): Promise<{ data?: { tabs?: TabInfo[] } }> {
-    const socketDir = process.env.AGENT_BROWSER_SOCKET_DIR
-      || (process.env.XDG_RUNTIME_DIR ? path.join(process.env.XDG_RUNTIME_DIR, 'agent-browser') : null)
-      || path.join(process.env.HOME || '/home/claude', '.agent-browser');
-    const session = process.env.AGENT_BROWSER_SESSION || 'default';
-    const socketPath = path.join(socketDir, `${session}.sock`);
+  /** A `tab_list` over the instance's Unix socket. */
+  private daemonTabList(session: string): Promise<{ data?: { tabs?: TabInfo[] } }> {
+    const socketPath = this.socketPath(session);
 
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => { client.destroy(); reject(new Error('Timeout')); }, 3000);
       const client = net.createConnection(socketPath, () => {
-        client.write(JSON.stringify({ id: 'tab-q', action: 'tab_list', ...extra }) + '\n');
+        client.write(JSON.stringify({ id: 'tab-q', action: 'tab_list' }) + '\n');
       });
       let buf = '';
       client.on('data', (chunk: Buffer) => {
@@ -95,60 +90,6 @@ class TabManager {
     });
   }
 
-  /**
-   * Run a saved-session operation (browser-session.ts) with agent-browser
-   * pinned to the agent's tab. The operation opens tabs of its own, and the
-   * daemon makes a tab it discovers the active one by itself, with no command
-   * (agent-browser 0.39), then falls back to the last tab once it closes.
-   * Pinned (its `pinTab`), it never adopts one; and a command applies the tab
-   * events the daemon has before anything else, so the unpin comes after it
-   * has seen the operation's tabs, while still pinned. Asks the daemon
-   * directly: the operation already holds the browser (browser-gate.ts).
-   */
-  async keepActiveTab<T>(work: () => Promise<T>): Promise<T> {
-    const pinned = await this.daemonTabList({ pinTab: true }).then(() => true, () => false);
-    try {
-      return await work();
-    } finally {
-      if (pinned) await this.daemonTabList({ pinTab: false }).catch(() => {});
-    }
-  }
-
-  /** Re-query daemon and update the cached tab count */
-  async syncTabCount(): Promise<void> {
-    try {
-      const tabs = await this.queryTabs();
-      this.lastKnownTabCount = tabs.length;
-    } catch { /* best-effort */ }
-  }
-
-  // --- Detection ---
-
-  /** Check if a new tab was opened since the last check. Returns tab info or null. */
-  async detectNewTab(): Promise<NewTabResult | null> {
-    try {
-      const tabs = await this.queryTabs();
-      const prevCount = this.lastKnownTabCount;
-      this.lastKnownTabCount = tabs.length;
-
-      if (tabs.length > prevCount) {
-        const active = tabs.find(t => t.active);
-        if (active) {
-          return {
-            newTab: true,
-            activeId: active.tabId,
-            activeUrl: active.url,
-            tabCount: tabs.length,
-          };
-        }
-      }
-      return null;
-    } catch {
-      // Tab detection is best-effort — don't fail the action if the daemon is unavailable
-      return null;
-    }
-  }
-
   // --- URL Matching ---
 
   /** Normalize and compare two URLs (origin + pathname + search, ignoring trailing slash and hash) */
@@ -162,10 +103,10 @@ class TabManager {
     } catch { return false; }
   }
 
-  /** Find a tab whose URL matches the given URL — one at exactly that URL (fragment included) first. */
-  async findMatchingTab(url: string): Promise<TabInfo | null> {
+  /** Find a usable tab whose URL matches the given URL — one at exactly that URL (fragment included) first. */
+  async findMatchingTab(session: string, url: string, usable: (tab: TabInfo) => boolean = () => true): Promise<TabInfo | null> {
     try {
-      const tabs = await this.queryTabs();
+      const tabs = (await this.queryTabs(session)).filter(usable);
       return tabs.find(t => t.url === url) ?? tabs.find(t => this.urlsMatch(t.url, url)) ?? null;
     } catch { return null; }
   }

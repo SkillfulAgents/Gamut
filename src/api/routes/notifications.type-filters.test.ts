@@ -9,6 +9,7 @@ import type { Context } from 'hono'
 vi.mock('../middleware/auth', () => ({
   Authenticated: () => async (_c: Context, next: () => Promise<void>) => next(),
   HasNotificationAccess: () => async (_c: unknown, next: () => Promise<void>) => next(),
+  getNotificationAccess: () => undefined,
 }))
 
 vi.mock('@shared/lib/auth/mode', () => ({ isAuthMode: () => false }))
@@ -81,7 +82,7 @@ describe('notification type filters (routes)', () => {
 
   it('passes a validated originating cache ID to every read write', async () => {
     const { markAsRead, markSessionNotificationsRead } = await import('@shared/lib/services/notification-service')
-    vi.mocked(markAsRead).mockResolvedValue(true)
+    vi.mocked(markAsRead).mockResolvedValue('agent-1')
     vi.mocked(markSessionNotificationsRead).mockResolvedValue(1)
     const source = crypto.randomUUID()
     for (const path of ['/n1/read', '/read-by-session/s1', '/read-all']) {

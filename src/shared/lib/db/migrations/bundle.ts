@@ -866,5 +866,47 @@ export const migrationBundle: readonly MigrationMeta[] = [
     "bps": true,
     "folderMillis": 1795056099108,
     "hash": "109901b115f99f73f721670b26d4837958d6703ee9f6b5cbd72dfd1176ca7e45"
+  },
+  {
+    "sql": [
+      "CREATE TABLE `jwks` (\n\t`id` text PRIMARY KEY NOT NULL,\n\t`public_key` text NOT NULL,\n\t`private_key` text NOT NULL,\n\t`created_at` integer NOT NULL,\n\t`expires_at` integer,\n\t`alg` text,\n\t`crv` text\n);\n",
+      "\nCREATE TABLE `oauth_access_token` (\n\t`id` text PRIMARY KEY NOT NULL,\n\t`token` text,\n\t`client_id` text NOT NULL,\n\t`session_id` text,\n\t`user_id` text,\n\t`reference_id` text,\n\t`authorization_code_id` text,\n\t`resources` text,\n\t`requested_user_info_claims` text,\n\t`refresh_id` text,\n\t`expires_at` integer,\n\t`created_at` integer,\n\t`revoked` integer,\n\t`confirmation` text,\n\t`scopes` text NOT NULL,\n\tFOREIGN KEY (`client_id`) REFERENCES `oauth_client`(`client_id`) ON UPDATE no action ON DELETE cascade,\n\tFOREIGN KEY (`session_id`) REFERENCES `session`(`id`) ON UPDATE no action ON DELETE set null,\n\tFOREIGN KEY (`user_id`) REFERENCES `user`(`id`) ON UPDATE no action ON DELETE cascade,\n\tFOREIGN KEY (`refresh_id`) REFERENCES `oauth_refresh_token`(`id`) ON UPDATE no action ON DELETE cascade\n);\n",
+      "\nCREATE UNIQUE INDEX `oauth_access_token_token_unique` ON `oauth_access_token` (`token`);",
+      "\nCREATE INDEX `oauth_access_token_client_id_idx` ON `oauth_access_token` (`client_id`);",
+      "\nCREATE INDEX `oauth_access_token_session_id_idx` ON `oauth_access_token` (`session_id`);",
+      "\nCREATE INDEX `oauth_access_token_user_id_idx` ON `oauth_access_token` (`user_id`);",
+      "\nCREATE INDEX `oauth_access_token_authorization_code_id_idx` ON `oauth_access_token` (`authorization_code_id`);",
+      "\nCREATE INDEX `oauth_access_token_refresh_id_idx` ON `oauth_access_token` (`refresh_id`);",
+      "\nCREATE TABLE `oauth_client` (\n\t`id` text PRIMARY KEY NOT NULL,\n\t`client_id` text NOT NULL,\n\t`client_secret` text,\n\t`client_discovery_id` text,\n\t`disabled` integer DEFAULT false,\n\t`skip_consent` integer,\n\t`enable_end_session` integer,\n\t`subject_type` text,\n\t`scopes` text,\n\t`client_credentials_scopes` text,\n\t`user_id` text,\n\t`created_at` integer,\n\t`updated_at` integer,\n\t`name` text,\n\t`uri` text,\n\t`icon` text,\n\t`contacts` text,\n\t`tos` text,\n\t`policy` text,\n\t`software_id` text,\n\t`software_version` text,\n\t`software_statement` text,\n\t`redirect_uris` text NOT NULL,\n\t`post_logout_redirect_uris` text,\n\t`backchannel_logout_uri` text,\n\t`backchannel_logout_session_required` integer,\n\t`token_endpoint_auth_method` text,\n\t`application_type` text,\n\t`jwks` text,\n\t`jwks_uri` text,\n\t`grant_types` text,\n\t`response_types` text,\n\t`require_pkce` integer,\n\t`dpop_bound_access_tokens` integer DEFAULT false,\n\t`reference_id` text,\n\t`metadata` text,\n\tFOREIGN KEY (`user_id`) REFERENCES `user`(`id`) ON UPDATE no action ON DELETE cascade\n);\n",
+      "\nCREATE UNIQUE INDEX `oauth_client_client_id_unique` ON `oauth_client` (`client_id`);",
+      "\nCREATE INDEX `oauth_client_user_id_idx` ON `oauth_client` (`user_id`);",
+      "\nCREATE TABLE `oauth_client_assertion` (\n\t`id` text PRIMARY KEY NOT NULL,\n\t`expires_at` integer NOT NULL\n);\n",
+      "\nCREATE TABLE `oauth_client_resource` (\n\t`id` text PRIMARY KEY NOT NULL,\n\t`client_id` text NOT NULL,\n\t`resource_id` text NOT NULL,\n\t`metadata` text,\n\t`created_at` integer,\n\tFOREIGN KEY (`client_id`) REFERENCES `oauth_client`(`client_id`) ON UPDATE no action ON DELETE cascade,\n\tFOREIGN KEY (`resource_id`) REFERENCES `oauth_resource`(`identifier`) ON UPDATE no action ON DELETE cascade\n);\n",
+      "\nCREATE INDEX `oauth_client_resource_client_id_idx` ON `oauth_client_resource` (`client_id`);",
+      "\nCREATE INDEX `oauth_client_resource_resource_id_idx` ON `oauth_client_resource` (`resource_id`);",
+      "\nCREATE UNIQUE INDEX `oauth_client_resource_client_resource_unique` ON `oauth_client_resource` (`client_id`,`resource_id`);",
+      "\nCREATE TABLE `oauth_consent` (\n\t`id` text PRIMARY KEY NOT NULL,\n\t`client_id` text NOT NULL,\n\t`user_id` text,\n\t`reference_id` text,\n\t`resources` text,\n\t`requested_user_info_claims` text,\n\t`scopes` text NOT NULL,\n\t`created_at` integer,\n\t`updated_at` integer,\n\tFOREIGN KEY (`client_id`) REFERENCES `oauth_client`(`client_id`) ON UPDATE no action ON DELETE cascade,\n\tFOREIGN KEY (`user_id`) REFERENCES `user`(`id`) ON UPDATE no action ON DELETE cascade\n);\n",
+      "\nCREATE INDEX `oauth_consent_client_id_idx` ON `oauth_consent` (`client_id`);",
+      "\nCREATE INDEX `oauth_consent_user_id_idx` ON `oauth_consent` (`user_id`);",
+      "\nCREATE TABLE `oauth_refresh_token` (\n\t`id` text PRIMARY KEY NOT NULL,\n\t`token` text NOT NULL,\n\t`client_id` text NOT NULL,\n\t`session_id` text,\n\t`user_id` text NOT NULL,\n\t`reference_id` text,\n\t`authorization_code_id` text,\n\t`resources` text,\n\t`requested_user_info_claims` text,\n\t`expires_at` integer,\n\t`created_at` integer,\n\t`revoked` integer,\n\t`rotated_at` integer,\n\t`rotation_replay_response` text,\n\t`rotation_replay_expires_at` integer,\n\t`auth_time` integer,\n\t`confirmation` text,\n\t`scopes` text NOT NULL,\n\tFOREIGN KEY (`client_id`) REFERENCES `oauth_client`(`client_id`) ON UPDATE no action ON DELETE cascade,\n\tFOREIGN KEY (`session_id`) REFERENCES `session`(`id`) ON UPDATE no action ON DELETE set null,\n\tFOREIGN KEY (`user_id`) REFERENCES `user`(`id`) ON UPDATE no action ON DELETE cascade\n);\n",
+      "\nCREATE UNIQUE INDEX `oauth_refresh_token_token_unique` ON `oauth_refresh_token` (`token`);",
+      "\nCREATE INDEX `oauth_refresh_token_client_id_idx` ON `oauth_refresh_token` (`client_id`);",
+      "\nCREATE INDEX `oauth_refresh_token_session_id_idx` ON `oauth_refresh_token` (`session_id`);",
+      "\nCREATE INDEX `oauth_refresh_token_user_id_idx` ON `oauth_refresh_token` (`user_id`);",
+      "\nCREATE INDEX `oauth_refresh_token_authorization_code_id_idx` ON `oauth_refresh_token` (`authorization_code_id`);",
+      "\nCREATE TABLE `oauth_resource` (\n\t`id` text PRIMARY KEY NOT NULL,\n\t`identifier` text NOT NULL,\n\t`name` text NOT NULL,\n\t`access_token_ttl` integer,\n\t`refresh_token_ttl` integer,\n\t`signing_algorithm` text,\n\t`signing_key_id` text,\n\t`allowed_scopes` text,\n\t`custom_claims` text,\n\t`dpop_bound_access_tokens_required` integer DEFAULT false,\n\t`disabled` integer DEFAULT false,\n\t`created_at` integer,\n\t`updated_at` integer,\n\t`policy_version` integer DEFAULT 1,\n\t`metadata` text\n);\n",
+      "\nCREATE UNIQUE INDEX `oauth_resource_identifier_unique` ON `oauth_resource` (`identifier`);"
+    ],
+    "bps": true,
+    "folderMillis": 1795320513430,
+    "hash": "ccf41ca1afaa60a4115603b852632e1925880f0689117848b6e4a7af2def1947"
+  },
+  {
+    "sql": [
+      "ALTER TABLE `oauth_client` ADD `ever_connected_at` integer;"
+    ],
+    "bps": true,
+    "folderMillis": 1795470844856,
+    "hash": "02692a940bfefc5984bde41b3ba5bf785a74621e622fbbbb6b492b4661ab140c"
   }
 ]

@@ -27,12 +27,6 @@ export const PRESS_SETTLE_MS = 50
 // One `get url` per action, compared against the last observation, instead of
 // before/after reads on every call.
 
-let lastKnownUrl: string | null = null
-
-export function resetUrlTracking(): void {
-  lastKnownUrl = null
-}
-
 export interface UrlDigest {
   url: string
   /** URL differs from the last observation (includes navigations that
@@ -55,19 +49,28 @@ export interface UrlDigest {
   changedBefore?: string
 }
 
-/** The URL the last observation recorded, or null. */
-export function lastObservedUrl(): string | null {
-  return lastKnownUrl
-}
+/** The URL one browser session last saw. */
+export class UrlTracker {
+  private lastKnownUrl: string | null = null
 
-/** Record the current URL and report whether it changed since last seen. */
-export function observeUrl(currentUrl: string): UrlDigest {
-  const previous = lastKnownUrl
-  lastKnownUrl = currentUrl
-  return {
-    url: currentUrl,
-    navigated: previous !== null && previous !== currentUrl,
-    firstObservation: previous === null,
+  reset(): void {
+    this.lastKnownUrl = null
+  }
+
+  /** The URL the last observation recorded, or null. */
+  last(): string | null {
+    return this.lastKnownUrl
+  }
+
+  /** Record the current URL and report whether it changed since last seen. */
+  observe(currentUrl: string): UrlDigest {
+    const previous = this.lastKnownUrl
+    this.lastKnownUrl = currentUrl
+    return {
+      url: currentUrl,
+      navigated: previous !== null && previous !== currentUrl,
+      firstObservation: previous === null,
+    }
   }
 }
 

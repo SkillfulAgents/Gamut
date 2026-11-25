@@ -103,28 +103,34 @@ vi.mock('@shared/lib/proxy/policy-resolver', () => ({
   resolveApiPolicy: (...args: unknown[]) => mockResolveApiPolicy(...args),
 }))
 
-// The agent's reviews, as its router answers the actor's review ops: a
-// request resolves to its outcome; resume and settle follow a recheck.
+// The agent's reviews: a request resolves to its outcome; resume and settle
+// follow a recheck. The mocks are told which agent's reviews were asked.
 const mockResumeReview = vi.fn(async (..._args: unknown[]): Promise<string> => 'allow')
 const mockSettleReview = vi.fn(async (_slug: string, _id: string, decision: string): Promise<string> => decision)
-vi.mock('@shared/lib/proxy/review-manager', () => ({
-  reviewManager: {
-    request: (agentSlug: string, details: object, options: unknown) => mockRequestReview({ ...details, agentSlug }, options),
+// "Allow for this session": whether the calling session's grants cover the request.
+const mockSessionAllows = vi.fn(async (..._args: unknown[]): Promise<boolean> => false)
+vi.mock('@shared/lib/proxy/agent-reviews', async (importOriginal) => {
+  const { agentReviewsWith } = await import('@shared/lib/agent-actor/testing/agent-store-mocks')
+  return agentReviewsWith(await importOriginal<typeof import('@shared/lib/proxy/agent-reviews')>(), (agentSlug) => ({
+    request: (details, options) => mockRequestReview({ ...details, agentSlug }, options),
     withdraw: vi.fn(),
-    resume: (...args: unknown[]) => mockResumeReview(...args),
-    settle: (slug: string, id: string, decision: string) => mockSettleReview(slug, id, decision),
+    resume: (id) => mockResumeReview(agentSlug, id),
+    settle: (id, decision) => mockSettleReview(agentSlug, id, decision),
     takeDecisionDetail: vi.fn(async () => ({})),
-  },
-}))
+    sessionAllows: (check) => mockSessionAllows(agentSlug, check),
+  }))
+})
 
-// The agent's account re-auth waits, as its router answers the actor's ops:
-// a request resolves to how the wait ended.
-vi.mock('@shared/lib/proxy/account-reauth-manager', () => ({
-  accountReauthManager: {
-    request: (agentSlug: string, details: object, options: unknown) => mockRequestReauth({ ...details, agentSlug }, options),
-    withdraw: vi.fn(),
-  },
-}))
+// The agent's account re-auth waits: a request resolves to how the wait ended.
+vi.mock('@shared/lib/proxy/reauth-waits', async (importOriginal) => {
+  const { reauthWaitsWith } = await import('@shared/lib/agent-actor/testing/agent-store-mocks')
+  return reauthWaitsWith(await importOriginal<typeof import('@shared/lib/proxy/reauth-waits')>(), {
+    account: (agentSlug) => ({
+      request: (details, options) => mockRequestReauth({ ...details, agentSlug }, options),
+      withdraw: vi.fn(),
+    }),
+  })
+})
 
 // Mock analytics
 vi.mock('@shared/lib/analytics/server-analytics', () => ({
@@ -2457,6 +2463,72 @@ describe('proxy session URL', () => {
       expect.objectContaining({ reviewType: 'api', accountId: 'acc-123', callerSessionId: 'session-a' }),
       expect.anything(),
     )
+  })
+
+  describe('allow for this session', () => {
+    const PLAIN_URL = '/api/proxy/my-agent/acc-123/gmail.googleapis.com/gmail/v1/messages'
+    const auditedDecisions = () => mockInsertValues.mock.calls.map(([entry]) => (entry as { policyDecision?: string }).policyDecision)
+
+    beforeEach(() => {
+      mapAccount('active')
+      mockSessionAllows.mockReset()
+      mockSessionAllows.mockResolvedValue(false)
+      mockRequestReview.mockResolvedValue('allow')
+      mockResolveApiPolicy.mockResolvedValue({
+        decision: 'review',
+        matchedScopes: ['gmail.modify'],
+        scopeDescriptions: {},
+        endpointAmbiguous: true,
+        resolvedFrom: 'scope_policy',
+      })
+    })
+
+    it('lets a request its session was granted through without a card', async () => {
+      mockSessionAllows.mockResolvedValue(true)
+
+      const res = await makeRequest(SESSION_URL, auth)
+
+      expect(res.status).toBe(200)
+      expect(mockRequestReview).not.toHaveBeenCalled()
+      expect(mockSessionAllows).toHaveBeenCalledWith('my-agent', {
+        callerSessionId: 'session-a', kind: 'api', targetId: 'acc-123', scopes: ['gmail.modify'], ambiguous: true,
+      })
+      expect(auditedDecisions()).toEqual(['allowed_for_session'])
+    })
+
+    it('raises the card when the session holds no grant for the request', async () => {
+      const res = await makeRequest(SESSION_URL, auth)
+
+      expect(res.status).toBe(200)
+      expect(mockRequestReview).toHaveBeenCalledOnce()
+      expect(auditedDecisions()).toEqual(['approved_by_user'])
+    })
+
+    it('leaves the request to its card when the grant check fails', async () => {
+      mockSessionAllows.mockRejectedValue(new Error('AppState is down'))
+
+      const res = await makeRequest(SESSION_URL, auth)
+
+      expect(res.status).toBe(200)
+      expect(mockRequestReview).toHaveBeenCalledOnce()
+    })
+
+    it('asks about no grant for a request that names no session', async () => {
+      await makeRequest(PLAIN_URL, auth)
+
+      expect(mockSessionAllows).not.toHaveBeenCalled()
+      expect(mockRequestReview).toHaveBeenCalledOnce()
+    })
+
+    it('never lifts a Block', async () => {
+      mockSessionAllows.mockResolvedValue(true)
+      mockResolveApiPolicy.mockResolvedValue({ decision: 'block', matchedScopes: ['gmail.modify'], scopeDescriptions: {}, resolvedFrom: 'scope_policy' })
+
+      const res = await makeRequest(SESSION_URL, auth)
+
+      expect(res.status).toBe(403)
+      expect(mockSessionAllows).not.toHaveBeenCalled()
+    })
   })
 
   it('names no session on the plain proxy URL', async () => {

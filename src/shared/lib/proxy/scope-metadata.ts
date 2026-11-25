@@ -893,6 +893,7 @@ export const SCOPE_METADATA: Record<string, Record<string, ScopeMeta>> = {
     "remote_files:write": { description: "Manage remote files", label: "write" },
     "rtm:stream": { description: "Connect to the real-time messaging stream", label: "read" },
     "search:read": { description: "Search messages and files", label: "read" },
+    "slack.identity": { description: "Check the connection, who you are signed in as, and which workspaces you can reach", label: "read" },
     "slack.public": { description: "Access public workspace data", label: "write" },
     "stars:read": { description: "View starred items", label: "read" },
     "stars:write": { description: "Manage starred items", label: "write" },

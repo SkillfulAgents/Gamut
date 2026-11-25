@@ -51,9 +51,14 @@ export async function admitBrowserStream(
     // Viewer+ can watch, but input is filtered per-role in serveBrowserStream.
     if (!(await authenticateAgentWebSocket(request, agentSlug, 'viewer'))) return { status: 403 }
     const canInput = await authenticateAgentWebSocket(request, agentSlug, 'user')
-    // Only the width goes on to the container, not the rest of the viewer's URL.
+    // Only the session (whose tab the stream follows) and the width go on to the
+    // container, not the rest of the viewer's URL.
+    const upstream = new URLSearchParams()
+    const sessionId = url.searchParams.get('sessionId')
+    if (sessionId) upstream.set('sessionId', sessionId)
     const width = url.searchParams.get('width')
-    return { agentSlug, canInput, upstreamSearch: width && /^\d+$/.test(width) ? `?width=${width}` : '' }
+    if (width && /^\d+$/.test(width)) upstream.set('width', width)
+    return { agentSlug, canInput, upstreamSearch: upstream.size ? `?${upstream}` : '' }
   } catch (error) {
     captureException(error, {
       tags: { component: 'browser-proxy', operation: 'authorize' },

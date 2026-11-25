@@ -1,3 +1,4 @@
+// @libsql-must-pass
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { and, asc, eq, inArray, isNotNull, min, sql } from 'drizzle-orm'
 import * as schema from '../db/schema'

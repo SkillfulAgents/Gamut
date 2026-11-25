@@ -20,7 +20,7 @@ import {
 } from '@shared/lib/services/notification-service'
 import { notificationTypesQuerySchema, readAllNotificationsBodySchema } from '@shared/lib/notifications/notification-filters'
 import { isAuthMode } from '@shared/lib/auth/mode'
-import { Authenticated, HasNotificationAccess } from '../middleware/auth'
+import { Authenticated, HasNotificationAccess, getNotificationAccess } from '../middleware/auth'
 import { waitForClientGone } from '../lib/wait-for-client-gone'
 import { openNotificationsFeed } from '../lib/notifications-feed'
 import { createSseFrameQueue } from '../lib/sse-frame-queue'
@@ -146,12 +146,19 @@ notificationsRouter.post('/:id/read', HasNotificationAccess(), async (c) => {
   try {
     const notificationId = c.req.param('id')
     const userId = getScopedUserId(c)
-    const slugs = await notificationReadAgentSlugs({ kind: 'notification', id: notificationId }, userId)
-    const success = await markAsRead(notificationId, notificationClientIdSchema.safeParse(c.req.header(NOTIFICATION_CLIENT_HEADER)).data)
+    const agentSlug = await markAsRead(notificationId, notificationClientIdSchema.safeParse(c.req.header(NOTIFICATION_CLIENT_HEADER)).data)
 
-    if (!success) {
+    if (agentSlug === null) {
       return c.json({ error: 'Notification not found' }, 404)
     }
+
+    // The agent comes from the write, and whether this viewer may be told its
+    // state from what HasNotificationAccess read: no third read of the row. An
+    // admin let in without holding the agent is told nothing about it.
+    const access = getNotificationAccess(c)
+    const slugs = !userId ? [agentSlug]
+      : access ? (access.viewerHasAgent ? [agentSlug] : [])
+        : await notificationReadAgentSlugs({ kind: 'notification', id: notificationId }, userId)
 
     return c.json({ success: true, readState: await confirmNotificationRead(slugs, userId) })
   } catch (error) {

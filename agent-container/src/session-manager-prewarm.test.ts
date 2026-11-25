@@ -13,7 +13,7 @@ import * as os from 'os'
 import * as path from 'path'
 
 vi.mock('./browser-state', () => ({
-  releaseBrowserLock: vi.fn(),
+  releaseBrowserSession: vi.fn(),
   renameBrowserSession: vi.fn(),
 }))
 

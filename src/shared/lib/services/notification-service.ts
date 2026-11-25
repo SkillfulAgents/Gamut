@@ -372,9 +372,10 @@ export async function getNotification(notificationId: string): Promise<Notificat
 // ============================================================================
 
 /**
- * Mark a notification as read
+ * Mark a notification as read. Answers the notification's agent, taken from
+ * the write itself, or null when there is no such notification.
  */
-export async function markAsRead(notificationId: string, sourceClientId?: string): Promise<boolean> {
+export async function markAsRead(notificationId: string, sourceClientId?: string): Promise<string | null> {
   const result = await db
     .update(notifications)
     .set({
@@ -385,7 +386,7 @@ export async function markAsRead(notificationId: string, sourceClientId?: string
     .returning(changeAudience())
 
   publishChanges(result, sourceClientId)
-  return result.length > 0
+  return result[0]?.agentSlug ?? null
 }
 
 /**

@@ -12,7 +12,7 @@ import { parseConnectionJson } from './connection-schema'
 import { randomUUID } from 'node:crypto'
 import { legacyLlmProviderId, providerCredentialFields } from './provider-settings'
 import { changesOf } from '../db/batch'
-import { sql, eq, isNull, or, and } from 'drizzle-orm'
+import { sql, eq, inArray, isNull, or, and } from 'drizzle-orm'
 import { z } from 'zod'
 import { db } from '../db'
 import {
@@ -69,11 +69,16 @@ export async function getConnection(id: string): Promise<ConnectionRow | null> {
   return (await db.select().from(llmConnections).where(eq(llmConnections.id, id)).get()) ?? null
 }
 
-/** Connection rows a request already read, by id: the resolvers below look there before reading a row. */
-export type ReadConnections = ReadonlyMap<string, ConnectionRow>
+/**
+ * Connection rows a request already read, by id: the resolvers below look there
+ * before reading a row. `null` is an id the request already knows has no row to
+ * offer, so it is not read either.
+ */
+export type ReadConnections = ReadonlyMap<string, ConnectionRow | null>
 
 async function connectionRow(id: string, read?: ReadConnections): Promise<ConnectionRow | null> {
-  return read?.get(id) ?? getConnection(id)
+  const known = read?.get(id)
+  return known !== undefined ? known : getConnection(id)
 }
 
 export function connectionModelOverrides(row: Pick<ConnectionRow, 'provider' | 'modelOverrides'>) {
@@ -524,12 +529,23 @@ export async function storedSelection(
 export async function resolveGlobalSelection(read?: ReadConnections, settings?: AppSettings): Promise<ResolvedConnection | null> {
   const current = settings ?? await getSettings()
   const root = current.llmDefault
-  const selected = await resolveConnectionSelection(root, false, read, current)
+  const known = new Map(read)
+  // The default's row is read once and kept, so falling back within it (a
+  // retired model) does not read it again.
+  if (root) known.set(root.llmProviderId, await connectionRow(root.llmProviderId, read))
+  const selected = await resolveConnectionSelection(root, false, known, current)
   if (selected?.connection.userId === null) return selected
-  const ids = new Set([root?.llmProviderId, current.llmLegacyProviderId, legacyLlmProviderId(current.llmProvider ?? 'anthropic')])
+  const ids = new Set([root?.llmProviderId, current.llmLegacyProviderId, legacyLlmProviderId(current.llmProvider ?? 'anthropic')]
+    .filter((id): id is string => !!id))
   for (const id of ids) {
-    if (!id) continue
-    const row = await connectionRow(id, read)
+    if (!known.has(id)) {
+      // The candidates not read yet (two at most) in one statement, not one
+      // each, and only once a candidate already read did not answer.
+      const unread = [...ids].filter((candidate) => !known.has(candidate))
+      const rows = await db.select().from(llmConnections).where(inArray(llmConnections.id, unread)).all()
+      for (const candidate of unread) known.set(candidate, rows.find((row) => row.id === candidate) ?? null)
+    }
+    const row = known.get(id)
     if (row?.userId !== null) continue
     const fallback = defaultSelectionForConnection(row, 'agent', current)
     if (fallback) return fallback

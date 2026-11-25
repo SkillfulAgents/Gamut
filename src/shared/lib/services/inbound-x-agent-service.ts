@@ -59,6 +59,12 @@ export async function buildInboundXAgentDetails({
           widgetRepairSlug: meta.widgetRepairSlug,
         }]
       }
+      if (meta.mcpInvocation) {
+        // Someone's MCP sessions are theirs to find here, as in the MCP
+        // server's own session list; an admin sees every one.
+        if (authMode && !viewerCanAccessAll && meta.mcpInvocation.userId !== viewerUserId) return []
+        return [{ id, createdAt: createdAt.toISOString(), mcp: { clientName: meta.mcpInvocation.clientName } }]
+      }
       if (!meta.invokedByAgentSlug) return []
       const caller = agentBySlug.get(meta.invokedByAgentSlug)
       return [{

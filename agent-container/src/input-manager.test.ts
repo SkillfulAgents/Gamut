@@ -497,6 +497,18 @@ describe('InputManager', () => {
       expect(inputManager.rejectByType('browser_input', 'The browser was closed')).toBe(0)
     })
 
+    it('rejects only one session\'s requests when given its id (it alone stopped using the browser)', async () => {
+      const mine = inputManager.createPendingWithType('rbt-s1', 'browser_input', { message: 'Log in.', requirements: [] }, 'session-1')
+      const theirs = inputManager.createPendingWithType('rbt-s2', 'browser_input', { message: 'Log in.', requirements: [] }, 'session-2')
+
+      expect(inputManager.rejectByType('browser_input', 'This session closed its browser', 'session-1')).toBe(1)
+      await expect(mine).rejects.toThrow('This session closed its browser')
+      expect(inputManager.hasPending('rbt-s2')).toBe(true)
+
+      inputManager.reject('rbt-s2', 'test cleanup')
+      await expect(theirs).rejects.toThrow('test cleanup')
+    })
+
     it('unblocks the real request_browser_input tool with a cancelled error result', async () => {
       const toolUseId = `rbt-tool-${Date.now()}`
       inputManager.setCurrentToolUseId(toolUseId)
@@ -504,7 +516,7 @@ describe('InputManager', () => {
       // The handler only registers a pending while a browser is active
       // (see the browser-lifecycle guard test file)
       const { setBrowserState, resetBrowserState } = await import('./browser-state')
-      setBrowserState({ active: true, sessionId: 'rbt-sess', cdpUrl: 'ws://127.0.0.1:9222', location: 'host' })
+      setBrowserState({ active: true, cdpUrl: 'ws://127.0.0.1:9222', location: 'host' })
 
       const { requestBrowserInputTool } = await import('./tools/request-browser-input')
       const handler = (requestBrowserInputTool as any).handler

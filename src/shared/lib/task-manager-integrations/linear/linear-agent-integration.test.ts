@@ -1,3 +1,4 @@
+// @libsql-must-pass
 import { deliveryStore } from '../../agent-integrations/delivery-store'
 vi.mock('../../services/connection-sync-service', () => ({ syncRemoteMcpAgents: vi.fn(async () => true) }))
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'

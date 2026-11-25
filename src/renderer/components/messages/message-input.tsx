@@ -700,6 +700,7 @@ export function MessageInput({ sessionId, agentSlug, onSessionCreated, onMessage
               message={composer.message}
               disabled={isDisabled}
               size="compact"
+              onSend={() => { if (composer.canSubmit) void composer.handleSubmit({ preventDefault() {} }) }}
             />
             {/* Not mid-dictation: that mic and socket would stay open under voice mode's own. */}
             <VoiceModeButton onClick={enterVoiceMode} disabled={isDisabled || composer.voiceInput.isRecording || composer.voiceInput.isConnecting} className="h-7 w-7" />

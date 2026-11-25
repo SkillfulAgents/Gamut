@@ -1,3 +1,4 @@
+// @libsql-must-pass
 /** Real HTTP OIDC discovery, code/PKCE exchange and signed JWKS verification. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { eq, sql } from 'drizzle-orm'

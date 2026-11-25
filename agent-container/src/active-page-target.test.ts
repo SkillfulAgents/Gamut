@@ -51,11 +51,12 @@ describe('selectActivePageTarget', () => {
       [{ url: 'https://www.pge.com/', active: true }],
       urlsMatch,
       { viewerTargetId: 'pge' },
-    )).toBe(targets[0]);
+    )).toBeNull();
   });
 
-  it('falls back to Chrome target ordering without an active match or viewer', () => {
-    expect(selectActivePageTarget(targets, [], urlsMatch)).toBe(targets[0]);
+  it('never picks another page: with no active match or viewer, the session has none (another session\'s tab may be the only one)', () => {
+    expect(selectActivePageTarget(targets, [], urlsMatch)).toBeNull();
+    expect(selectActivePageTarget([targets[1]], [{ url: 'https://elsewhere.example/', active: true, targetId: 'gone' }], urlsMatch)).toBeNull();
   });
 
   it('returns null when Chrome has no page targets', () => {

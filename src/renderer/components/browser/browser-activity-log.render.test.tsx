@@ -155,7 +155,15 @@ function resetProbes() {
   scrollIntoView.mockClear()
 }
 
-const rowLabels = () => screen.getAllByRole('button').map((button) => button.textContent)
+// Every <button> in the log is a row. Read from the DOM rather than with
+// getAllByRole: a role query leaves out hidden elements, and to do that jsdom
+// computes the style of every match, about 1.5 ms a row, again after each
+// change to the DOM. Inside a waitFor that is paid on the way to the awaited
+// state too: on a loaded CI runner the check of the 60 rows that show before
+// the subagent's transcript lands took longer than the wait's whole second, so
+// the wait timed out with the transcript fetched and not yet delivered.
+const rows = () => Array.from(document.querySelectorAll('button'))
+const rowLabels = () => rows().map((button) => button.textContent)
 
 async function mount() {
   const view = render(
@@ -215,7 +223,7 @@ function seedLongSession() {
 async function mountLongSession() {
   seedLongSession()
   const view = await mount()
-  await waitFor(() => expect(screen.getAllByRole('button')).toHaveLength(80))
+  await waitFor(() => expect(rows()).toHaveLength(80))
   // A subagent is at work, as it is whenever the drawer is open.
   send({ type: 'session_active' })
   send({ type: 'subagent_started', parentToolId: 'task-m-task', agentId: 'sub-1', subagentType: 'web-browser' })
@@ -245,7 +253,7 @@ describe('BrowserActivityLog renders', () => {
     expect(rowRenders).toEqual([])
     expect(parseCalls).toEqual([])
     expect(scrollIntoView).not.toHaveBeenCalled()
-    expect(screen.getAllByRole('button')).toHaveLength(80)
+    expect(rows()).toHaveLength(80)
   })
 
   it('does not render rows or parse results when a refetch brings nothing new', async () => {
@@ -272,7 +280,7 @@ describe('BrowserActivityLog renders', () => {
   it('parses no result for a closed row, and parses on open', async () => {
     server.messages = [assistant('m-0', [browserCall('a', { result: JSON.stringify([{ type: 'text', text: 'snapshot text' }]) })])]
     await mount()
-    await waitFor(() => expect(screen.getAllByRole('button')).toHaveLength(1))
+    await waitFor(() => expect(rows()).toHaveLength(1))
     expect(parseCalls).toEqual([])
 
     fireEvent.click(screen.getByRole('button'))
@@ -286,7 +294,7 @@ describe('BrowserActivityLog renders', () => {
   it('still opens a row that has a result but no input', async () => {
     server.messages = [assistant('m-0', [{ id: 'a', name: 'mcp__browser__snapshot', result: 'only a result' }])]
     await mount()
-    await waitFor(() => expect(screen.getAllByRole('button')).toHaveLength(1))
+    await waitFor(() => expect(rows()).toHaveLength(1))
 
     fireEvent.click(screen.getByRole('button'))
     expect(screen.getByText('only a result')).toBeInTheDocument()
@@ -317,9 +325,9 @@ describe('BrowserActivityLog renders', () => {
       assistant('m-2', [browserCall('c', { result: undefined })]),
     ]
     await mount()
-    await waitFor(() => expect(screen.getAllByRole('button')).toHaveLength(3))
+    await waitFor(() => expect(rows()).toHaveLength(3))
     // Open the pending row: it has no result to show yet.
-    fireEvent.click(screen.getAllByRole('button')[2])
+    fireEvent.click(rows()[2])
     resetProbes()
 
     server.messages[3].toolCalls![0].result = 'page loaded'
@@ -344,7 +352,7 @@ describe('BrowserActivityLog renders', () => {
     server.subagents['sub-2'] = [assistant('t-0', [browserCall('other-0'), { id: 'x', name: 'Read', input: { marker: 'x' } }])]
     server.messages.push(task('m-task-2', 'sub-2'))
     await mount()
-    await waitFor(() => expect(screen.getAllByRole('button')).toHaveLength(80))
+    await waitFor(() => expect(rows()).toHaveLength(80))
     await waitFor(() => expect(rowLabels()[79]).toContain('other-0'))
 
     // 121 calls in all: the last 80 are main 41..59, sub 0..59, other 0.
@@ -378,7 +386,7 @@ describe('BrowserActivityLog renders', () => {
     expect(rowRenders).toEqual(['live'])
     expect(logRenders).toBe(4)
     expect(scrollIntoView).toHaveBeenCalledTimes(1)
-    expect(screen.getAllByRole('button')).toHaveLength(80)
+    expect(rows()).toHaveLength(80)
 
     // Once the call is in the transcript, its row replaces the streaming one.
     resetProbes()
@@ -410,7 +418,7 @@ describe('BrowserActivityLog renders', () => {
   it('skips a streaming tool that is already persisted and shows the next one', async () => {
     server.messages = [assistant('m-0', [browserCall('done-1')]), task('m-task', 'sub-1')]
     await mount()
-    await waitFor(() => expect(screen.getAllByRole('button')).toHaveLength(1))
+    await waitFor(() => expect(rows()).toHaveLength(1))
     send({ type: 'session_active' })
 
     send({ type: 'tool_use_start', toolId: 'done-1', toolName: 'mcp__browser__click', partialInput: '{"marker":"stale"}' })

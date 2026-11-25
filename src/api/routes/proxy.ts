@@ -301,8 +301,30 @@ async function handleProxyRequest(c: Context, { agentSlug, accountId, rest, call
     }, 403)
   }
 
+  // 3.55 "Allow for this session": a grant of the calling session stands in
+  // for the review the policy asks for. It is read as the policy's own answer,
+  // so a proxy rule that requires review still holds the request. A check
+  // that fails leaves the request to its card.
+  const allowedForSession = async (policy: typeof policyResult): Promise<boolean> => {
+    if (policy.decision !== 'review' || !callerSessionId) return false
+    try {
+      return await agentRegistry.get(agentSlug).inputs.reviews.sessionAllows({
+        callerSessionId,
+        kind: 'api',
+        targetId: accountId,
+        scopes: policy.matchedScopes,
+        ambiguous: policy.endpointAmbiguous === true,
+      })
+    } catch (grantError) {
+      console.warn('[proxy] Session grant check failed, leaving the request to review:', grantError)
+      return false
+    }
+  }
+  const sessionGranted = await allowedForSession(policyResult)
+  const policyOutcome: 'allow' | 'review' = sessionGranted ? 'allow' : policyResult.decision
+
   // Track the precise outcome for audit logging
-  let resolvedPolicyDecision: string = policyResult.decision // 'allow' or 'review'
+  let resolvedPolicyDecision: string = sessionGranted ? 'allowed_for_session' : policyResult.decision // 'allow', 'allowed_for_session' or 'review'
 
   // 3.6 Proxy rules: a require rule can send an allowed request to review; an
   // allow rule can move a reviewed request to allow.
@@ -322,12 +344,12 @@ async function handleProxyRequest(c: Context, { agentSlug, accountId, rest, call
       body: await readBody(),
     }),
   )
-  const ruleGate = await runRules(policyResult.decision)
+  const ruleGate = await runRules(policyOutcome)
   const ruleAudit = {
     ruleVersionId: decidingRuleVersionId(ruleGate),
     ruleOutcomes: auditRuleOutcomes(ruleGate.evaluations),
   }
-  if (ruleGate.unavailable && policyResult.decision === 'allow') {
+  if (ruleGate.unavailable && policyOutcome === 'allow') {
     // No one can tell whether a require rule would hold this request. Answer
     // now so the agent can retry, rather than parking an allowed request on
     // a review card for minutes.
@@ -372,7 +394,7 @@ async function handleProxyRequest(c: Context, { agentSlug, accountId, rest, call
         reevaluate: async () => {
           const policy = await resolvePolicy()
           if (policy.decision === 'block') return 'deny'
-          const gate = await runRules(policy.decision)
+          const gate = await runRules(await allowedForSession(policy) ? 'allow' : policy.decision)
           return gate.unavailable ? 'review' : gate.decision
         },
       })
@@ -407,8 +429,8 @@ async function handleProxyRequest(c: Context, { agentSlug, accountId, rest, call
     }
   }
 
-  // resolvedPolicyDecision is now 'allow' (auto), 'allowed_by_rule' or
-  // 'approved_by_user' (manual)
+  // resolvedPolicyDecision is now 'allow' (auto), 'allowed_for_session',
+  // 'allowed_by_rule' or 'approved_by_user' (manual)
 
   // Audit helper: curried with all the context fields shared by every
   // post-policy audit entry. Caller supplies only what varies (statusCode,

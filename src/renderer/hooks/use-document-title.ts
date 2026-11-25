@@ -64,6 +64,7 @@ const SETTINGS_TAB_TITLES = {
   web: 'Web Search',
   capabilities: 'Subagents',
   'global-guidance': 'Global Guidance',
+  'mcp-server': 'MCP Server',
   'computer-use': 'Computer Use',
   'account-provider': 'Account Provider',
   voice: 'Voice',

@@ -142,8 +142,9 @@ vi.mock('@renderer/hooks/use-runtime-status', () => ({
   useRuntimeStatus: () => ({ data: mockRuntimeStatus }),
 }))
 
+const mockUseArtifacts = vi.hoisted(() => vi.fn((_slug: string | null, _options?: Record<string, unknown>) => ({ data: [] })))
 vi.mock('@renderer/hooks/use-artifacts', () => ({
-  useArtifacts: () => ({ data: [] }),
+  useArtifacts: mockUseArtifacts,
 }))
 
 vi.mock('@renderer/hooks/use-webhook-triggers', () => ({
@@ -880,6 +881,18 @@ describe('AppSidebar — agent rows', () => {
     renderWithProviders(<AppSidebar />)
     expect(screen.getByText('Session 1')).toBeInTheDocument()
     expect(screen.getByTestId('session-item-session-1').parentElement).toHaveAttribute('data-is-active', 'false')
+  })
+
+  it('reads dashboards only for an expanded row, as a list of names behind the notifications stream', () => {
+    mockUseArtifacts.mockClear()
+    mockRouteParams = { slug: 'test-agent' }
+    renderWithProviders(<AppSidebar />)
+    // Every row calls the hook: a slug only when expanded, and always namesOnly,
+    // which is what slows the idle poll to five minutes while the stream delivers.
+    const calls = mockUseArtifacts.mock.calls
+    expect(calls.length).toBeGreaterThan(0)
+    for (const [, options] of calls) expect(options).toEqual({ namesOnly: true })
+    expect(new Set(calls.map(([slug]) => slug).filter(Boolean))).toEqual(new Set(['test-agent']))
   })
 
   it('session sub-item links to the session route', () => {

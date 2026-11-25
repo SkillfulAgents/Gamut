@@ -18,13 +18,13 @@ function work(log: string[], name: string) {
 const tick = () => new Promise((resolve) => setTimeout(resolve, 5))
 
 describe('the browser gate', () => {
-  it('runs commands side by side, and an operation only once none is running', async () => {
+  it('runs a session\'s commands side by side, and its operation only once none is running', async () => {
     const log: string[] = []
     const first = work(log, 'command-1')
     const second = work(log, 'command-2')
     const operation = work(log, 'operation')
-    const commands = [browserCommand(first.run), browserCommand(second.run)]
-    const alone = browserAlone(operation.run)
+    const commands = [browserCommand('s-1', first.run), browserCommand('s-1', second.run)]
+    const alone = browserAlone('s-1', operation.run)
     await tick()
     expect(log).toEqual(['command-1:start', 'command-2:start'])
 
@@ -38,16 +38,16 @@ describe('the browser gate', () => {
     await Promise.all([...commands, alone])
   })
 
-  it('holds back a command that starts while an operation waits, so a busy browser cannot keep it waiting', async () => {
+  it('holds back a command of the session that starts while its operation waits, so a busy browser cannot keep it waiting', async () => {
     const log: string[] = []
     const first = work(log, 'command-1')
     const later = work(log, 'command-2')
     const operation = work(log, 'operation')
-    const running = browserCommand(first.run)
+    const running = browserCommand('s-1', first.run)
     await tick()
-    const alone = browserAlone(operation.run)
+    const alone = browserAlone('s-1', operation.run)
     await tick()
-    const held = browserCommand(later.run)
+    const held = browserCommand('s-1', later.run)
     await tick()
     expect(log).toEqual(['command-1:start'])
 
@@ -61,29 +61,48 @@ describe('the browser gate', () => {
     await Promise.all([running, alone, held])
   })
 
-  it('holds a command back while an operation runs, and runs operations one at a time', async () => {
+  it('holds a command back while its session\'s operation runs, and runs operations one at a time, whoever\'s', async () => {
     const log: string[] = []
     const first = work(log, 'operation-1')
     const second = work(log, 'operation-2')
     const command = work(log, 'command')
-    const operations = [browserAlone(first.run), browserAlone(second.run)]
+    const operations = [browserAlone('s-1', first.run), browserAlone('s-2', second.run)]
     await tick()
-    const held = browserCommand(command.run)
+    const held = browserCommand('s-1', command.run)
     await tick()
     expect(log).toEqual(['operation-1:start'])
 
     first.release()
     await tick()
-    expect(log).toEqual(['operation-1:start', 'operation-1:end', 'operation-2:start'])
+    expect(log).toEqual(['operation-1:start', 'operation-1:end', 'operation-2:start', 'command:start'])
     second.release()
-    await tick()
-    expect(log.slice(3)).toEqual(['operation-2:end', 'command:start'])
     command.release()
     await Promise.all([...operations, held])
   })
 
+  it('never holds another session\'s commands: its instance is on a tab of its own', async () => {
+    const log: string[] = []
+    const mine = work(log, 'command-s1')
+    const operation = work(log, 'operation-s2')
+    const theirs = work(log, 'command-s2')
+    const running = browserCommand('s-2', theirs.run)
+    await tick()
+    const alone = browserAlone('s-2', operation.run)
+    await tick()
+    const other = browserCommand('s-1', mine.run)
+    await tick()
+    expect(log).toEqual(['command-s2:start', 'command-s1:start'])
+    mine.release()
+    theirs.release()
+    await tick()
+    expect(log.at(-1)).toBe('operation-s2:start')
+    operation.release()
+    await Promise.all([running, alone, other])
+  })
+
   it('lets a failed operation go, and passes its error on', async () => {
-    await expect(browserAlone(async () => { throw new Error('the browser went away') })).rejects.toThrow('the browser went away')
-    expect(await browserCommand(async () => 'ran')).toBe('ran')
+    await expect(browserAlone('s-1', async () => { throw new Error('the browser went away') })).rejects.toThrow('the browser went away')
+    expect(await browserCommand('s-1', async () => 'ran')).toBe('ran')
+    expect(await browserAlone('s-2', async () => 'next')).toBe('next')
   })
 })

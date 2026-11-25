@@ -1,3 +1,4 @@
+// @libsql-must-pass
 /**
  * Who a notification is pushed to, against a real database, for both push
  * channels: the recipient matrix (membership, account status, the tagged

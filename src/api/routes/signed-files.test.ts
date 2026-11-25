@@ -1,3 +1,4 @@
+// @libsql-must-pass
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Hono } from 'hono'
 import * as fs from 'node:fs'
@@ -143,6 +144,12 @@ describe('minting', () => {
     expect(minted.expiresAt.getTime()).toBe(now + 5 * 60_000)
     const shorter = await mintSignedDownloadUrl('alice', { kind: 'workspace-file', agentSlug: 'agent', path: 'notes/a.txt' }, { ttlMs: 30_000 })
     expect(shorter.expiresAt.getTime()).toBe(now + 30_000)
+  })
+
+  it('uses the base URL the minter passes, without a trailing slash', async () => {
+    const minted = await mintSignedDownloadUrl('alice', { kind: 'workspace-file', agentSlug: 'agent', path: 'notes/a.txt' }, { baseUrl: 'http://localhost:47892/' })
+    expect(minted.url).toMatch(/^http:\/\/localhost:47892\/api\/signed-files\/[A-Za-z0-9_-]+\.[A-Za-z0-9_-]{43}$/)
+    expect(await (await redeem(minted.url)).text()).toBe('alpha file contents')
   })
 
   it('refuses a lifetime past the maximum', async () => {

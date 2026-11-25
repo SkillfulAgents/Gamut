@@ -21,7 +21,7 @@ const AUTO_SLEEP_TIMEOUT_MS = 30 * 60 * 1000
 
 describe('idle alarm — small profile', () => {
   let perf: PerfApp
-  let host: typeof import('@shared/lib/agent-actor').containerHost
+  let runningAgentSlugs: typeof import('@shared/lib/agent-actor').runningAgentSlugs
   let registry: typeof import('@shared/lib/agent-actor').agentRegistry
 
   // Each agent's idle alarm, on its actor.
@@ -32,7 +32,7 @@ describe('idle alarm — small profile', () => {
 
   beforeAll(async () => {
     perf = await bootPerfApp('small')
-    ;({ containerHost: host, agentRegistry: registry } = await import('@shared/lib/agent-actor'))
+    ;({ runningAgentSlugs, agentRegistry: registry } = await import('@shared/lib/agent-actor'))
     for (const slug of perf.seeded.agentSlugs) await registry.get(slug).container.start()
   })
 
@@ -41,23 +41,23 @@ describe('idle alarm — small profile', () => {
   })
 
   it('decides for every running container without touching a file', async () => {
-    expect(host.getRunningAgentIds()).toHaveLength(perf.profile.agents)
+    expect(await runningAgentSlugs()).toHaveLength(perf.profile.agents)
 
     const { measurement } = await measure(fireAll)
 
     // Started "now": nobody is idle, everybody is still up and re-armed.
-    expect(host.getRunningAgentIds()).toHaveLength(perf.profile.agents)
+    expect(await runningAgentSlugs()).toHaveLength(perf.profile.agents)
     for (const slug of perf.seeded.agentSlugs) expect(alarmOf(slug).isArmed()).toBe(true)
     expectWithinBudget('small: idle alarm (nothing idle)', measurement, { totalOps: 0, wallMs: 50 })
   })
 
   it('sleeps every container idle past the timeout without touching a file', async () => {
     vi.spyOn(Date, 'now').mockReturnValue(BASE_TIME + AUTO_SLEEP_TIMEOUT_MS + 60_000)
-    expect(host.getRunningAgentIds()).toHaveLength(perf.profile.agents)
+    expect(await runningAgentSlugs()).toHaveLength(perf.profile.agents)
 
     const { measurement } = await measure(fireAll)
 
-    expect(host.getRunningAgentIds()).toHaveLength(0)
+    expect(await runningAgentSlugs()).toHaveLength(0)
     for (const slug of perf.seeded.agentSlugs) expect(alarmOf(slug).isArmed()).toBe(false)
     expectWithinBudget('small: idle alarm (all idle, all stopped)', measurement, { totalOps: 0, wallMs: 100 })
   })

@@ -65,6 +65,10 @@ import mobilePairing from './routes/mobile-pairing'
 import agentBootstrap from './routes/agent-bootstrap'
 import activityRouter from './routes/activity'
 import signedFiles from './routes/signed-files'
+import mcpRoute, { MCP_ROUTE_PATH } from './routes/mcp'
+import mcpOAuthDiscovery from './routes/mcp-oauth-discovery'
+import { mcpClientRegistrationBodyLimit, mcpClientRegistrationLimits } from './middleware/mcp-client-registration'
+import mcpServerSettings from './routes/mcp-server-settings'
 import { isAuthMode } from '@shared/lib/auth/mode'
 import { WORKSPACE_UNAVAILABLE_HEADER } from '@shared/lib/workspace-unavailable-header'
 import { sql } from 'drizzle-orm'
@@ -101,7 +105,8 @@ app.use('*', cors({
   // The packaged renderer is file:// calling loopback, so the cloud router's
   // not-ready marker (relayed by cloud-proxy.ts) is only readable if exposed here.
   // So is a workspace file's ETag, which an open preview polls for changes.
-  exposeHeaders: [WORKSPACE_UNAVAILABLE_HEADER, 'ETag'],
+  // And the MCP endpoint's OAuth challenge, which browser-based MCP clients read cross-origin.
+  exposeHeaders: [WORKSPACE_UNAVAILABLE_HEADER, 'ETag', 'WWW-Authenticate'],
 }))
 
 // Uncacheable unless a route opts in — see the middleware for why an absent
@@ -161,6 +166,12 @@ if (isAuthMode()) {
 // before the Better Auth wildcard, behind the /api/auth/* middleware stack.
 if (isAuthMode()) {
   app.route('/api/auth/mobile', mobilePairing)
+}
+
+// Open Dynamic Client Registration for MCP clients: bounded in size and
+// counted per client and workspace before the provider sees it.
+if (isAuthMode()) {
+  app.use('/api/auth/oauth2/register', mcpClientRegistrationBodyLimit, mcpClientRegistrationLimits)
 }
 
 // Mount Better Auth handler (only when AUTH_MODE is enabled)
@@ -283,6 +294,7 @@ app.route('/api/audit-log', auditLogRouter)
 app.route('/api/connection-logs', connectionLogsRouter)
 app.route('/api/platform-auth', platformAuth)
 app.route('/api/account-deletion', accountDeletion)
+app.route('/api/mcp-server', mcpServerSettings)
 if (isAuthMode()) {
   // Public RP-initiated Platform SSO launcher (SUP-466). Outside /api so the
   // Platform "Open Cloud Agents" link can target a stable deployment path.
@@ -300,6 +312,17 @@ app.route('/api/llm-connections', llmConnectionsRouter)
 app.route('/api/favicon', faviconRouter)
 app.route('/api/server-facts', serverFactsRouter)
 app.route('/api/debug', debugRouter)
+
+// Gamut's MCP server for external agents. Outside `/api` like the cloud proxy
+// below: it carries its own credential (the installation token without auth
+// mode), which `/api/*` never accepts, and the local-mode loopback check does
+// not cover it. See routes/mcp.ts.
+app.route(MCP_ROUTE_PATH, mcpRoute)
+if (isAuthMode()) {
+  // The MCP OAuth discovery documents (RFC 9728, RFC 8414), at the root as
+  // the RFCs place them. See routes/mcp-oauth-discovery.ts.
+  app.route('/.well-known', mcpOAuthDiscovery)
+}
 
 // Desktop → cloud-workspace forwarding. Mounted outside `/api` on purpose: it
 // is not an endpoint of this server but a different server's `/api` reached

@@ -181,4 +181,25 @@ describe('startAudioCapture', () => {
     await startAudioCapture(sink(), stream)
     expect(processors).toHaveLength(1)
   })
+
+  it('builds the audio graph while the microphone is still opening', async () => {
+    const { ctx } = fakeContext({ worklet: 'ok' })
+    vi.stubGlobal('AudioContext', function FakeAudioContext() { return ctx } as unknown as typeof AudioContext)
+    let open!: (mic: MediaStream) => void
+    const opening = new Promise<MediaStream>((resolve) => { open = resolve })
+    const started = startAudioCapture(sink(), opening)
+    await vi.waitFor(() => expect(FakeWorkletNode.instances).toHaveLength(1))
+    // The worklet is loaded and waiting; only the microphone is outstanding.
+    expect(ctx.audioWorklet?.addModule).toHaveBeenCalled()
+    open(stream)
+    expect((await started).stream).toBe(stream)
+  })
+
+  it('closes the context it made when the microphone is refused', async () => {
+    const { ctx } = fakeContext({ worklet: 'ok' })
+    vi.stubGlobal('AudioContext', function FakeAudioContext() { return ctx } as unknown as typeof AudioContext)
+    const denied = Object.assign(new Error('denied'), { name: 'NotAllowedError' })
+    await expect(startAudioCapture(sink(), Promise.reject(denied))).rejects.toBe(denied)
+    expect(ctx.close).toHaveBeenCalled()
+  })
 })

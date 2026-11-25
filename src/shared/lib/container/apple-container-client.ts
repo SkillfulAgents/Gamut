@@ -464,6 +464,10 @@ export class AppleContainerClient extends BaseContainerClient {
     await execWithPath(`${this.getRunnerShellCommand()} image delete --force ${shellEscape(image)}`)
   }
 
+  static debugCliCommand(): string {
+    return 'container'
+  }
+
   /**
    * Check if a supported Apple Container CLI is installed. An unsupported
    * version reports not-installed so the UI offers Install, which upgrades

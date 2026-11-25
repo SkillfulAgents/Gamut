@@ -56,6 +56,24 @@ describe('static files over the Node HTTP adapter', () => {
     }
   })
 
+  it('serves the MCP consent page so no other origin can frame it, and only that page', async () => {
+    const consent = await fetch(`${baseUrl}/oauth/consent?client_id=x&sig=y`)
+    expect(consent.status).toBe(200)
+    expect(await consent.text()).toContain('<title>App</title>')
+    expect(consent.headers.get('content-security-policy')).toBe("frame-ancestors 'none'")
+    expect(consent.headers.get('x-frame-options')).toBe('DENY')
+    // The renderer's router matches the path in any letter case, so the headers must too.
+    for (const variant of ['/OAuth/consent?client_id=x&sig=y', '/oauth/CONSENT?client_id=x&sig=y', '/OAUTH/Consent']) {
+      const response = await fetch(`${baseUrl}${variant}`)
+      expect(response.status, variant).toBe(200)
+      expect(response.headers.get('content-security-policy'), variant).toBe("frame-ancestors 'none'")
+      expect(response.headers.get('x-frame-options'), variant).toBe('DENY')
+    }
+    const other = await fetch(`${baseUrl}/settings/mcp-server`)
+    expect(other.headers.get('content-security-policy')).toBeNull()
+    expect(other.headers.get('x-frame-options')).toBeNull()
+  })
+
   it('streams a complete binary response without changing its bytes', async () => {
     const res = await fetch(`${baseUrl}/sample.bin`)
     expect(res.status).toBe(200)

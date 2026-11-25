@@ -1,4 +1,5 @@
 // Boot phase marks → one grep-friendly `boot_timing {json}` line after post-bind init.
+// scripts/warmup-compile-cache.sh waits for that line to know the server has booted.
 
 type BootMark = 'modulesLoaded' | 'settingsRead' | 'dbReady' | 'bound'
 

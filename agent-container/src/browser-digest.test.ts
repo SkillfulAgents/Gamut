@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import {
-  observeUrl,
-  resetUrlTracking,
+  UrlTracker,
   formatUrlDigest,
   formatUrlDigestBrief,
   formatFillReadback,
@@ -9,38 +8,39 @@ import {
   formatScrollDigest,
 } from './browser-digest'
 
-describe('observeUrl', () => {
-  beforeEach(() => resetUrlTracking())
+describe('UrlTracker', () => {
+  let urls = new UrlTracker()
+  beforeEach(() => { urls = new UrlTracker() })
 
   it('first observation is not a navigation, and is flagged as first', () => {
-    expect(observeUrl('https://a.com/')).toEqual({ url: 'https://a.com/', navigated: false, firstObservation: true })
+    expect(urls.observe('https://a.com/')).toEqual({ url: 'https://a.com/', navigated: false, firstObservation: true })
   })
 
   it('same URL twice is not a navigation', () => {
-    observeUrl('https://a.com/')
-    expect(observeUrl('https://a.com/').navigated).toBe(false)
+    urls.observe('https://a.com/')
+    expect(urls.observe('https://a.com/').navigated).toBe(false)
   })
 
   it('detects navigation, including ones that happened between actions', () => {
-    observeUrl('https://a.com/')
-    expect(observeUrl('https://a.com/checkout')).toEqual({ url: 'https://a.com/checkout', navigated: true, firstObservation: false })
+    urls.observe('https://a.com/')
+    expect(urls.observe('https://a.com/checkout')).toEqual({ url: 'https://a.com/checkout', navigated: true, firstObservation: false })
     // late navigation surfaces on the NEXT action's digest
-    expect(observeUrl('https://stripe.com/pay').navigated).toBe(true)
+    expect(urls.observe('https://stripe.com/pay').navigated).toBe(true)
   })
 
   it('regression: open-seeded baseline makes the first click navigation detectable', () => {
     // validation run found: open(data:...) reset but never seeded the baseline,
     // so a click that navigated to example.com was reported "URL unchanged"
-    observeUrl('data:text/html,<a href=...>')   // seeded at /browser/open
-    const afterClick = observeUrl('https://example.com/')
+    urls.observe('data:text/html,<a href=...>')   // seeded at /browser/open
+    const afterClick = urls.observe('https://example.com/')
     expect(afterClick.navigated).toBe(true)
     expect(formatUrlDigest(afterClick)).toContain('NAVIGATED')
   })
 
-  it('resetUrlTracking clears history (browser reopen)', () => {
-    observeUrl('https://a.com/')
-    resetUrlTracking()
-    expect(observeUrl('https://b.com/').navigated).toBe(false)
+  it('reset clears history (browser reopen)', () => {
+    urls.observe('https://a.com/')
+    urls.reset()
+    expect(urls.observe('https://b.com/').navigated).toBe(false)
   })
 })
 

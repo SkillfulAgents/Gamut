@@ -49,7 +49,21 @@ const h = vi.hoisted(() => {
     },
     user: { isAuthMode: false, isAdmin: false, user: null },
     settings: { data: { setupCompleted: true } },
-    search: { open: false },
+    search: (() => {
+      let open = false
+      const searchListeners = new Set<() => void>()
+      return {
+        get: () => open,
+        set(next: boolean) {
+          open = next
+          searchListeners.forEach((listener) => listener())
+        },
+        subscribe(listener: () => void) {
+          searchListeners.add(listener)
+          return () => searchListeners.delete(listener)
+        },
+      }
+    })(),
     passthrough: ({ children }: { children: React.ReactNode }) => children,
   }
 })
@@ -93,7 +107,10 @@ vi.mock('@renderer/hooks/use-keyboard-viewport', () => ({ useKeyboardViewport: (
 vi.mock('@renderer/hooks/use-user-settings', () => ({ useUserSettings: () => h.settings }))
 vi.mock('@renderer/hooks/use-settings', () => ({ useSettings: () => h.settings }))
 vi.mock('@renderer/context/user-context', () => ({ useUser: () => h.user }))
-vi.mock('@renderer/context/search-context', () => ({ useSearch: () => h.search }))
+vi.mock('@renderer/context/search-context', () => ({
+  // As the real one: only a caller of this hook renders when search opens or closes.
+  useSearchOpen: () => useSyncExternalStore(h.search.subscribe, h.search.get),
+}))
 vi.mock('@renderer/lib/error-reporting', () => ({
   setRendererErrorReportingEnabled: () => {},
   setRendererErrorReportingUser: () => {},
@@ -159,7 +176,7 @@ beforeEach(() => {
   h.counts.hookConsumer = 0
   h.counts.rawConsumer = 0
   h.counts.onboardingConsumer = 0
-  h.search = { open: false }
+  h.search.set(false)
   document.title = ''
 })
 
@@ -193,18 +210,36 @@ describe('RootLayout during a chat turn', () => {
     const { rerender } = render(<RootLayout />)
     const mounted = { ...h.counts }
 
-    // Something the root layout does subscribe to changes (search opening,
-    // settings refetching): the layout renders, the context values hold.
-    h.search = { open: true }
+    // Something the root layout does subscribe to changes (settings
+    // refetching, a route's search params): the layout renders, the context
+    // values hold.
     rerender(<RootLayout />)
-    h.search = { open: false }
     rerender(<RootLayout />)
 
-    // (Three renders: opening search also latches searchEverOpened.)
-    expect(h.counts.root).toBe(mounted.root + 3)
+    expect(h.counts.root).toBe(mounted.root + 2)
     expect(h.counts.hookConsumer).toBe(mounted.hookConsumer)
     expect(h.counts.rawConsumer).toBe(mounted.rawConsumer)
     expect(h.counts.onboardingConsumer).toBe(mounted.onboardingConsumer)
+  })
+
+  it('does not re-render, and re-renders no consumer, when search opens and closes', () => {
+    const { queryByTestId } = render(<RootLayout />)
+    const mounted = { ...h.counts }
+    // Off the boot graph until first opened.
+    expect(queryByTestId('lazy-SearchDialog')).toBeNull()
+
+    act(() => h.search.set(true))
+    expect(queryByTestId('lazy-SearchDialog')).not.toBeNull()
+    act(() => h.search.set(false))
+    // Stays mounted once opened: the dialog closes itself, with its animation.
+    expect(queryByTestId('lazy-SearchDialog')).not.toBeNull()
+    act(() => h.search.set(true))
+    act(() => h.search.set(false))
+
+    // Only the dialog's mount point rendered: before it was a leaf, each open
+    // and close rendered the whole root layout (three renders for the first
+    // pair, two for each pair after).
+    expect(h.counts).toEqual(mounted)
   })
 
   it('keeps the title up to date while the wizard covers the routes', async () => {

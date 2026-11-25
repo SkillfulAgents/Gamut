@@ -1,3 +1,4 @@
+// @libsql-must-pass
 /**
  * ResolveAgent() and the agent role middlewares against a real database: a
  * member's request reads the agent and their role on it in one statement, and

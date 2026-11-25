@@ -8,7 +8,7 @@ vi.mock('@shared/lib/services/agent-members-service', () => ({
   changeMemberRole: (...args: unknown[]) => mockChangeMemberRole(...args),
   removeMember: (...args: unknown[]) => mockRemoveMember(...args),
 }))
-import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach, onTestFinished, type MockInstance } from 'vitest'
 
 // The last-owner guards live in agent-members-service (real-database tests
 // there); the routes only map its outcome to a status and a message.
@@ -528,6 +528,7 @@ vi.mock('@shared/lib/services/session-service', async (importOriginal) => {
   getSessionMessagesPage: vi.fn(),
   getSessionMessagesDelta: vi.fn(),
   getSession: vi.fn(),
+  getSessionWithMetadata: vi.fn(),
   getSessionMetadata: vi.fn(),
   sessionExists: vi.fn().mockResolvedValue(true),
   sessionIsKnown: vi.fn().mockResolvedValue(true),
@@ -722,18 +723,23 @@ vi.mock('@shared/lib/error-reporting', () => ({
   captureMessage: vi.fn(),
 }))
 
-const mockGetPendingReviewsForAgent = vi.fn((_slug: string) => [] as any[])
-const mockSubmitDecision = vi.fn((..._args: unknown[]) => false)
-vi.mock('@shared/lib/proxy/review-manager', () => ({
-  reviewManager: {
-    getPendingReviewsForAgent: (slug: string) => mockGetPendingReviewsForAgent(slug),
-    denyAllForAgent: vi.fn(),
-    submitDecision: (...args: unknown[]) => mockSubmitDecision(...args),
-    resolveMatchingPending: vi.fn(),
-    resolveMatchingPendingByLabel: vi.fn(),
-    resolveMatchingXAgentByOperation: vi.fn(),
-  },
-}))
+// The agent's reviews: what is pending, and whether a decision was taken. The
+// mocks are told which agent's reviews were asked.
+const mockPendingReviews = vi.fn((_slug: string) => [] as any[])
+const mockSubmitReview = vi.fn((..._args: unknown[]) => false)
+const mockAllowForSession = vi.fn(async (..._args: unknown[]): Promise<string> => 'granted')
+vi.mock('@shared/lib/proxy/agent-reviews', async (importOriginal) => {
+  const { agentReviewsWith } = await import('@shared/lib/agent-actor/testing/agent-store-mocks')
+  return agentReviewsWith(await importOriginal<typeof import('@shared/lib/proxy/agent-reviews')>(), (agentSlug) => ({
+    pending: () => mockPendingReviews(agentSlug),
+    denyAll: vi.fn(),
+    submit: (...args) => mockSubmitReview(agentSlug, ...args),
+    allowForSession: (id) => mockAllowForSession(agentSlug, id) as ReturnType<typeof import('@shared/lib/proxy/agent-reviews').AgentReviews.prototype.allowForSession>,
+    resolveMatching: vi.fn(),
+    resolveMatchingByLabel: vi.fn(),
+    resolveMatchingXAgent: vi.fn(),
+  }))
+})
 
 vi.mock('@shared/lib/services/agent-template-service', () => ({
   exportAgentTemplate: vi.fn(),
@@ -939,8 +945,8 @@ import { attachMount, removeMount, resolveMountPath } from '@shared/lib/services
 import { notificationManager } from '@shared/lib/notifications/notification-manager'
 import { appendMentions } from '@shared/lib/utils/mentions'
 import { appendComputerUseNote } from '@shared/lib/utils/computer-use-note'
-import { listSessions, listSessionsByIds, getSessionMessagesWithCompact, getSessionMessagesPage, getSessionMessagesDelta, getSessionSummary, sessionExists, sessionIsKnown, isSessionRegistered, deleteSession, getSession, getSessionMetadata, updateSessionName, registerSession, readSessionMetadata, updateSessionMetadata } from '@shared/lib/services/session-service'
-import { createScheduledTask, listCompletedOneTimeTasks, listPendingScheduledTasks, listPendingWakesByAgent, updateScheduleExpression } from '@shared/lib/services/scheduled-task-service'
+import { listSessions, listSessionsByIds, getSessionMessagesWithCompact, getSessionMessagesPage, getSessionMessagesDelta, getSessionSummary, sessionExists, sessionIsKnown, isSessionRegistered, deleteSession, getSession, getSessionWithMetadata, getSessionMetadata, updateSessionName, registerSession, readSessionMetadata, updateSessionMetadata } from '@shared/lib/services/session-service'
+import { createScheduledTask, getPendingWakeForSession, listCompletedOneTimeTasks, listPendingScheduledTasks, listPendingWakesByAgent, updateScheduleExpression } from '@shared/lib/services/scheduled-task-service'
 import { listArtifactsFromFilesystem } from '@shared/lib/services/artifact-service'
 import { scanArtifactsIn } from '@shared/lib/services/artifact-scan'
 
@@ -974,10 +980,10 @@ function unreadPreviews(sessionsByAgent: Map<string, Set<string>>): Map<string, 
 import { markSessionUnread, clearSessionUnread, getSessionIdsMarkedUnread, getSessionIdsMarkedUnreadByAgents, deleteSessionUnreadMarks } from '@shared/lib/services/session-unread-service'
 import { unlinkTodosFromSessions } from '@shared/lib/services/todo-service'
 import { globalFeed } from '@shared/lib/notifications/global-feed'
-import { userInputRequestManager } from '@shared/lib/tools/requests/request-manager'
+import { userInputRequestManager } from '@shared/lib/agent-actor/testing/routers/request-manager'
 import { AgentInputRequests } from '@shared/lib/tools/requests/agent-input-requests'
 import { mutateSettings } from '@shared/lib/config/settings'
-import { computerUsePermissionManager } from '@shared/lib/computer-use/permission-manager'
+import { computerUsePermissionManager } from '@shared/lib/agent-actor/testing/routers/permission-manager'
 import { localHostPort } from '@shared/lib/host/local-host-port'
 import { listUserSecrets, setSecret, updateSecret, deleteSecret, getSecret, getSecretEnvVars } from '@shared/lib/services/secrets-service'
 import { keyToEnvVar } from '@shared/lib/utils/secrets'
@@ -3053,6 +3059,188 @@ describe('path traversal security — GET /:id/files/*', () => {
     expect(res.headers.get('cache-control')).toBe('private, no-store, max-age=0')
   })
 
+  // An inline media element may keep the bytes if it asks before each use;
+  // everything else stays no-store. Chromium reuses a no-cache copy without
+  // asking for a navigation (on Back) and for an <img> (within its document),
+  // so neither may ever be handed one.
+  describe('revalidated copies for <video> and <audio>', () => {
+    const FILE = '/api/agents/test-agent/files/out/render.mp4'
+    const stat = (mtimeMs: number, size = 100, birthtimeMs?: number) => ({ ...fileStat(size), mtimeMs, birthtimeMs })
+    const get = (url: string, headers: Record<string, string>, method = 'GET') =>
+      app.request(`http://localhost${url}`, { method, headers })
+
+    it.each(['video', 'audio'])('lets an inline %s request keep a copy it must revalidate', async (dest) => {
+      mockFsStat.mockResolvedValue(stat(1_000))
+      mockCreateReadStream.mockReturnValueOnce(Readable.from([Buffer.alloc(100)]))
+
+      const res = await get(`${FILE}?inline=true`, { 'Sec-Fetch-Dest': dest })
+
+      expect(res.status).toBe(200)
+      expect(res.headers.get('cache-control')).toBe('private, no-cache, max-age=0')
+      expect(res.headers.get('vary')).toBe('Sec-Fetch-Dest')
+      expect(res.headers.get('etag')).toBe('"1000-100"')
+    })
+
+    it.each([
+      ['a navigation to the file', { 'Sec-Fetch-Dest': 'document' }, '?inline=true'],
+      ['an <img>', { 'Sec-Fetch-Dest': 'image' }, '?inline=true'],
+      ['a frame', { 'Sec-Fetch-Dest': 'iframe' }, '?inline=true'],
+      ['a script fetch', { 'Sec-Fetch-Dest': 'empty' }, '?inline=true'],
+      ['a client that sends no Sec-Fetch-Dest', {}, '?inline=true'],
+      ['a download, whatever asks for it', { 'Sec-Fetch-Dest': 'video' }, ''],
+    ])('keeps %s on no-store, and answers its If-None-Match with the file', async (_name, headers, query) => {
+      mockFsStat.mockResolvedValue(stat(1_000))
+      mockCreateReadStream.mockReturnValueOnce(Readable.from([Buffer.alloc(100)]))
+
+      const res = await get(`${FILE}${query}`, { ...headers, 'If-None-Match': '"1000-100"' })
+
+      expect(res.status).toBe(200)
+      expect(res.headers.get('cache-control')).toBe('private, no-store, max-age=0')
+      // So a copy stored for an element never answers one of these for the same URL.
+      expect(res.headers.get('vary')).toBe('Sec-Fetch-Dest')
+      expect((await res.arrayBuffer()).byteLength).toBe(100)
+    })
+
+    it('answers a remount of an unchanged file with 304: no bytes, nothing opened', async () => {
+      mockFsStat.mockResolvedValue(stat(1_000))
+      mockCreateReadStream.mockReturnValueOnce(Readable.from([Buffer.alloc(100)]))
+      const first = await get(`${FILE}?inline=true`, { 'Sec-Fetch-Dest': 'video' })
+      expect((await first.arrayBuffer()).byteLength).toBe(100)
+      mockCreateReadStream.mockClear()
+
+      let bytes = 0
+      for (let remount = 0; remount < 5; remount++) {
+        const res = await get(`${FILE}?inline=true`, { 'Sec-Fetch-Dest': 'video', 'If-None-Match': first.headers.get('etag') as string })
+        expect(res.status).toBe(304)
+        // What the browser needs to keep using, and keep revalidating, its copy.
+        expect(res.headers.get('etag')).toBe(first.headers.get('etag'))
+        expect(res.headers.get('cache-control')).toBe('private, no-cache, max-age=0')
+        expect(res.headers.get('vary')).toBe('Sec-Fetch-Dest')
+        expect(res.headers.get('content-length')).toBeNull()
+        bytes += (await res.arrayBuffer()).byteLength
+      }
+      expect(bytes).toBe(0)
+      expect(mockCreateReadStream).not.toHaveBeenCalled()
+    })
+
+    it('accepts the weak form of its tag, which a compressing layer hands the browser', async () => {
+      mockFsStat.mockResolvedValue(stat(1_000))
+      const res = await get(`${FILE}?inline=true`, { 'Sec-Fetch-Dest': 'audio', 'If-None-Match': 'W/"1000-100"' })
+      expect(res.status).toBe(304)
+    })
+
+    it.each([
+      ['rewritten later', stat(2_000)],
+      ['of another size', stat(1_000, 101)],
+      ['replaced by a file moved into place with the same size and mtime', stat(1_000, 100, 777)],
+    ])('sends the file again once it is %s', async (_name, changed) => {
+      mockFsStat.mockResolvedValue(changed)
+      mockCreateReadStream.mockReturnValueOnce(Readable.from([Buffer.alloc(changed.size)]))
+
+      const res = await get(`${FILE}?inline=true`, { 'Sec-Fetch-Dest': 'audio', 'If-None-Match': '"1000-100"' })
+
+      expect(res.status).toBe(200)
+      expect(res.headers.get('etag')).not.toBe('"1000-100"')
+      expect((await res.arrayBuffer()).byteLength).toBe(changed.size)
+    })
+
+    it('still 404s a deleted file that a copy is held for', async () => {
+      fileMissing()
+      const res = await get(`${FILE}?inline=true`, { 'Sec-Fetch-Dest': 'audio', 'If-None-Match': '"1000-100"' })
+      expect(res.status).toBe(404)
+      expect(res.headers.get('etag')).toBeNull()
+    })
+
+    it('answers a ranged request for bytes the browser already holds with 304', async () => {
+      mockFsStat.mockResolvedValue(stat(1_000))
+      const res = await get(`${FILE}?inline=true`, { 'Sec-Fetch-Dest': 'video', Range: 'bytes=10-19', 'If-None-Match': '"1000-100"' })
+      expect(res.status).toBe(304)
+      expect(res.headers.get('content-range')).toBeNull()
+      expect(mockCreateReadStream).not.toHaveBeenCalled()
+    })
+
+    it('serves the range a seek asks for while If-Range names this file', async () => {
+      mockFsStat.mockResolvedValue(stat(1_000))
+      mockCreateReadStream.mockReturnValueOnce(Readable.from([Buffer.alloc(10)]))
+
+      const res = await get(`${FILE}?inline=true`, { 'Sec-Fetch-Dest': 'video', Range: 'bytes=10-19', 'If-Range': '"1000-100"' })
+
+      expect(res.status).toBe(206)
+      expect(res.headers.get('content-range')).toBe('bytes 10-19/100')
+      expect(mockCreateReadStream).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ start: 10, end: 19 }))
+    })
+
+    it.each([
+      ['another version of the file', '"900-100"'],
+      ['a weak tag', 'W/"1000-100"'],
+      ['a date', 'Wed, 21 Oct 2015 07:28:00 GMT'],
+    ])('sends the whole file, not a range to splice onto old bytes, when If-Range is %s', async (_name, ifRange) => {
+      mockFsStat.mockResolvedValue(stat(1_000))
+      mockCreateReadStream.mockReturnValueOnce(Readable.from([Buffer.alloc(100)]))
+
+      // No Sec-Fetch-Dest: If-Range is about the bytes, whoever asks.
+      const res = await get(FILE, { Range: 'bytes=10-19', 'If-Range': ifRange })
+
+      expect(res.status).toBe(200)
+      expect(res.headers.get('content-range')).toBeNull()
+      expect(res.headers.get('content-length')).toBe('100')
+      expect((await res.arrayBuffer()).byteLength).toBe(100)
+    })
+
+    // An error kept under the file's tag would be handed back as the file on the next 304.
+    it.each([
+      ['the file went away between the stat and the read', () => mockFsStat.mockResolvedValueOnce(stat(1_000)).mockRejectedValueOnce(enoent()), {}, 404],
+      ['the read failed', () => { mockFsStat.mockResolvedValue(stat(1_000)); mockCreateReadStream.mockImplementationOnce(() => { throw new Error('EIO') }) }, {}, 500],
+      ['the range cannot be served', () => mockFsStat.mockResolvedValue(stat(1_000)), { Range: 'bytes=200-300' }, 416],
+    ])('keeps an error on no-store when %s', async (_name, arrange, headers, status) => {
+      arrange()
+
+      const res = await get(`${FILE}?inline=true`, { 'Sec-Fetch-Dest': 'video', ...headers })
+
+      expect(res.status).toBe(status)
+      expect(res.headers.get('cache-control')).toBe('private, no-store, max-age=0')
+    })
+
+    // CORS with trusted origins starts the response before the route runs, and
+    // Hono then lets the headers already on it win over a body's own.
+    it('keeps its headers behind a middleware that has already started the response', async () => {
+      const behind = new Hono()
+      behind.use('*', async (c, next) => {
+        c.header('Vary', 'Origin', { append: true })
+        c.res.headers.set('X-Started', 'yes')
+        await next()
+      })
+      behind.route('/', app)
+      const ask = (headers: Record<string, string>) =>
+        behind.request(`http://localhost${FILE}?inline=true`, { headers: { 'Sec-Fetch-Dest': 'video', ...headers } })
+
+      mockFsStat.mockResolvedValue(stat(1_000))
+      mockCreateReadStream.mockReturnValueOnce(Readable.from([Buffer.alloc(100)]))
+      const full = await ask({})
+      expect(full.status).toBe(200)
+      expect(full.headers.get('cache-control')).toBe('private, no-cache, max-age=0')
+      expect(full.headers.get('vary')).toBe('Origin, Sec-Fetch-Dest')
+
+      const unchanged = await ask({ 'If-None-Match': '"1000-100"' })
+      expect(unchanged.status).toBe(304)
+      expect(unchanged.headers.get('cache-control')).toBe('private, no-cache, max-age=0')
+      expect(unchanged.headers.get('vary')).toBe('Origin, Sec-Fetch-Dest')
+
+      mockFsStat.mockReset()
+      mockFsStat.mockResolvedValueOnce(stat(1_000)).mockRejectedValueOnce(enoent())
+      const gone = await ask({})
+      expect(gone.status).toBe(404)
+      expect(gone.headers.get('cache-control')).toBe('private, no-store, max-age=0')
+    })
+
+    it('answers a HEAD the same way, opening nothing', async () => {
+      mockFsStat.mockResolvedValue(stat(1_000))
+      const res = await get(`${FILE}?inline=true`, { 'Sec-Fetch-Dest': 'audio', 'If-None-Match': '"1000-100"' }, 'HEAD')
+      expect(res.status).toBe(304)
+      expect(mockCreateReadStream).not.toHaveBeenCalled()
+    })
+  })
+
   it('rejects a workspace symlink whose real path escapes the workspace', async () => {
     mockFsRealpath
       .mockResolvedValueOnce('/mock/workspace')
@@ -3126,14 +3314,14 @@ describe('path traversal security — GET /:id/files/*', () => {
     })
 
     // An open preview polls this to learn the file changed without reading it.
-    it('names the file\'s state in a weak ETag that moves when it is rewritten', async () => {
+    it('names the file\'s state in an ETag that moves when it is rewritten', async () => {
       mockFsStat.mockResolvedValue({ ...fileStat(100), mtimeMs: 1_000 })
       const first = await headReq(app, '/api/agents/test-agent/files/out/report.md?inline=true')
-      expect(first.headers.get('etag')).toBe('W/"1000-100"')
-      expect((await headReq(app, '/api/agents/test-agent/files/out/report.md?inline=true')).headers.get('etag')).toBe('W/"1000-100"')
+      expect(first.headers.get('etag')).toBe('"1000-100"')
+      expect((await headReq(app, '/api/agents/test-agent/files/out/report.md?inline=true')).headers.get('etag')).toBe('"1000-100"')
 
       mockFsStat.mockResolvedValue({ ...fileStat(100), mtimeMs: 2_000 })
-      expect((await headReq(app, '/api/agents/test-agent/files/out/report.md?inline=true')).headers.get('etag')).toBe('W/"2000-100"')
+      expect((await headReq(app, '/api/agents/test-agent/files/out/report.md?inline=true')).headers.get('etag')).toBe('"2000-100"')
       expect(mockCreateReadStream).not.toHaveBeenCalled()
     })
 
@@ -7964,7 +8152,7 @@ describe('GET /api/agents (enriched summary)', () => {
     mockLiveSessions.activeIds.mockReturnValue([])
     mockLiveSessions.hasActive.mockReturnValue(false)
     mockLiveSessions.hasAwaitingInput.mockReturnValue(false)
-    mockGetPendingReviewsForAgent.mockReturnValue([])
+    mockPendingReviews.mockReturnValue([])
     vi.mocked(getSessionMessagesPage).mockResolvedValue({
       messages: [],
       nextCursor: null,
@@ -8877,7 +9065,7 @@ describe('GET /api/agents (enriched summary)', () => {
     mockLiveSessions.activeIds.mockReturnValue(['sess-active'])
     mockLiveSessions.isAwaitingInput.mockReturnValue(false)
     // Agent has pending proxy reviews
-    mockGetPendingReviewsForAgent.mockReturnValue([
+    mockPendingReviews.mockReturnValue([
       { id: 'review-1', agentSlug: 'agent-1', accountId: 'acc-1', toolkit: 'gmail', method: 'GET', targetPath: '/messages', matchedScopes: ['gmail.readonly'], scopeDescriptions: {} },
     ])
 
@@ -8898,7 +9086,7 @@ describe('GET /api/agents (enriched summary)', () => {
     // Session is NOT active — reviews were triggered by a non-session flow (e.g. dashboard startup)
     mockLiveSessions.isActive.mockReturnValue(false)
     mockLiveSessions.isAwaitingInput.mockReturnValue(false)
-    mockGetPendingReviewsForAgent.mockReturnValue([
+    mockPendingReviews.mockReturnValue([
       { id: 'review-1', agentSlug: 'agent-1', accountId: 'acc-1', toolkit: 'gmail', method: 'GET', targetPath: '/messages', matchedScopes: ['gmail.readonly'], scopeDescriptions: {} },
     ])
 
@@ -9123,6 +9311,51 @@ describe('artifact proxy — subPath uses the raw display-slug URL', () => {
     expect(init.headers).not.toHaveProperty('if-none-match')
   })
 
+  it('forwards a request body without the caller content-length', async () => {
+    mockContainerFetch.mockResolvedValue(
+      new Response('{"ok":true}', { headers: { 'content-type': 'application/json' } }),
+    )
+    const body = JSON.stringify({ action: 'reply', text: 'hello' })
+
+    const res = await app.request(
+      'http://localhost/api/agents/abc1234567/artifacts/dash/api/respond',
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'content-length': String(body.length) },
+        body,
+      },
+    )
+
+    expect(res.status).toBe(200)
+    const init = mockContainerFetch.mock.calls[0]?.[1] as RequestInit
+    expect(init.method).toBe('POST')
+    expect(init.headers).toHaveProperty('content-type', 'application/json')
+    expect(init.headers).not.toHaveProperty('content-length')
+    expect(new TextDecoder().decode(init.body as ArrayBuffer)).toBe(body)
+  })
+
+  it('delivers a POST body to a real dashboard server with undici loaded', async () => {
+    // The host imports undici, which then serves every fetch in the process.
+    // On Node 22 that fetch rejects a forwarded content-length (SUP-1790).
+    await import('undici')
+    const dashboard = createServer((req, res) => req.pipe(res))
+    await new Promise<void>((resolve) => dashboard.listen(0, '127.0.0.1', resolve))
+    onTestFinished(() => { dashboard.close() })
+    const dashboardUrl = `http://127.0.0.1:${(dashboard.address() as AddressInfo).port}`
+    // The same fetch BaseContainerClient.request makes to the container port.
+    mockContainerFetch.mockImplementation((path: string, init?: RequestInit) => fetch(`${dashboardUrl}${path}`, init))
+    const body = JSON.stringify({ action: 'reply', text: 'hello' })
+
+    const res = await app.request('http://localhost/api/agents/abc1234567/artifacts/dash/api/respond', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'content-length': String(body.length) },
+      body,
+    })
+
+    expect(res.status).toBe(200)
+    expect(await res.text()).toBe(body)
+  })
+
   it('canonicalizes display-slug document navigations to match the dashboard router base', async () => {
     const res = await app.request(
       'http://localhost/api/agents/my-dash-abc1234567/artifacts/dash/s/deck?present=1',
@@ -9151,20 +9384,20 @@ describe('POST /api/agents/:id/proxy-review/:reviewId (agent rule requests)', ()
 
   beforeEach(() => {
     mockIsAuthMode.mockReturnValue(false)
-    mockSubmitDecision.mockReturnValue(true)
+    mockSubmitReview.mockReturnValue(true)
     vi.mocked(logAuditEvent).mockClear()
   })
 
   afterEach(() => {
-    mockSubmitDecision.mockReturnValue(false)
-    mockGetPendingReviewsForAgent.mockReturnValue([])
+    mockSubmitReview.mockReturnValue(false)
+    mockPendingReviews.mockReturnValue([])
   })
 
   it.each([
     { decision: 'allow', action: 'approved', ruleProposal: proposal, request: 'create' },
     { decision: 'deny', action: 'rejected', ruleProposal: { ...proposal, deletesRuleId: 'rule-9' }, request: 'delete' },
   ])('audits who decided ($action, $request)', async ({ decision, action, ruleProposal, request }) => {
-    mockGetPendingReviewsForAgent.mockReturnValue([{ id: 'review-1', agentSlug: 'my-agent', accountId: 'acct-1', toolkit: 'gmail', method: 'RULE', targetPath: 'proxy-rules', matchedScopes: [], scopeDescriptions: {}, ruleProposal }])
+    mockPendingReviews.mockReturnValue([{ id: 'review-1', agentSlug: 'my-agent', accountId: 'acct-1', toolkit: 'gmail', method: 'RULE', targetPath: 'proxy-rules', matchedScopes: [], scopeDescriptions: {}, ruleProposal }])
     const res = await postJson(app, '/api/agents/my-agent/proxy-review/review-1', { decision })
     expect(res.status).toBe(200)
     expect(logAuditEvent).toHaveBeenCalledWith({
@@ -9177,15 +9410,15 @@ describe('POST /api/agents/:id/proxy-review/:reviewId (agent rule requests)', ()
   })
 
   it('does not audit ordinary proxy reviews as rule decisions', async () => {
-    mockGetPendingReviewsForAgent.mockReturnValue([{ id: 'review-1', agentSlug: 'my-agent', accountId: 'acct-1', toolkit: 'gmail', method: 'POST', targetPath: 'x', matchedScopes: [], scopeDescriptions: {} }])
+    mockPendingReviews.mockReturnValue([{ id: 'review-1', agentSlug: 'my-agent', accountId: 'acct-1', toolkit: 'gmail', method: 'POST', targetPath: 'x', matchedScopes: [], scopeDescriptions: {} }])
     expect((await postJson(app, '/api/agents/my-agent/proxy-review/review-1', { decision: 'allow' })).status).toBe(200)
     expect(vi.mocked(logAuditEvent).mock.calls.some(([event]) => event.object === 'proxy_rule')).toBe(false)
   })
 
   it('passes the reason typed with a deny to the review', async () => {
-    mockGetPendingReviewsForAgent.mockReturnValue([{ id: 'review-1', agentSlug: 'my-agent', accountId: 'acct-1', toolkit: 'gmail', method: 'POST', targetPath: 'x', matchedScopes: [], scopeDescriptions: {} }])
+    mockPendingReviews.mockReturnValue([{ id: 'review-1', agentSlug: 'my-agent', accountId: 'acct-1', toolkit: 'gmail', method: 'POST', targetPath: 'x', matchedScopes: [], scopeDescriptions: {} }])
     expect((await postJson(app, '/api/agents/my-agent/proxy-review/review-1', { decision: 'deny', reason: '  Use the shared folder  ' })).status).toBe(200)
-    expect(mockSubmitDecision).toHaveBeenCalledWith('my-agent', 'review-1', 'deny', { reason: 'Use the shared folder' })
+    expect(mockSubmitReview).toHaveBeenCalledWith('my-agent', 'review-1', 'deny', { reason: 'Use the shared folder' })
   })
 
   describe('a model picked on an agent-to-agent card', () => {
@@ -9210,10 +9443,10 @@ describe('POST /api/agents/:id/proxy-review/:reviewId (agent rule requests)', ()
     afterEach(() => { spies.splice(0).forEach((spy) => spy.mockRestore()) })
 
     it('rides with the allow, on the card\'s connection whatever the post names', async () => {
-      mockGetPendingReviewsForAgent.mockReturnValue([invokeCard(runtime)])
+      mockPendingReviews.mockReturnValue([invokeCard(runtime)])
       const res = await postJson(app, '/api/agents/my-agent/proxy-review/review-1', { decision: 'allow', pick: { model: 'opus', effort: 'max', llmProviderId: 'someone-elses' } })
       expect(res.status).toBe(200)
-      expect(mockSubmitDecision).toHaveBeenCalledWith('my-agent', 'review-1', 'allow', { pick: { model: 'opus', llmProviderId: 'platform', effort: 'max' } })
+      expect(mockSubmitReview).toHaveBeenCalledWith('my-agent', 'review-1', 'allow', { pick: { model: 'opus', llmProviderId: 'platform', effort: 'max' } })
     })
 
     it.each([
@@ -9221,12 +9454,38 @@ describe('POST /api/agents/:id/proxy-review/:reviewId (agent rule requests)', ()
       { name: 'the card\'s connection has no such model', card: invokeCard(runtime), model: 'not-a-model' },
       { name: 'the target moved to another connection while the card waited', card: invokeCard(runtime), model: 'opus', moved: true },
     ])('is refused, and the card stays open, when $name', async ({ card, model, moved }) => {
-      mockSubmitDecision.mockClear()
+      mockSubmitReview.mockClear()
       if (moved) targetConnection = 'another'
-      mockGetPendingReviewsForAgent.mockReturnValue([card])
+      mockPendingReviews.mockReturnValue([card])
       expect((await postJson(app, '/api/agents/my-agent/proxy-review/review-1', { decision: 'allow', pick: { model } })).status).toBe(409)
-      expect(mockSubmitDecision).not.toHaveBeenCalled()
+      expect(mockSubmitReview).not.toHaveBeenCalled()
     })
+  })
+})
+
+describe('POST /api/agents/:id/proxy-review/:reviewId/session', () => {
+  const app = createApp()
+  const post = () => app.request('/api/agents/my-agent/proxy-review/review-1/session', { method: 'POST' })
+
+  beforeEach(() => mockAllowForSession.mockReset())
+
+  it('grants the review\'s request to its session, naming only the review', async () => {
+    mockAllowForSession.mockResolvedValue('granted')
+    const res = await post()
+    expect(res.status).toBe(200)
+    expect(mockAllowForSession).toHaveBeenCalledWith('my-agent', 'review-1')
+  })
+
+  it('answers a review that is gone with the 404 the card reads as settled', async () => {
+    mockAllowForSession.mockResolvedValue('not_found')
+    expect((await post()).status).toBe(404)
+  })
+
+  it('refuses a review that cannot be allowed for a session', async () => {
+    mockAllowForSession.mockResolvedValue('not_offered')
+    const res = await post()
+    expect(res.status).toBe(400)
+    expect(await res.json()).toEqual({ error: 'This request can only be allowed once' })
   })
 })
 
@@ -9239,7 +9498,7 @@ describe('POST /api/agents/:id/proxy-review/:reviewId/always', () => {
     mockDbOnConflictDoUpdate.mockReset()
     mockDbSelectFrom.mockReset()
     mockCaptureException.mockReset()
-    mockGetPendingReviewsForAgent.mockReturnValue([])
+    mockPendingReviews.mockReturnValue([])
     // Default account/MCP lookup: a row owned by the test user. Both branches
     // read it to prove the FOREIGN KEY target exists; the API-scope branch
     // also validates the scope against its toolkit and, in auth mode, both
@@ -9256,7 +9515,7 @@ describe('POST /api/agents/:id/proxy-review/:reviewId/always', () => {
   })
 
   it('rejects persistent allow for a create review', async () => {
-    mockGetPendingReviewsForAgent.mockReturnValueOnce([{
+    mockPendingReviews.mockReturnValueOnce([{
       id: 'review-1', agentSlug: 'my-agent', accountId: 'target', toolkit: 'agents',
       method: 'create', targetPath: 'agents:create:target', matchedScopes: ['create:target'],
       xAgent: { targetAgentSlug: 'target', targetAgentName: 'Target', operation: 'create' },
@@ -9271,7 +9530,7 @@ describe('POST /api/agents/:id/proxy-review/:reviewId/always', () => {
   })
 
   it('rejects a scope or label allow on an unnamed API review', async () => {
-    mockGetPendingReviewsForAgent.mockReturnValue([{
+    mockPendingReviews.mockReturnValue([{
       id: 'review-1', agentSlug: 'my-agent', accountId: 'acc-1', toolkit: 'linear', method: 'POST',
       targetPath: '/graphql', matchedScopes: ['read', 'write'], endpointAmbiguous: true,
     }])
@@ -9520,7 +9779,7 @@ describe('POST /api/agents/:id/proxy-review/:reviewId/always', () => {
   // The pending review is stamped with its type at creation and wins over
   // whatever the client claims.
   it('routes to mcpToolPolicies when the pending review is stamped mcp, even if the client says api', async () => {
-    mockGetPendingReviewsForAgent.mockReturnValue([{
+    mockPendingReviews.mockReturnValue([{
       id: 'review-1', agentSlug: 'my-agent', accountId: 'mcp-railway', reviewType: 'mcp',
       toolkit: 'Railway', method: 'POST', targetPath: 'subscriptions/listen',
       matchedScopes: [], scopeDescriptions: {},
@@ -9542,7 +9801,7 @@ describe('POST /api/agents/:id/proxy-review/:reviewId/always', () => {
   })
 
   it('routes to apiScopePolicies when the pending review is stamped api, even if the client says mcp', async () => {
-    mockGetPendingReviewsForAgent.mockReturnValue([{
+    mockPendingReviews.mockReturnValue([{
       id: 'review-1', agentSlug: 'my-agent', accountId: 'account-123', reviewType: 'api',
       toolkit: 'gmail', method: 'GET', targetPath: 'gmail/v1/users/me/messages',
       matchedScopes: ['gmail.readonly'], scopeDescriptions: {},
@@ -9564,7 +9823,7 @@ describe('POST /api/agents/:id/proxy-review/:reviewId/always', () => {
 
   it('falls back to the client-declared type for a pending review without a stamp', async () => {
     // Envelopes registered before the stamp existed carry no reviewType.
-    mockGetPendingReviewsForAgent.mockReturnValue([{
+    mockPendingReviews.mockReturnValue([{
       id: 'review-1', agentSlug: 'my-agent', accountId: 'mcp-server-123',
       toolkit: 'linear', method: 'POST', targetPath: 'tools/call: list_issues',
       matchedScopes: ['list_issues'], scopeDescriptions: {},
@@ -11419,22 +11678,25 @@ describe('session existence guards read metadata, not the transcript', () => {
     createdAt: new Date('2026-03-01T10:00:00.000Z'),
     lastActivityAt: new Date('2026-03-01T10:05:00.000Z'),
   }
+  /** What the single-session read finds in the session's index entry. */
+  const sessionWith = (metadata: Awaited<ReturnType<typeof getSessionMetadata>>) =>
+    vi.mocked(getSessionWithMetadata).mockResolvedValue({ session: SESSION_INFO, metadata })
 
   beforeEach(async () => {
     vi.clearAllMocks()
     app = createApp()
     vi.mocked(sessionIsKnown).mockResolvedValue(true)
     vi.mocked(getSession).mockResolvedValue(SESSION_INFO)
+    sessionWith(null)
+    vi.mocked(getSessionMetadata).mockResolvedValue(null)
     vi.mocked(readSessionMetadata).mockResolvedValue({})
+    vi.mocked(getPendingWakeForSession).mockResolvedValue(null)
+    vi.mocked(getAgentRecord).mockResolvedValue(null)
   })
 
   it('returns x-agent provenance for the session breadcrumb and back bar', async () => {
-    vi.mocked(readSessionMetadata).mockResolvedValue({
-      'sess-1': { invokedByAgentSlug: 'caller-agent' },
-    })
-    vi.mocked(getAgent).mockResolvedValue({
-      frontmatter: { name: 'Caller Agent' },
-    } as any)
+    sessionWith({ invokedByAgentSlug: 'caller-agent' })
+    vi.mocked(getAgentRecord).mockResolvedValue({ slug: 'caller-agent', name: 'Caller Agent' } as any)
 
     const res = await getReq(app, '/api/agents/test-agent/sessions/sess-1')
 
@@ -11444,12 +11706,22 @@ describe('session existence guards read metadata, not the transcript', () => {
       invokedByAgentSlug: 'caller-agent',
       invokedByAgentName: 'Caller Agent',
     })
+    // The name is the catalog's: the calling agent's instructions are not read for it.
+    expect(getAgentRecord).toHaveBeenCalledWith('caller-agent')
+    expect(getAgent).not.toHaveBeenCalled()
+  })
+
+  it('names a calling agent that is gone by its slug', async () => {
+    sessionWith({ invokedByAgentSlug: 'caller-agent' })
+
+    const res = await getReq(app, '/api/agents/test-agent/sessions/sess-1')
+
+    expect(res.status).toBe(200)
+    expect(await res.json()).toMatchObject({ invokedByAgentSlug: 'caller-agent', invokedByAgentName: 'caller-agent' })
   })
 
   it('returns widget repair provenance for the session breadcrumb and back bar', async () => {
-    vi.mocked(readSessionMetadata).mockResolvedValue({
-      'sess-1': { isWidgetRepair: true, widgetRepairSlug: 'weather' },
-    })
+    sessionWith({ isWidgetRepair: true, widgetRepairSlug: 'weather' })
 
     const res = await getReq(app, '/api/agents/test-agent/sessions/sess-1')
 
@@ -11461,13 +11733,13 @@ describe('session existence guards read metadata, not the transcript', () => {
       widgetRepairSlug: 'weather',
     })
     expect(body).not.toHaveProperty('invokedByAgentSlug')
+    expect(body).not.toHaveProperty('invokedByAgentName')
+    expect(getAgentRecord).not.toHaveBeenCalled()
   })
 
   it('returns fork lineage from the parent listing name', async () => {
-    vi.mocked(readSessionMetadata).mockResolvedValue({
-      'sess-1': { forkedFromSessionId: 'src-1' },
-      'src-1': { name: 'Pricing' },
-    })
+    sessionWith({ forkedFromSessionId: 'src-1' })
+    vi.mocked(getSessionMetadata).mockResolvedValue({ name: 'Pricing' })
 
     const res = await getReq(app, '/api/agents/test-agent/sessions/sess-1')
 
@@ -11477,14 +11749,134 @@ describe('session existence guards read metadata, not the transcript', () => {
       forkedFromSessionId: 'src-1',
       forkedFromSessionName: 'Pricing',
     })
-    // One metadata read serves the session and its parent's name, and is
-    // handed to getSession rather than read again there.
-    expect(readSessionMetadata).toHaveBeenCalledTimes(1)
+    // One entry serves the session and its metadata, and one more the parent's
+    // name: the agent's other sessions are not read.
+    expect(getSessionWithMetadata).toHaveBeenCalledTimes(1)
+    expect(getSessionWithMetadata).toHaveBeenCalledWith(expect.objectContaining({ slug: 'test-agent' }), 'sess-1')
+    expect(getSessionMetadata).toHaveBeenCalledTimes(1)
+    expect(getSessionMetadata).toHaveBeenCalledWith(expect.objectContaining({ slug: 'test-agent' }), 'src-1')
+    expect(readSessionMetadata).not.toHaveBeenCalled()
+    expect(getSession).not.toHaveBeenCalled()
+  })
+
+  it('reads one index entry for a session that is not a fork, and none of the agent\'s other sessions', async () => {
+    sessionWith({ name: 'Renamed', model: 'claude-sonnet-5' })
+
+    const res = await getReq(app, '/api/agents/test-agent/sessions/sess-1')
+
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body).toMatchObject({ id: 'sess-1', name: 'Renamed', model: 'claude-sonnet-5' })
+    expect(body).not.toHaveProperty('forkedFromSessionName')
+    expect(getSessionWithMetadata).toHaveBeenCalledTimes(1)
     expect(getSessionMetadata).not.toHaveBeenCalled()
-    expect(getSession).toHaveBeenCalledTimes(1)
-    expect(getSession).toHaveBeenCalledWith(expect.objectContaining({ slug: 'test-agent' }), 'sess-1', {
-      metadata: { forkedFromSessionId: 'src-1' },
+    expect(readSessionMetadata).not.toHaveBeenCalled()
+    expect(getSession).not.toHaveBeenCalled()
+  })
+
+  it('answers 404 for an unknown session without reading anything else', async () => {
+    vi.mocked(getSessionWithMetadata).mockResolvedValue(null)
+    mockRuntimeSettings.mockClear()
+
+    const res = await getReq(app, '/api/agents/test-agent/sessions/sess-1')
+
+    expect(res.status).toBe(404)
+    expect(getPendingWakeForSession).not.toHaveBeenCalled()
+    expect(getSessionMetadata).not.toHaveBeenCalled()
+    expect(getAgentRecord).not.toHaveBeenCalled()
+    expect(mockRuntimeSettings).not.toHaveBeenCalled()
+  })
+
+  it('starts the reads that follow the session\'s entry together', async () => {
+    sessionWith({ invokedByAgentSlug: 'caller-agent', forkedFromSessionId: 'src-1' })
+    const runtime = await import('@shared/lib/llm-provider/connection-runtime')
+    const settings = mockRuntimeSettings()
+    mockRuntimeSettings.mockReturnValue({ ...settings, llmDefault: { model: 'model-a', llmProviderId: 'conn-1' } } as never)
+    // Every read is held open: one that waited for another would never start.
+    const held: Array<() => void> = []
+    const hold = <T,>(value: T) => () => new Promise<T>((resolve) => { held.push(() => resolve(value)) })
+    const inherit = vi.spyOn(runtime, 'resolveConnectionRuntimeInherit').mockImplementation(hold({ model: 'model-a', llmProviderId: 'conn-1' }) as never)
+    vi.mocked(getPendingWakeForSession).mockImplementation(hold(null))
+    vi.mocked(getAgentRecord).mockImplementation(hold({ slug: 'caller-agent', name: 'Caller Agent' }) as never)
+    vi.mocked(getSessionMetadata).mockImplementation(hold({ name: 'Pricing' }))
+    try {
+      const pending = getReq(app, '/api/agents/test-agent/sessions/sess-1')
+      await vi.waitFor(() => expect(held).toHaveLength(4))
+      expect(inherit).toHaveBeenCalledTimes(1)
+      expect(getPendingWakeForSession).toHaveBeenCalledWith('test-agent', 'sess-1')
+      expect(getAgentRecord).toHaveBeenCalledWith('caller-agent')
+      expect(getSessionMetadata).toHaveBeenCalledWith(expect.anything(), 'src-1')
+      // Answered in the reverse of the order they were asked in.
+      for (const release of held.splice(0).reverse()) release()
+      const res = await pending
+      expect(res.status).toBe(200)
+      expect(await res.json()).toMatchObject({
+        model: 'model-a',
+        llmProviderId: 'conn-1',
+        invokedByAgentName: 'Caller Agent',
+        forkedFromSessionName: 'Pricing',
+      })
+    } finally {
+      for (const release of held) release()
+      inherit.mockRestore()
+      mockRuntimeSettings.mockReturnValue(settings)
+    }
+  })
+
+  it('carries a pending wake beside the other fields', async () => {
+    vi.mocked(getPendingWakeForSession).mockResolvedValue({
+      id: 'wake-1', nextExecutionAt: new Date('2026-03-02T09:00:00.000Z'), prompt: 'Check the build', name: 'Build check',
+    } as never)
+
+    const res = await getReq(app, '/api/agents/test-agent/sessions/sess-1')
+
+    expect(res.status).toBe(200)
+    expect(await res.json()).toMatchObject({
+      pendingWakeAt: '2026-03-02T09:00:00.000Z',
+      pendingWakeTaskId: 'wake-1',
+      pendingWakeNote: 'Check the build',
+      pendingWakeSummary: 'Build check',
     })
+  })
+
+  it.each([
+    ['the pending wake', () => { vi.mocked(getPendingWakeForSession).mockRejectedValue(new Error('db down')) }],
+    ['the fork source', () => {
+      sessionWith({ forkedFromSessionId: 'src-1' })
+      vi.mocked(getSessionMetadata).mockRejectedValue(new Error('db down'))
+    }],
+    ['the calling agent', () => {
+      sessionWith({ invokedByAgentSlug: 'caller-agent' })
+      vi.mocked(getAgentRecord).mockRejectedValue(new Error('db down'))
+    }],
+  ])('answers 500 when the read of %s fails, as it did when the reads ran in turn', async (_name, arrange) => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    arrange()
+    try {
+      const res = await getReq(app, '/api/agents/test-agent/sessions/sess-1')
+      expect(res.status).toBe(500)
+      expect(await res.json()).toEqual({ error: 'Failed to fetch session' })
+    } finally {
+      consoleError.mockRestore()
+    }
+  })
+
+  it('still answers when the display defaults cannot be resolved', async () => {
+    sessionWith({ model: 'stored-model', llmProviderId: 'stored-conn' })
+    const runtime = await import('@shared/lib/llm-provider/connection-runtime')
+    const inherit = vi.spyOn(runtime, 'resolveConnectionRuntimeInherit').mockRejectedValue(new Error('provider outage'))
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const settings = mockRuntimeSettings()
+    mockRuntimeSettings.mockReturnValue({ ...settings, llmDefault: { model: 'model-a', llmProviderId: 'conn-1' } } as never)
+    try {
+      const res = await getReq(app, '/api/agents/test-agent/sessions/sess-1')
+      expect(res.status).toBe(200)
+      expect(await res.json()).toMatchObject({ model: 'stored-model', llmProviderId: 'stored-conn' })
+    } finally {
+      inherit.mockRestore()
+      warn.mockRestore()
+      mockRuntimeSettings.mockReturnValue(settings)
+    }
   })
 
   it('resolves the session display defaults from one read of the settings, and the next view reads again', async () => {
@@ -11508,10 +11900,8 @@ describe('session existence guards read metadata, not the transcript', () => {
   })
 
   it('uses the registered listing name, not a transcript-derived title', async () => {
-    vi.mocked(readSessionMetadata).mockResolvedValue({
-      'sess-1': { forkedFromSessionId: 'src-1' },
-      'src-1': { name: 'Pricing' },
-    })
+    sessionWith({ forkedFromSessionId: 'src-1' })
+    vi.mocked(getSessionMetadata).mockResolvedValue({ name: 'Pricing' })
     vi.mocked(getSession).mockImplementation(async (_slug, id) => {
       if (id === 'sess-1') return SESSION_INFO
       if (id === 'src-1') return { ...SESSION_INFO, id: 'src-1', name: 'First user message' }
@@ -11522,13 +11912,11 @@ describe('session existence guards read metadata, not the transcript', () => {
 
     expect(res.status).toBe(200)
     expect((await res.json()).forkedFromSessionName).toBe('Pricing')
-    expect(getSession).toHaveBeenCalledTimes(1)
+    expect(getSession).not.toHaveBeenCalled()
   })
 
   it('omits forkedFromSessionName when the parent listing is gone', async () => {
-    vi.mocked(readSessionMetadata).mockResolvedValue({
-      'sess-1': { forkedFromSessionId: 'src-1' },
-    })
+    sessionWith({ forkedFromSessionId: 'src-1' })
 
     const res = await getReq(app, '/api/agents/test-agent/sessions/sess-1')
 

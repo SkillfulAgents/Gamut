@@ -166,10 +166,11 @@ export function useBrowserStream({
     const baseUrl = getApiBaseUrl()
     const wsProtocol = baseUrl.startsWith('https') || window.location.protocol === 'https:' ? 'wss' : 'ws'
     const wsHost = baseUrl ? baseUrl.replace(/^https?:\/\//, '') : window.location.host
-    // Sizes the first screencast. A drawer still opening has no width yet; the report below covers that.
+    // The session names the tab the stream follows: each session of the agent has its own.
+    // The width sizes the first screencast. A drawer still opening has no width yet; the report below covers that.
     const width = canvasDeviceWidth(canvasRef.current)
-    const widthQuery = width ? `?width=${width}` : ''
-    const wsUrl = `${wsProtocol}://${wsHost}/api/agents/${agentSlug}/browser/stream${widthQuery}`
+    const query = new URLSearchParams({ sessionId, ...(width ? { width: String(width) } : {}) })
+    const wsUrl = `${wsProtocol}://${wsHost}/api/agents/${agentSlug}/browser/stream?${query}`
 
     const ws = new WebSocket(wsUrl)
     wsRef.current = ws
@@ -269,9 +270,9 @@ export function useBrowserStream({
       }
       apiFetch(`/api/agents/${agentSlug}/browser/status`)
         .then((res) => res.json())
-        .then((status: { active?: boolean; sessionId?: string }) => {
+        .then((status: { active?: boolean; sessionIds?: string[] }) => {
           if (wsRef.current !== ws) return
-          if (!status.active || status.sessionId !== sessionId) {
+          if (!status.active || !(status.sessionIds ?? []).includes(sessionId)) {
             clearBrowserActive(sessionId)
           } else if (failedReconnectsRef.current >= MAX_FAILED_RECONNECTS) {
             clearBrowserActive(sessionId)

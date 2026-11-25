@@ -346,13 +346,16 @@ describe('ContainerRuntime drives during a start', () => {
     agents.runtime('test-agent').updateCachedStatus('stopped', null)
   })
 
+  /** The agents a drive change would reach only through a restart, as their runtimes say. */
+  const holdingDrives = () => (agents.runtime('test-agent').holdsDrives() ? ['test-agent'] : [])
+
   it('holds its drives from just before the start reads them, and a stale mark then survives the start', async () => {
     const seen: string[][] = []
     mockGetSettings.mockImplementationOnce(() => {
-      seen.push(containerHost.getAgentIdsHoldingDrives())
+      seen.push(holdingDrives())
       return { container: { agentImage: 'test-image', containerRunner: 'docker' }, app: {} }
     })
-    drives.onList = () => { seen.push(containerHost.getAgentIdsHoldingDrives()) }
+    drives.onList = () => { seen.push(holdingDrives()) }
     mockStart.mockImplementationOnce(async () => { agents.runtime('test-agent').markStale() })
     try {
       await agents.runtime('test-agent').ensureRunning()
@@ -369,7 +372,7 @@ describe('ContainerRuntime drives during a start', () => {
       throw new Error('start failed')
     })
     await expect(agents.runtime('test-agent').ensureRunning()).rejects.toThrow('start failed')
-    expect(containerHost.getAgentIdsHoldingDrives()).toEqual([])
+    expect(holdingDrives()).toEqual([])
     expect(agents.runtime('test-agent').isStale()).toBe(false)
     await agents.runtime('test-agent').ensureRunning()
     expect(agents.runtime('test-agent').isStale()).toBe(false)
@@ -390,7 +393,7 @@ describe('ContainerRuntime drives during a start', () => {
 
     resumeFirst()
     await expect(first).rejects.toThrow('overtook')
-    expect(containerHost.getAgentIdsHoldingDrives()).toEqual(['test-agent'])
+    expect(holdingDrives()).toEqual(['test-agent'])
     finishSecond()
     await second
   })

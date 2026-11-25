@@ -169,15 +169,16 @@ function isRecentSessionsKey(queryKey: readonly unknown[]): boolean {
   return queryKey.length === 4 && queryKey[2] === 'recent'
 }
 
-/**
- * Put a session this tab just created at the head of the agent's cached recent
- * slice, as the create mutation does for the full list, so its sidebar row is
- * there at once; the refetch behind it stays authoritative.
- */
-export function seedCreatedSessionInRecent(queryClient: QueryClient, agentSlug: string, created: ApiSession): void {
+/** Show a newly created or forked session immediately in its detail, Agent Home and the sidebar. */
+export function seedCreatedSession(queryClient: QueryClient, created: ApiSession): void {
+  const { id, agentSlug } = created
+  queryClient.setQueryData(['session', id, agentSlug], created)
+  queryClient.setQueryData<ApiSession[]>(['sessions', agentSlug], (sessions) => (
+    sessions && !sessions.some((session) => session.id === id) ? [created, ...sessions] : undefined
+  ))
   let added = false
   queryClient.setQueryData<ApiSession[]>(recentSessionsKey(agentSlug), (sessions) => {
-    if (!sessions || sessions.some((session) => session.id === created.id)) return sessions
+    if (!sessions || sessions.some((session) => session.id === id)) return undefined
     added = true
     return [created, ...sessions].slice(0, RECENT_SESSIONS_LIMIT)
   })
@@ -342,29 +343,30 @@ function patchSessionWithAliases(
   update: (session: ApiSession) => ApiSession,
 ): boolean {
   let changed = false
-  const applyUpdate = (session: ApiSession): ApiSession => {
+  // Returning undefined skips the cache write. Even writing identical data marks
+  // it fresh, which can cancel the full-list refresh when a fork opens and clears its unread dot.
+  const applyUpdate = (session: ApiSession | undefined): ApiSession | undefined => {
+    if (!session) return undefined
     const next = update(session)
-    if (next !== session) changed = true
+    if (next === session) return undefined
+    changed = true
     return next
   }
-  // A session not present in a list (e.g. brand-new on its first
-  // session_active) is simply not patched — the refetch introduces it.
-  queryClient.setQueriesData<unknown>(
+  queryClient.setQueriesData<ApiSession[]>(
     { predicate: (query) => isAgentSessionListKey(query.queryKey, aliases) },
-    (data: unknown) => (
-      Array.isArray(data)
-        ? data.map((entry) => {
-            const session = entry as ApiSession | null
-            return session && session.id === sessionId ? applyUpdate(session) : entry
-          })
-        : data
-    ),
+    (sessions) => {
+      if (!Array.isArray(sessions)) return undefined
+      const index = sessions.findIndex((session) => session?.id === sessionId)
+      const next = applyUpdate(sessions[index])
+      if (!next) return undefined
+      const rows = sessions.slice()
+      rows[index] = next
+      return rows
+    },
   )
   // The detail entry's exact keys are known — no cache walk needed.
   for (const alias of aliases) {
-    queryClient.setQueryData<ApiSession>(['session', sessionId, alias], (session) => (
-      session ? applyUpdate(session) : session
-    ))
+    queryClient.setQueryData<ApiSession>(['session', sessionId, alias], applyUpdate)
   }
   return changed
 }

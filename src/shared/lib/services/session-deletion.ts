@@ -3,6 +3,7 @@ import { agentRegistry } from '@shared/lib/agent-actor'
 import { db } from '@shared/lib/db'
 import { inList } from '@shared/lib/db/bound-parameters'
 import { messageAuthor } from '@shared/lib/db/schema'
+import { dropSessionGrants } from '@shared/lib/proxy/session-grants'
 import { deleteNotificationsBySessionIds } from './notification-service'
 import { cancelPendingWakeForSession } from './scheduled-task-service'
 import { deleteSessionUnreadMarks } from './session-unread-service'
@@ -48,4 +49,9 @@ export async function deleteSessionRecords(agentSlug: string, sessionIds: string
   await deleteSessionUnreadMarks(agentSlug, sessionIds)
   // A Todo board item started in one goes back to Drafts (or, if finished, keeps its place).
   await unlinkTodosFromSessions(agentSlug, sessionIds)
+  // "Allow for this session" grants: they would expire unread, and a failure
+  // to drop them must not fail the delete.
+  await Promise.all(sessionIds.map((sessionId) => dropSessionGrants(agentSlug, sessionId).catch((error: unknown) => {
+    console.warn('Failed to drop session grants for deleted session:', error)
+  })))
 }

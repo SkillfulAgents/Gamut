@@ -67,4 +67,12 @@ describe('passkey routes', () => {
     expect((await post('/browser/passkey/disarm', {})).status).toBe(200)
     expect(keeper.disarm).toHaveBeenCalled()
   })
+
+  it('arms the tab of the session that asked, and reports on that session\'s tab', async () => {
+    expect((await post('/browser/passkey/arm', { sessionId: 's-2', mode: 'present', ttlMs: 300_000 })).status).toBe(200)
+    expect(deps.activeTab).toHaveBeenLastCalledWith('s-2')
+    deps.activeTab.mockClear()
+    await app.request('/browser/passkey/state')
+    expect(deps.activeTab).toHaveBeenCalledWith('s-2')
+  })
 })

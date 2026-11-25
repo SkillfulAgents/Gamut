@@ -114,7 +114,7 @@ describe('useBrowserStream reconnect', () => {
     FakeWebSocket.instances = []
     vi.stubGlobal('WebSocket', FakeWebSocket)
     mockApiFetch.mockResolvedValue({
-      json: () => Promise.resolve({ active: true, sessionId: 's' }),
+      json: () => Promise.resolve({ active: true, sessionIds: ['s'] }),
     })
     vi.useFakeTimers({ shouldAdvanceTime: true })
   })
@@ -288,7 +288,7 @@ describe('useBrowserStream history', () => {
     FakeWebSocket.instances = []
     vi.stubGlobal('WebSocket', FakeWebSocket)
     mockApiFetch.mockResolvedValue({
-      json: () => Promise.resolve({ active: true, sessionId: 's' }),
+      json: () => Promise.resolve({ active: true, sessionIds: ['s'] }),
     })
   })
 
@@ -361,7 +361,7 @@ describe('useBrowserStream ordered history', () => {
     vi.clearAllMocks()
     FakeWebSocket.instances = []
     vi.stubGlobal('WebSocket', FakeWebSocket)
-    mockApiFetch.mockResolvedValue({ json: () => Promise.resolve({ active: true, sessionId: 's' }) })
+    mockApiFetch.mockResolvedValue({ json: () => Promise.resolve({ active: true, sessionIds: ['s'] }) })
   })
   afterEach(() => vi.unstubAllGlobals())
 
@@ -505,9 +505,9 @@ describe('useBrowserStream viewport width', () => {
   const resize = (devicePixels: number) =>
     observed[0].fire({ devicePixelContentBoxSize: [{ inlineSize: devicePixels }], contentRect: { width: devicePixels / 2 } })
 
-  it('puts the canvas width in device pixels on the stream URL', async () => {
+  it('puts the session and the canvas width in device pixels on the stream URL', async () => {
     const { ws } = await openSocket(canvasOfCssWidth(420.5))
-    expect(new URL(ws.url).search).toBe('?width=841')
+    expect(new URL(ws.url).search).toBe('?sessionId=s&width=841')
   })
 
   it('reports the exact width on each change, leaving debouncing to the container', async () => {
@@ -530,7 +530,7 @@ describe('useBrowserStream viewport width', () => {
 
   it('leaves the width off the URL while the canvas has none', async () => {
     const { ws } = await openSocket(canvasOfCssWidth(0))
-    expect(new URL(ws.url).search).toBe('')
+    expect(new URL(ws.url).search).toBe('?sessionId=s')
   })
 
   it('without device-pixel-content-box, re-measures whenever the pixel ratio changes', async () => {

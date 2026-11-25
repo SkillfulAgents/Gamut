@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, onTestFinished, vi } from 'vitest'
-import type { AgentStoreDirectory } from '@shared/lib/agent-actor/store-directory'
+import type { AgentStoreDirectory } from '@shared/lib/agent-actor/testing/routers/store-directory'
 import { AgentComputerUse } from './agent-permissions'
-import { ComputerUsePermissionManager } from './permission-manager'
+import { ComputerUsePermissionManager } from '@shared/lib/agent-actor/testing/routers/permission-manager'
 import { TIMED_GRANT_DURATION_MS } from './types'
 
 const mockGetSettings = vi.fn()

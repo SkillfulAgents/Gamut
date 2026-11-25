@@ -17,11 +17,16 @@ vi.mock('@shared/lib/services/session-activity', () => ({
   recordProvisionalSessionActivity: (_store: unknown, _id: string, at: number) => ({ recordedAtMs: at, previousMs: null }),
   revertSessionActivity: vi.fn(),
 }))
+// The agent's workspace is this test's temporary directory.
+const dir = vi.hoisted(() => ({ workspace: '' }))
+vi.mock('@shared/lib/utils/file-storage', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@shared/lib/utils/file-storage')>()),
+  getAgentWorkspaceDir: () => dir.workspace,
+}))
 
 import * as sessionService from '@shared/lib/services/session-service'
 import * as errorReporting from '@shared/lib/error-reporting'
-import * as transcripts from './local-transcript-ops'
-import { LocalAgentActor, type LocalActorDeps } from './local-agent-actor'
+import { LocalAgentActor, type LocalActorParts } from './local-agent-actor'
 import { CLI_TRANSCRIPTS_DIR, sessionDirPath } from './session-store'
 import { createRecordingHostPort } from './testing/recording-host-port'
 
@@ -70,7 +75,7 @@ const evictIdle = () => {
 
 const deps = () =>
   ({
-    containerHost: {
+    containers: {
       createRuntime: () => ({
         isStopping: () => false,
         // The actor's first read: nothing to change here.
@@ -82,11 +87,7 @@ const deps = () =>
       }),
     },
     host: createRecordingHostPort().port,
-    sessionService,
-    transcripts,
-    getAgentWorkspaceDir: () => workspace,
-    recordSessionActivity: vi.fn(),
-  }) as unknown as LocalActorDeps
+  }) as unknown as LocalActorParts
 
 const listed = async (actor: LocalAgentActor) => (await sessionService.listSessions(actor.store)).map((s) => s.id)
 
@@ -101,6 +102,7 @@ async function seed(actor: LocalAgentActor, id: string) {
 
 beforeEach(() => {
   workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'session-delete-'))
+  dir.workspace = workspace
   fs.mkdirSync(path.dirname(transcriptFile(SESSION)), { recursive: true })
   resident.clear()
   status = 'running'

@@ -56,9 +56,9 @@ vi.mock('@shared/lib/utils/file-storage', () => ({ resolveAgentId: vi.fn() }))
 vi.mock('@shared/lib/proxy/token-store', () => ({ validateProxyToken: vi.fn() }))
 
 import accountReauth from './account-reauth'
-import { accountReauthManager } from '@shared/lib/proxy/account-reauth-manager'
+import { accountReauthManager } from '@shared/lib/agent-actor/testing/routers/account-reauth-manager'
 import { agentRegistry } from '@shared/lib/agent-actor'
-import { userInputRequestManager } from '@shared/lib/tools/requests/request-manager'
+import { userInputRequestManager } from '@shared/lib/agent-actor/testing/routers/request-manager'
 
 type TestEnv = { Variables: { user: { id: string }; agentId: string } }
 let app: Hono<TestEnv>

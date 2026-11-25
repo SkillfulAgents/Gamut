@@ -1,3 +1,4 @@
+// @libsql-must-pass
 import { PlatformLlmProvider } from '@shared/lib/llm-provider/platform-provider'
 import { getRequestUserId } from '@shared/lib/platform-attribution/request-context'
 import { BaseLlmProvider } from '@shared/lib/llm-provider/base-llm-provider'
@@ -50,7 +51,8 @@ vi.mock('../middleware/auth', () => ({
     c.req.header('Test-User') === 'admin' ? next() : c.json({ error: 'Forbidden' }, 403),
 }))
 vi.mock('@shared/lib/agent-actor', () => ({
-  containerHost: { getReadiness: () => ({ status: 'READY' }), hasRunningAgents: () => false },
+  containerHost: { getReadiness: () => ({ status: 'READY' }) },
+  hasRunningAgents: async () => false,
 }))
 vi.mock('@shared/lib/startup', () => ({ getServicesInitError: () => null }))
 import runtimeStatusRoutes from './runtime-status'

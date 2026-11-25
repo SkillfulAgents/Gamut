@@ -38,7 +38,7 @@ describe('requestBrowserInputTool browser-lifecycle guard', () => {
   })
 
   it('creates a pending normally while the browser is active', async () => {
-    setBrowserState({ active: true, sessionId: 'sess-1', cdpUrl: 'ws://127.0.0.1:9222', location: 'host' })
+    setBrowserState({ active: true, cdpUrl: 'ws://127.0.0.1:9222', location: 'host' })
     const toolUseId = `guard-live-${Date.now()}`
     inputManager.setCurrentToolUseId(toolUseId)
 
@@ -62,7 +62,7 @@ describe('requestBrowserInputTool browser-lifecycle guard', () => {
   })
 
   it('tells the agent to submit the login after credentials are autofilled', async () => {
-    setBrowserState({ active: true, sessionId: 'sess-1', cdpUrl: 'ws://127.0.0.1:9222' })
+    setBrowserState({ active: true, cdpUrl: 'ws://127.0.0.1:9222', location: 'host' })
     const toolUseId = `guard-autofill-${Date.now()}`
     inputManager.setCurrentToolUseId(toolUseId)
 

@@ -1,10 +1,9 @@
 /**
  * Test helper: agents' container runtimes without their actors.
  *
- * In the app each agent's actor holds its runtime, and the agent registry
- * attaches the actors to the container host. A container-layer test without
- * the registry attaches these instead: one runtime per slug, made on first
- * use, as an actor makes it. By default an agent has no live sessions, an idle
+ * In the app each agent's actor asks the container host for its runtime and
+ * holds it. A container-layer test without actors holds these instead: one
+ * runtime per slug, made on first use, as an actor makes it. By default an agent has no live sessions, an idle
  * alarm that never arms and a watch that checks nothing; `use` changes what
  * the runtimes made after it get.
  *
@@ -62,6 +61,8 @@ export function attachTestRuntimes(host: ContainerHost): TestRuntimes {
       idleAlarm: { arm: () => {}, disarm: () => {} },
       containerWatch: new ContainerWatch({ checkHealth: async () => {}, checkStatus: async () => {} }),
       instructions: async () => null,
+      clearComputerUseApp: () => {},
+      forgetRuntime: () => drop(slug),
       ...given,
     }
     runtime = host.createRuntime(slug, agent)
@@ -76,16 +77,11 @@ export function attachTestRuntimes(host: ContainerHost): TestRuntimes {
     return made
   }
   const drop = (slug: string): void => {
-    runtimes.get(slug)?.dispose()
+    // Forgotten before it is disposed, as an agent's state does it.
+    const dropped = runtimes.get(slug)
     runtimes.delete(slug)
+    dropped?.dispose()
   }
-  host.attachAgentRuntimes({
-    wake: async (slug) => {
-      await runtime(slug).syncAgentStatus().catch(() => runtime(slug).markAsStopped())
-    },
-    held: () => [...runtimes.values()],
-    drop,
-  })
   return {
     runtime,
     peek: (slug) => runtimes.get(slug),

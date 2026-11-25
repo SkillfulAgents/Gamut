@@ -74,13 +74,13 @@ describe('Radix interaction contracts', () => {
     expect(onCheckedChange).toHaveBeenCalledExactlyOnceWith(false)
   })
 
-  it('programmatic select updates preserve the submitted value without clicking an ancestor', () => {
+  it.each(['outline', 'row'] as const)('programmatic %s select updates preserve the submitted value without clicking an ancestor', (variant) => {
     const onFormClick = vi.fn()
     const onValueChange = vi.fn()
     const view = (value: string) => (
       // eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-noninteractive-element-interactions -- Observe bubbled events on the real form; the form itself is not an interactive control.
       <form aria-label="Profile settings" onClick={onFormClick}>
-        <Select name="profile" value={value} onValueChange={onValueChange}>
+        <Select variant={variant} name="profile" value={value} onValueChange={onValueChange}>
           <SelectTrigger aria-label="Profile"><SelectValue /></SelectTrigger>
           <SelectContent>
             <SelectItem value="work">Work</SelectItem>

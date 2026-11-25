@@ -139,6 +139,9 @@ import { serve } from '@hono/node-server'
 import api from '../api'
 import { openDatabase } from '@shared/lib/db'
 import { initializeLocalAppState } from '@shared/lib/app-state'
+import { containerHost as containers, initializeAgentRegistry } from '@shared/lib/agent-actor'
+import { LocalAgentActor } from '@shared/lib/agent-actor/local-agent-actor'
+import { localHostPort as host } from '@shared/lib/host/local-host-port'
 import { installDesktopKeyManager } from './keys/install-desktop-key-manager'
 import { initializeBackgroundWork, serviceHost } from '@shared/lib/background-work'
 import { LocalTaskManager } from '@shared/lib/background-work/local-task-manager'
@@ -1654,6 +1657,8 @@ async function startApp() {
   await attachErrorReportingIdentity()
   // Then the state the API shares across requests, in this process's memory.
   await initializeLocalAppState()
+  // Then the agents: each one's actor runs in this process.
+  initializeAgentRegistry((slug) => new LocalAgentActor(slug, { containers, host }))
 
   // Key custody next, before the API serves anything: the vault seals through
   // it, and it checks a key against the sealed data (so after the database).

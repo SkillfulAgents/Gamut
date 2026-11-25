@@ -153,16 +153,28 @@ function refuseCommand(command: string[]): string | null {
   // Same guard as /browser/press for the raw CLI form: `press` with a
   // non-key string silently types nothing while reporting success.
   if (verb === 'press' && command.length === 2) return validatePressKey(command[1]);
+  // The browser is the agent's, shared by its sessions: the CLI's close would
+  // leave this session's tabs open (and `close --all` would end every other
+  // session's instance), and `connect` would move this one to another browser.
+  if (verb === 'close' || verb === 'quit' || verb === 'exit') {
+    return 'Use the `browser_close` tool to close the browser. `close` through browser_run is not available.';
+  }
+  if (verb === 'connect') return 'The browser is already connected; `connect` through browser_run is not available.';
   return null;
 }
 
-// Why browser_run refuses a command, or null. `batch` runs each of its
-// arguments as a command of its own, so each one gets the same checks.
-export function runCommandRefusal(commandArgs: string[]): string | null {
-  const commands = commandArgs[0]?.toLowerCase() === 'batch'
+// The CLI commands a browser_run request runs. `batch` runs each of its
+// arguments as a command of its own.
+export function runCommands(commandArgs: string[]): string[][] {
+  return commandArgs[0]?.toLowerCase() === 'batch'
     ? commandArgs.slice(1).filter((arg) => !arg.startsWith('-')).map(splitCommandArgs)
     : [commandArgs];
-  for (const command of commands) {
+}
+
+// Why browser_run refuses a command, or null. Each command of a `batch` gets
+// the same checks.
+export function runCommandRefusal(commandArgs: string[]): string | null {
+  for (const command of runCommands(commandArgs)) {
     const refusal = refuseCommand(command);
     if (refusal) return refusal;
   }

@@ -1,210 +1,127 @@
-import { containerHost } from '@shared/lib/container/container-host'
-import { userInputRequestManager } from '@shared/lib/tools/requests/request-manager'
-import { reviewManager } from '@shared/lib/proxy/review-manager'
-import { accountReauthManager } from '@shared/lib/proxy/account-reauth-manager'
-import { computerUsePermissionManager } from '@shared/lib/computer-use/permission-manager'
-import { mcpReauthManager } from '@shared/lib/proxy/mcp-reauth-manager'
-import * as sessionService from '@shared/lib/services/session-service'
-import { appendAssistantEntry, appendInformationalEntry } from '@shared/lib/services/session-transcript-append'
-import { recordSessionActivity } from '@shared/lib/services/session-activity'
-import * as transcriptOps from './local-transcript-ops'
-import { getAgentWorkspaceDir } from '@shared/lib/utils/file-storage'
-import { syncAgentConnectionEnvironment } from '@shared/lib/container/connection-runtime-sync'
-import { loadDailyUsageData, loadSessionUsageTotals } from '@shared/lib/services/usage-service'
-import { localHostPort } from '@shared/lib/host/local-host-port'
-import { LocalAgentActor, type LocalActorDeps } from './local-agent-actor'
+/**
+ * The agents of this process: one actor per agent, made on first use.
+ *
+ * The registry knows nothing about how an actor works. The entry point says
+ * which implementation the process uses, once, before anything touches an
+ * agent, as it opens the database and installs AppState:
+ *
+ *   initializeAgentRegistry((slug) => new LocalAgentActor(slug, { containers, host }))
+ *
+ * Everything else reaches an agent through `agentRegistry.get(slug)` and the
+ * `AgentActor` interface, and asks about the agents of the process through
+ * `agentRegistry.held()`.
+ *
+ * This module imports no actor implementation: an implementation imports it.
+ */
 import { serializingActor } from './serializing-actor'
-import type { AgentState } from './agent-state'
-import type { AgentStoreDirectory } from './store-directory'
+import { defaultActorForTests } from './testing/default-actor'
 import type { AgentActor, AgentRegistry, AgentSlug } from './types'
 
-/**
- * Build a registry whose handles delegate to `deps`. A handle is created on
- * first `get` and holds the agent's in-memory state (see `AgentState`),
- * its container runtime among it. Evicting a handle releases it.
- *
- * The registry also hands the container host the way to the actors'
- * runtimes, and the user-input, review, re-auth and computer-use routers the
- * way to each actor's stores.
- */
-export function createAgentRegistry(
-  deps: LocalActorDeps,
-  options: {
-    /**
-     * State the actors own that outlived an earlier registry: in development
-     * the backend modules are re-evaluated on edit (the Vite adapter reloads
-     * the SSR entry in the same process), and the host and the routers both
-     * survive that on `globalThis`. What the actors hold — live sessions,
-     * parked reviews and waits, open requests, grants — must survive with them, or a
-     * reload strands every pending approval; so the singleton registry keeps
-     * this map on `globalThis` too, and a reloaded module wraps each state in
-     * a fresh handle: the new code over the state the old one built.
-     */
-    states?: Map<AgentSlug, AgentState>
-    /**
-     * How callers reach a handle: what `get` hands out in its place (a test
-     * transport such as `serializingActor`). The container layer and the
-     * routers reach the actors' state directly, as before.
-     */
-    transport?: (actor: AgentActor) => AgentActor
-  } = {},
-): AgentRegistry {
-  const states = options.states ?? new Map<AgentSlug, AgentState>()
-  const handles = new Map<AgentSlug, LocalAgentActor>()
-  const transported = new WeakMap<LocalAgentActor, AgentActor>()
-  const outward = (actor: LocalAgentActor): AgentActor => {
-    const transport = options.transport
-    if (!transport) return actor
-    let reached = transported.get(actor)
-    if (!reached) {
-      reached = transport(actor)
-      transported.set(actor, reached)
-    }
-    return reached
-  }
+/** Makes the actor of one agent. Never does I/O. */
+export type CreateAgentActor = (slug: AgentSlug) => AgentActor
 
-  const wrap = (slug: AgentSlug, state?: AgentState): LocalAgentActor => {
-    const actor = new LocalAgentActor(slug, deps, state)
-    handles.set(slug, actor)
-    states.set(slug, actor.state)
-    return actor
-  }
-  // Handles for whatever state the previous registry left: sweeps over
-  // `all()` and reads through `peek` must see it without waiting for a `get`.
-  for (const [slug, state] of states) wrap(slug, state)
-
-  // A handle this registry does not hold wraps the agent's state if another
-  // registry over the same map already made one. After a reload, a singleton
-  // that survived on `globalThis` still calls the registry of its own module
-  // evaluation; a fresh state there would replace the live one in the map.
-  const get = (slug: AgentSlug): LocalAgentActor => handles.get(slug) ?? wrap(slug, states.get(slug))
-
-  const evict = (slug: AgentSlug): void => {
-    // Releasing the state drops the agent's runtime last: settling a parked
-    // request may still want to recompute the agent's awaiting state.
-    handles.get(slug)?.dispose()
-    handles.delete(slug)
-    states.delete(slug)
-  }
-
-  // What the host does across agents (stop all, is anything running, the
-  // startup wake) it asks of the actors' runtimes. Wired here, by the
-  // package that owns the actors, so no entry point has to remember to.
-  deps.containerHost.attachAgentRuntimes({
-    wake: (slug) => get(slug).firstRead,
-    held: () => [...handles.values()].flatMap((actor) => actor.state.peekRuntime() ?? []),
-    drop: (slug) => handles.get(slug)?.state.dropRuntime(),
-  })
-
-  // The routers over the actors' stores get the same: one directory each,
-  // reading through the handles, so nothing is stored anywhere but on them.
-  // A test double may not carry the port; the real routers do.
-  const directory = <T>(pick: (state: AgentState) => T): AgentStoreDirectory<T> => ({
-    get: (slug) => pick(get(slug).state),
-    peek: (slug) => {
-      const actor = handles.get(slug)
-      return actor ? pick(actor.state) : undefined
-    },
-    all: () => [...handles.values()].map((actor) => pick(actor.state)),
-  })
-  deps.userInputRequestManager.attachAgents?.(directory((state) => state.inputRequests))
-  deps.reviewManager.attachAgents?.(directory((state) => state.reviews))
-  deps.accountReauthManager.attachAgents?.(directory((state) => state.accountReauth))
-  deps.mcpReauthManager.attachAgents?.(directory((state) => state.mcpReauth))
-  deps.computerUsePermissionManager.attachAgents?.(directory((state) => state.computerUse))
-
+/** A registry over `createActor`: it makes each agent's actor once, and drops it on evict. */
+export function createAgentRegistry(createActor: CreateAgentActor): AgentRegistry {
+  const actors = new Map<AgentSlug, AgentActor>()
   return {
-    get: (slug): AgentActor => outward(get(slug)),
-    evict: async (slug) => evict(slug),
+    get: (slug) => {
+      let actor = actors.get(slug)
+      if (!actor) {
+        actor = createActor(slug)
+        actors.set(slug, actor)
+      }
+      return actor
+    },
+    held: () => [...actors.values()],
+    evict: async (slug) => {
+      const actor = actors.get(slug)
+      actors.delete(slug)
+      await actor?.dispose()
+    },
     evictAll: async () => {
-      // Release every handle, its runtime with it. At shutdown the containers
-      // are stopped first: see startup.ts.
-      const released = [...handles.values()]
-      for (const actor of released) actor.dispose()
-      handles.clear()
-      states.clear()
-      // Activity an index recorded and has not stored yet is stored before
-      // this settles: its wakeup does not come once dispatch has stopped,
-      // and nothing reads the index again. After the release, which callers
-      // rely on having happened by the time this returns its promise.
-      await Promise.all(released.map((actor) =>
-        actor.store.index.storeRecordedActivity().catch((error: unknown) => {
-          console.warn(`[AgentRegistry] Could not store the recorded session activity of ${actor.slug}:`, error)
-        }),
-      ))
+      // Every actor lets go before this returns its promise: callers rely on
+      // the release having happened by then. At shutdown the containers are
+      // stopped first: see startup.ts.
+      const released = [...actors.values()]
+      actors.clear()
+      await Promise.all(released.map((actor) => actor.dispose('shutdown')))
     },
   }
 }
 
-// The actors' state persists across dev-server hot reloads on globalThis,
-// matching the host and the routers it is wired to: a reload
-// that kept the routers but lost the state would leave every parked approval
-// undecidable. See `createAgentRegistry`.
-const globalForRegistry = globalThis as unknown as {
-  agentActorStates: Map<AgentSlug, AgentState> | undefined
-}
-const agentActorStates = globalForRegistry.agentActorStates ?? new Map<AgentSlug, AgentState>()
-if (process.env.NODE_ENV !== 'production') {
-  globalForRegistry.agentActorStates = agentActorStates
+// Development and tests only: every actor is reached through the serializing
+// test transport, as across a wire.
+const throughTestTransport =
+  process.env.NODE_ENV !== 'production' && process.env.SUPERAGENT_ACTOR_TRANSPORT === 'serializing'
+
+// In this module, not on globalThis: a dev-server edit that re-evaluates it
+// leaves the slot empty, and the dev server installs a registry of the new code.
+let installed: AgentRegistry | null = null
+/** What `installed` makes its actors with. */
+let installedWith: CreateAgentActor | null = null
+
+function install(createActor: CreateAgentActor): void {
+  installed = createAgentRegistry(throughTestTransport ? (slug) => serializingActor(createActor(slug)) : createActor)
+  installedWith = createActor
 }
 
-// Getters, not values: each dependency is read when an actor method runs, not
-// when this module loads. A test that mocks one of these modules therefore
-// intercepts exactly the call it always intercepted, and the others are never
-// touched — the same as when the consumer imported the module directly.
-export const agentRegistry: AgentRegistry = createAgentRegistry({
-  get containerHost() {
-    return containerHost
-  },
-  get userInputRequestManager() {
-    return userInputRequestManager
-  },
-  get reviewManager() {
-    return reviewManager
-  },
-  get accountReauthManager() {
-    return accountReauthManager
-  },
-  get computerUsePermissionManager() {
-    return computerUsePermissionManager
-  },
-  get mcpReauthManager() {
-    return mcpReauthManager
-  },
-  get sessionService() {
-    return sessionService
-  },
-  get transcripts() {
-    return transcriptOps
-  },
-  get appendInformationalEntry() {
-    return appendInformationalEntry
-  },
-  get appendAssistantEntry() {
-    return appendAssistantEntry
-  },
-  get recordSessionActivity() {
-    return recordSessionActivity
-  },
-  get getAgentWorkspaceDir() {
-    return getAgentWorkspaceDir
-  },
-  get syncAgentConnectionEnvironment() {
-    return syncAgentConnectionEnvironment
-  },
-  get loadDailyUsageData() {
-    return loadDailyUsageData
-  },
-  get loadSessionUsageTotals() {
-    return loadSessionUsageTotals
-  },
-  get host() {
-    return localHostPort
-  },
-}, {
-  states: agentActorStates,
-  // Development and tests only: every actor reached through the serializing test transport.
-  ...(process.env.NODE_ENV !== 'production' && process.env.SUPERAGENT_ACTOR_TRANSPORT === 'serializing'
-    ? { transport: serializingActor }
-    : {}),
-})
+/**
+ * Says how this process makes an agent's actor. Called once by the entry
+ * point, before anything uses an agent; a repeat call does nothing.
+ */
+export function initializeAgentRegistry(createActor: CreateAgentActor): void {
+  if (!installed) install(createActor)
+}
+
+/**
+ * Whether a registry is installed. Given `createActor`, whether it is
+ * installed over that very function: the dev server asks, since an edit can
+ * re-evaluate the code that makes the actors and leave this module as it was.
+ */
+export function isAgentRegistryInitialized(createActor?: CreateAgentActor): boolean {
+  return installed !== null && (createActor === undefined || installedWith === createActor)
+}
+
+/**
+ * For a process whose backend modules are re-evaluated while it runs (the dev
+ * server, on an edit): makes the agents' actors with `createActor` from here
+ * on, in place of whatever was installed. The actors held so far are
+ * forgotten, not disposed: what they held outlives them, and the actors made
+ * next take it up (see local-agent-registry.ts).
+ */
+export function reinstallAgentRegistry(createActor: CreateAgentActor): void {
+  install(createActor)
+}
+
+/**
+ * Tests only: forget the installed registry, so the next use installs anew.
+ * Given `createActor`, install a registry over it instead, as it is: a test
+ * that makes its own actors reaches them directly, not through the test transport.
+ */
+export function _resetAgentRegistryForTest(createActor?: CreateAgentActor): void {
+  installed = createActor ? createAgentRegistry(createActor) : null
+  installedWith = createActor ?? null
+}
+
+function current(): AgentRegistry {
+  if (!installed) {
+    // Tests have no entry point: one that installs nothing gets the actors
+    // desktop and the Node server run (see testing/default-actor.ts). Nothing
+    // names a default outside tests.
+    const forTests = defaultActorForTests()
+    if (!forTests) {
+      throw new Error('The agent registry is not initialized. The entry point must call initializeAgentRegistry() before anything uses an agent.')
+    }
+    // Made on first use, not when a module loads.
+    initializeAgentRegistry(forTests)
+  }
+  return installed!
+}
+
+/** The process's agents, through whatever the entry point installed. */
+export const agentRegistry: AgentRegistry = {
+  get: (slug) => current().get(slug),
+  held: () => current().held(),
+  evict: (slug) => current().evict(slug),
+  evictAll: () => current().evictAll(),
+}

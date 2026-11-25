@@ -1,3 +1,4 @@
+// @libsql-must-pass
 vi.mock('@shared/lib/services/connection-sync-service', () => ({ syncRemoteMcpAgents: vi.fn(async () => true) }))
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Hono } from 'hono'

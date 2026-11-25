@@ -119,7 +119,7 @@ export function createUserInputMcpServer(
  * @param tools - per-session browser tool set from createBrowserTools().
  *   Each session must bind its own tools so browser requests carry that
  *   session's CURRENT id (it changes on query restart) — a shared tool set
- *   races across sessions and strands browser calls on the ownership lock.
+ *   races across sessions and drives one session's browser tab from another's.
  */
 export function createBrowserMcpServer(tools: ReturnType<typeof createBrowserTools>) {
   return createSdkMcpServer({

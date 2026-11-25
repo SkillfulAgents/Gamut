@@ -5,6 +5,7 @@
  */
 import { agentRegistry } from '@shared/lib/agent-actor'
 import { compactMessage } from '@shared/lib/services/x-agent-transcript-view'
+import { DEADLINE, raceDeadline } from '@shared/lib/utils/race-deadline'
 
 /**
  * After a sync invoke, the SDK may emit 'result' (which clears isActive) before
@@ -96,27 +97,6 @@ export function lateDeliveryRevokedError(): string {
   )
 }
 
-const DEADLINE = Symbol('deadline')
-
-// Race a promise against an absolute deadline. The losing promise keeps
-// running — callers that receive DEADLINE must decide what to do when (or if)
-// it eventually settles, and must attach their own rejection handler to it.
-async function raceDeadline<T>(promise: Promise<T>, deadline: number): Promise<T | typeof DEADLINE> {
-  const remainingMs = deadline - Date.now()
-  if (remainingMs <= 0) return DEADLINE
-  let timer: ReturnType<typeof setTimeout> | undefined
-  try {
-    return await Promise.race([
-      promise,
-      new Promise<typeof DEADLINE>((resolve) => {
-        timer = setTimeout(() => resolve(DEADLINE), remainingMs)
-      }),
-    ])
-  } finally {
-    if (timer) clearTimeout(timer)
-  }
-}
-
 // Bounds the live sessions' stream attach — its WebSocket `ready` promise has no
 // timeout of its own, so a wedged container would otherwise hold the caller's
 // fetch open past its 300s header timeout.
@@ -189,25 +169,71 @@ export async function readLastAssistantMessage(
   sessionId: string,
   boundaryUuid?: string,
 ): Promise<{ role: string; content: string; toolName?: string } | null> {
+  const reply = await readLastAssistantReply(targetSlug, sessionId, { boundaryUuid })
+  if (!reply) return null
+  return {
+    role: reply.role,
+    content: reply.content,
+    ...(reply.toolName ? { toolName: reply.toolName } : {}),
+  }
+}
+
+/** The last assistant entry, compacted, with what a caller may need beyond the text. */
+export interface LastAssistantReply {
+  uuid: string
+  role: string
+  /** The compact content: text, and placeholders for tool calls and thinking-only turns. */
+  content: string
+  /** The entry's own text only, never a placeholder; '' when it has none. */
+  spoken: string
+  toolName?: string
+  isApiErrorMessage: boolean
+}
+
+export interface ReadLastAssistantOptions {
+  /** See `readLastAssistantMessage`: the entry still last means the reply has not flushed. */
+  boundaryUuid?: string
+  /** How many reads; default `X_AGENT_READ_RETRY_ATTEMPTS` or 10. */
+  attempts?: number
+  /** The pause between reads; default `X_AGENT_READ_RETRY_INTERVAL_MS` or 500ms. */
+  intervalMs?: number
+  /** Count a system entry the tail read returns as the reply (the x-agent read does); default true. */
+  includeSystem?: boolean
+}
+
+/**
+ * The core of `readLastAssistantMessage`: the last assistant entry newer than
+ * `boundaryUuid`, read from the tail up to `attempts` times while the reply
+ * may still be flushing, or null when none appears.
+ */
+export async function readLastAssistantReply(
+  targetSlug: string,
+  sessionId: string,
+  options: ReadLastAssistantOptions = {},
+): Promise<LastAssistantReply | null> {
+  const { boundaryUuid, attempts = READ_RETRY_ATTEMPTS, intervalMs = READ_RETRY_INTERVAL_MS, includeSystem = true } = options
   const actor = agentRegistry.get(targetSlug)
-  for (let i = 0; i < READ_RETRY_ATTEMPTS; i++) {
+  for (let i = 0; i < attempts; i++) {
     // Only the most recent assistant entry matters, so read the transcript
     // from the tail instead of full-parsing it (transcripts reach 100MB+, and
-    // this runs up to READ_RETRY_ATTEMPTS times per invoke).
+    // this runs up to `attempts` times per invoke).
     const entry = await actor.messages.findLastEntry(sessionId, { kind: 'assistant' })
     const isStaleBoundary = boundaryUuid !== undefined && entry?.uuid === boundaryUuid
-    if (entry && !isStaleBoundary) {
+    if (entry && !isStaleBoundary && (includeSystem || entry.type !== 'system')) {
       const compact = compactMessage(entry)
       if (compact) {
         return {
+          uuid: entry.uuid,
           role: compact.role,
           content: compact.content,
+          spoken: compact.spoken,
           ...(compact.toolName ? { toolName: compact.toolName } : {}),
+          isApiErrorMessage: entry.type !== 'system' && entry.isApiErrorMessage === true,
         }
       }
     }
-    if (i < READ_RETRY_ATTEMPTS - 1) {
-      await new Promise((r) => setTimeout(r, READ_RETRY_INTERVAL_MS))
+    if (i < attempts - 1) {
+      await new Promise((r) => setTimeout(r, intervalMs))
     }
   }
   return null

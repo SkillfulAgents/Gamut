@@ -1,3 +1,4 @@
+// @libsql-must-pass
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AppDatabase } from '@shared/lib/db'
 import { scheduledTasks } from '@shared/lib/db/schema'

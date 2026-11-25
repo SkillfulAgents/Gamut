@@ -4,9 +4,9 @@ import * as fs from 'fs'
 import * as os from 'os'
 import * as path from 'path'
 
-const mockReleaseBrowserLock = vi.fn(() => false)
+const mockReleaseBrowserSession = vi.fn(() => false)
 vi.mock('./browser-state', () => ({
-  releaseBrowserLock: (...args: unknown[]) => mockReleaseBrowserLock(...(args as [])),
+  releaseBrowserSession: (...args: unknown[]) => mockReleaseBrowserSession(...(args as [])),
 }))
 
 const persistedSessions = new Map<string, Record<string, unknown>>()
@@ -132,7 +132,7 @@ describe('SessionManager idle eviction', () => {
     workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'session-manager-test-'))
     spawnedProcesses.length = 0
     persistedSessions.clear()
-    mockReleaseBrowserLock.mockClear()
+    mockReleaseBrowserSession.mockClear()
     nextInitFailure = null
     nextStartFailure = null
     nextStartDelayMs = 0
@@ -171,7 +171,7 @@ describe('SessionManager idle eviction', () => {
     expect(proc.isRunning()).toBe(false)
     // Entry survives: still resolvable without a resume-from-persistence.
     expect(manager.hasActiveSession(id)).toBe(true)
-    expect(mockReleaseBrowserLock).toHaveBeenCalledWith(id)
+    expect(mockReleaseBrowserSession).toHaveBeenCalledWith(id)
   })
 
   it('announces eviction only after the process stops and before a racing send resumes', async () => {

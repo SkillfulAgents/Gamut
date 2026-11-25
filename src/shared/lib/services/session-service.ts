@@ -599,6 +599,19 @@ export async function getSession(
   sessionId: string,
   already?: { metadata: SessionMetadata | null },
 ): Promise<SessionInfo | null> {
+  return (await getSessionWithMetadata(store, sessionId, already))?.session ?? null
+}
+
+/**
+ * {@link getSession}, with the metadata it was built from: the session's one
+ * index entry serves both, so a caller that needs the session and what the app
+ * keeps about it reads one entry, not every entry of the agent.
+ */
+export async function getSessionWithMetadata(
+  store: SessionStore,
+  sessionId: string,
+  already?: { metadata: SessionMetadata | null },
+): Promise<{ session: SessionInfo; metadata: SessionMetadata | null } | null> {
   // Content-serving path (the single-session route reads this): link-aware,
   // so a planted link to another agent's transcript resolves to null, not that
   // agent's session summary.
@@ -614,7 +627,7 @@ export async function getSession(
   }
   if (stat?.kind === 'file') {
     // The index's time when it has seen the transcript: it is what every listing shows.
-    return sessionFromTranscriptStat(sessionId, store.slug, metadata ?? undefined, entry?.transcript ?? stat)
+    return { session: sessionFromTranscriptStat(sessionId, store.slug, metadata ?? undefined, entry?.transcript ?? stat), metadata }
   }
 
   // No transcript yet, but the session is registered → it was just created and
@@ -626,7 +639,7 @@ export async function getSession(
   // grace window with no transcript is a deleted session; a genuine 404 means
   // the session is in neither store — truly missing.
   if (metadata && metadataOnlySession(metadata, Date.now()) === 'new') {
-    return emptySessionFromMetadata(sessionId, store.slug, metadata)
+    return { session: emptySessionFromMetadata(sessionId, store.slug, metadata), metadata }
   }
 
   return null

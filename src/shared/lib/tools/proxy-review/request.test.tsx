@@ -326,4 +326,49 @@ describe('ProxyReviewRequestItem connection link', () => {
     expect(screen.queryByTestId('proxy-review-connection-link')).not.toBeInTheDocument()
     expect(screen.getByText('Railway')).toBeInTheDocument()
   })
+
+  describe('allow for this session', () => {
+    beforeEach(() => mockApiFetch.mockReset())
+
+    it('grants the card\'s session, naming only the review', async () => {
+      mockApiFetch.mockResolvedValue(new Response('{"ok":true}', { status: 200 }))
+      renderCard({ reviewType: 'mcp', targetPath: 'tools/call/search', matchedScopes: ['search'], sessionScoped: true })
+      const user = userEvent.setup()
+      await user.click(screen.getByTestId('proxy-review-always-allow-btn'))
+      await user.click(await screen.findByTestId('proxy-review-allow-session'))
+
+      expect(mockApiFetch).toHaveBeenCalledOnce()
+      expect(mockApiFetch.mock.calls[0]).toEqual(['/api/agents/my-agent/proxy-review/review-1/session', { method: 'POST' }])
+      expect(await screen.findByTestId('proxy-review-completed')).toHaveAttribute('data-status', 'allowed')
+    })
+
+    it('names the menu for what it now holds', () => {
+      renderCard({ matchedScopes: ['search'], sessionScoped: true })
+      expect(screen.getByTestId('proxy-review-always-allow-btn')).toHaveTextContent('Allow More')
+    })
+
+    it.each([
+      { case: 'the card is shown to the whole agent', props: { matchedScopes: ['search'] } },
+      { case: 'the request matched nothing', props: { matchedScopes: [], sessionScoped: true } },
+    ])('is not offered when $case', async ({ props }) => {
+      renderCard(props)
+      const user = userEvent.setup()
+      const menu = screen.getByTestId('proxy-review-always-allow-btn')
+      expect(menu).toHaveTextContent('Always Allow')
+      await user.click(menu)
+      await screen.findByTestId('proxy-review-always-allow-all')
+      expect(screen.queryByTestId('proxy-review-allow-session')).toBeNull()
+    })
+
+    it('shows the server\'s refusal and stays open', async () => {
+      mockApiFetch.mockResolvedValue(new Response('{"error":"This request can only be allowed once"}', { status: 400 }))
+      renderCard({ matchedScopes: ['search'], sessionScoped: true })
+      const user = userEvent.setup()
+      await user.click(screen.getByTestId('proxy-review-always-allow-btn'))
+      await user.click(await screen.findByTestId('proxy-review-allow-session'))
+
+      expect(await screen.findByText(/This request can only be allowed once/)).toBeInTheDocument()
+      expect(screen.getByTestId('proxy-review-request')).toBeInTheDocument()
+    })
+  })
 })

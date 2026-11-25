@@ -5,6 +5,9 @@ import { mountWebBuild } from './web-build'
 import { mountCompression } from './compression'
 import { openDatabase } from '@shared/lib/db'
 import { initializeLocalAppState } from '@shared/lib/app-state'
+import { containerHost as containers, initializeAgentRegistry } from '@shared/lib/agent-actor'
+import { LocalAgentActor } from '@shared/lib/agent-actor/local-agent-actor'
+import { localHostPort as host } from '@shared/lib/host/local-host-port'
 import { installServerKeyManager } from '@shared/lib/keys/install-server-key-manager'
 import { attachErrorReportingIdentity, flushErrorReporting, initErrorReporting } from '@shared/lib/error-reporting'
 import { createServerProvider } from '@shared/lib/error-reporting/sentry-provider'
@@ -29,7 +32,7 @@ if (existsSync('./dist/renderer')) {
   mountWebBuild(app, './dist/renderer')
 }
 
-let server: BoundServer['server']
+let server: BoundServer['server'] | undefined
 
 // Graceful shutdown handling
 let isShuttingDown = false
@@ -48,13 +51,22 @@ async function gracefulShutdown(signal: string) {
     console.error('Error stopping services:', error)
   }
 
+  // The signal came during boot: there is no server to close, and start()
+  // stops before it binds one. Leave now, or the process would stay up until
+  // the forced exit below while whoever sent the signal waits on it.
+  if (!server) {
+    console.log('Stopped before the server was bound.')
+    process.exit(0)
+    return
+  }
+
   // Close the server
-  server?.close(() => {
+  server.close(() => {
     console.log('Server closed.')
     process.exit(0)
   })
   // close() waits for keep-alive / streaming sockets; drop them so it can call back.
-  ;(server as { closeAllConnections?: () => void } | undefined)?.closeAllConnections?.()
+  ;(server as { closeAllConnections?: () => void }).closeAllConnections?.()
 
   // Force exit after timeout
   setTimeout(() => {
@@ -85,12 +97,18 @@ async function start() {
   await attachErrorReportingIdentity()
   // Then the state the API's processes share; this one process keeps it in memory.
   await initializeLocalAppState()
+  // Then the agents: each one's actor runs in this process.
+  initializeAgentRegistry((slug) => new LocalAgentActor(slug, { containers, host }))
   // Then key custody: the vault seals and opens through it, and it checks a
   // key against the sealed data, so after the database and before any request.
   await installServerKeyManager()
   // Then task dispatch: a request can schedule work as soon as the bind below lands.
   await initializeBackgroundWork(new LocalTaskManager())
   registerBackgroundWork()
+
+  // A shutdown signal during boot has already stopped the services: binding
+  // now would serve without them. gracefulShutdown ends the process.
+  if (isShuttingDown) return
 
   const defaultPort = parseInt(process.env.PORT || '47891', 10)
 

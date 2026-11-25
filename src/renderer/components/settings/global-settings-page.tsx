@@ -4,7 +4,8 @@ import { SettingsPage, type SettingsPageSection, type SettingsPageSectionGroup }
 import { lazyRouteComponent, type LinkProps } from '@tanstack/react-router'
 import { useUser } from '@renderer/context/user-context'
 import { usePlatformAuthStatus } from '@renderer/hooks/use-platform-auth'
-import { offersComputerUseSettings } from '@renderer/lib/capabilities'
+import type { SettingsTab } from '@renderer/router/search-schemas'
+import { settingsGroupsFor, useSettingsAudience } from './settings-catalog'
 
 // Each settings pane is a separate on-demand boundary. The navigation shell is
 // immediately usable, while only the active pane (and its dependency graph) is
@@ -39,6 +40,7 @@ const AuditLogTab = lazyRouteComponent(() => import('./audit-log-tab'), 'AuditLo
 const ExperimentsTab = lazyRouteComponent(() => import('./experiments-tab'), 'ExperimentsTab')
 const VolumesTab = lazyRouteComponent(() => import('./volumes-tab'), 'VolumesTab')
 const LoginsTab = lazyRouteComponent(() => import('./logins-tab'), 'LoginsTab')
+const McpServerTab = lazyRouteComponent(() => import('./mcp-server-tab'), 'McpServerTab')
 
 function deferredTab(content: ReactNode): ReactNode {
   return (
@@ -72,10 +74,8 @@ function platformInviteHref(platformBaseUrl: string, orgId: string | null | unde
 }
 
 export function GlobalSettingsPage({ onClose, onOpenWizard, initialSection, onSectionChange, sectionLinkProps }: GlobalSettingsPageProps) {
-  const { isAuthMode, isAdmin } = useUser()
+  const { isAuthMode } = useUser()
   const { data: platformAuth } = usePlatformAuthStatus()
-  const showAdminSettings = !isAuthMode || isAdmin
-  const showAuthAdmin = isAuthMode && isAdmin
 
   // Same predicate as server isPlatformControlledAuth — not JWKS orgId.
   const hideLocalAuthSections = Boolean(platformAuth?.platformControlled)
@@ -84,108 +84,60 @@ export function GlobalSettingsPage({ onClose, onOpenWizard, initialSection, onSe
       ? platformInviteHref(platformAuth.platformBaseUrl, platformAuth.orgId)
       : undefined
 
-  // Grouped by what the setting concerns (app-level vs agent behavior), not by
-  // who can edit it — admin-only sections are filtered per-item instead.
-  // General always leads and Admin always trails; the mode-gated items sit
-  // between those two anchors in every mode.
-  const appSections: SettingsPageSection[] = [
-    { id: 'general', label: 'General', icon: <AnimatedNavIcon name="general" className="h-4 w-4" />, render: () => deferredTab(<GeneralTab onOpenWizard={onOpenWizard} />) },
-    { id: 'notifications', label: 'Notifications', icon: <AnimatedNavIcon name="bell" className="h-4 w-4" />, render: () => deferredTab(<NotificationsTab />) },
-    { id: 'platform', label: 'Account', icon: <AnimatedNavIcon name="account" className="h-4 w-4" />, render: () => deferredTab(<PlatformTab readOnly={isAuthMode} />) },
-    // Everyone: each switch is the viewer's own.
-    { id: 'experiments', label: 'Experiments', icon: <AnimatedNavIcon name="experiments" className="h-4 w-4" />, render: () => deferredTab(<ExperimentsTab />) },
-    ...(isAuthMode && showAdminSettings ? [{ id: 'analytics', label: 'Analytics', icon: <AnimatedNavIcon name="analytics" className="h-4 w-4" />, render: () => deferredTab(<AnalyticsTab />) }] : []),
-    // Its people are offered when sharing and mentioning (auth mode), and it can
-    // create agents' own apps (every mode).
-    ...(showAdminSettings ? [{ id: 'team-directory', label: 'Team Directory', icon: <AnimatedNavIcon name="directory" className="h-4 w-4" />, render: () => deferredTab(<TeamDirectoryTab />) }] : []),
-    ...(showAuthAdmin
-      ? [
-          // Keep local role/ban/remove — Platform Team cannot write Better Auth columns.
-          // Invite goes to Platform when platform-controlled (local email invite is off).
-          {
-            id: 'users',
-            label: 'Users',
-            icon: <AnimatedNavIcon name="users" className="h-4 w-4" />,
-            render: () => deferredTab(
-              <UsersTab
-                platformControlled={hideLocalAuthSections}
-                platformInviteHref={platformTeamInviteHref}
-              />
-            ),
-          },
-          {
-            id: 'auth',
-            label: 'Auth',
-            icon: <AnimatedNavIcon name="shield" className="h-4 w-4" />,
-            render: () => deferredTab(<AuthTab hideLocalAuthSections={hideLocalAuthSections} />),
-          },
-        ]
-      : []),
-    ...(showAdminSettings ? [{ id: 'admin', label: 'Admin', icon: <AnimatedNavIcon name="shield" className="h-4 w-4" />, render: () => deferredTab(<AdminTab />) }] : []),
-  ]
+  const audience = useSettingsAudience()
 
-  // What agents can do or reach — toggled and curated as needs change.
-  const capabilitySections: SettingsPageSection[] = [
-    // Pairing mints a session credential against THIS deployment's auth, so
-    // the tab only exists in auth mode — a local install has no session to pair.
-    ...(isAuthMode ? [{ id: 'mobile', label: 'Mobile', icon: <AnimatedNavIcon name="mobile" className="h-4 w-4" />, render: () => deferredTab(<MobileTab />) }] : []),
-    {
-      id: 'connections',
-      label: 'Connections',
-      icon: <AnimatedNavIcon name="connections" className="h-4 w-4" />,
+  // What each page draws. Its name, icon, group, order and who has it come from
+  // the settings catalog, which the Cmd-K palette reads too.
+  const content: Record<SettingsTab, Pick<SettingsPageSection, 'render' | 'headerActions'>> = {
+    general: { render: () => deferredTab(<GeneralTab onOpenWizard={onOpenWizard} />) },
+    notifications: { render: () => deferredTab(<NotificationsTab />) },
+    platform: { render: () => deferredTab(<PlatformTab readOnly={isAuthMode} />) },
+    experiments: { render: () => deferredTab(<ExperimentsTab />) },
+    analytics: { render: () => deferredTab(<AnalyticsTab />) },
+    'team-directory': { render: () => deferredTab(<TeamDirectoryTab />) },
+    // Keep local role/ban/remove: Platform Team cannot write Better Auth columns.
+    // Invite goes to Platform when platform-controlled (local email invite is off).
+    users: {
+      render: () => deferredTab(
+        <UsersTab
+          platformControlled={hideLocalAuthSections}
+          platformInviteHref={platformTeamInviteHref}
+        />
+      ),
+    },
+    auth: { render: () => deferredTab(<AuthTab hideLocalAuthSections={hideLocalAuthSections} />) },
+    admin: { render: () => deferredTab(<AdminTab />) },
+    mobile: { render: () => deferredTab(<MobileTab />) },
+    connections: {
       render: () => deferredTab(<ConnectionsTab />),
       headerActions: <Suspense fallback={null}><NewIntegrationButton /></Suspense>,
     },
-    { id: 'volumes', label: 'Drives', icon: <AnimatedNavIcon name="folder" className="h-4 w-4" />, render: () => deferredTab(<VolumesTab />) },
-    // Everyone: each user's vault is their own.
-    { id: 'logins', label: 'Logins', icon: <AnimatedNavIcon name="key" className="h-4 w-4" />, render: () => deferredTab(<LoginsTab />) },
-    ...(showAdminSettings
-      ? [
-          { id: 'skillsets', label: 'Skillsets', icon: <AnimatedNavIcon name="layers" className="h-4 w-4" />, render: () => deferredTab(<SkillsetsTab />) },
-          { id: 'web', label: 'Web Search', icon: <AnimatedNavIcon name="search" className="h-4 w-4" />, render: () => deferredTab(<WebTab />) },
-          { id: 'browser', label: 'Browser Use', icon: <AnimatedNavIcon name="pointer" className="h-4 w-4" />, render: () => deferredTab(<BrowserTab />) },
-          // Computer Use drives the machine the agent runs on, and its whole
-          // UI — permission grants, the recovery link into System Settings — is
-          // written for that machine being yours. `isElectron()` stays true in
-          // cloud mode while execution moves to the deployment, so the tab would
-          // describe your laptop and govern someone else's. A sandboxed build
-          // has no computer use to govern.
-          ...(offersComputerUseSettings() ? [{ id: 'computer-use', label: 'Computer Use', icon: <AnimatedNavIcon name="mouse" className="h-4 w-4" />, render: () => deferredTab(<ComputerUseTab />) }] : []),
-          { id: 'capabilities', label: 'Subagents', icon: <AnimatedNavIcon name="workflow" className="h-4 w-4" />, render: () => deferredTab(<CapabilitiesTab />) },
-        ]
-      : []),
-    // Everyone: what every agent is told is visible to all; the editor is
-    // read-only for non-admins.
-    { id: 'global-guidance', label: 'Global Guidance', icon: <AnimatedNavIcon name="guidance" className="h-4 w-4" />, render: () => deferredTab(<GlobalInstructionsTab />) },
-    // Everyone: the tab carries each person's own read-aloud voice; the
-    // provider and key sections inside it are admin-gated.
-    { id: 'llm', label: 'Model Providers', icon: <AnimatedNavIcon name="sparkle" className="h-4 w-4" />, render: () => deferredTab(<LlmTab />) },
-    { id: 'voice', label: 'Voice', icon: <AnimatedNavIcon name="mic" className="h-4 w-4" />, render: () => deferredTab(<VoiceTab />) },
-  ]
+    'mcp-server': { render: () => deferredTab(<McpServerTab />) },
+    volumes: { render: () => deferredTab(<VolumesTab />) },
+    logins: { render: () => deferredTab(<LoginsTab />) },
+    skillsets: { render: () => deferredTab(<SkillsetsTab />) },
+    web: { render: () => deferredTab(<WebTab />) },
+    browser: { render: () => deferredTab(<BrowserTab />) },
+    'computer-use': { render: () => deferredTab(<ComputerUseTab />) },
+    capabilities: { render: () => deferredTab(<CapabilitiesTab />) },
+    'global-guidance': { render: () => deferredTab(<GlobalInstructionsTab />) },
+    llm: { render: () => deferredTab(<LlmTab />) },
+    voice: { render: () => deferredTab(<VoiceTab />) },
+    'account-provider': { render: () => deferredTab(<AccountProviderTab />) },
+    runtime: { render: () => deferredTab(<RuntimeTab />) },
+    usage: { render: () => deferredTab(<UsageTab />) },
+    'audit-log': { render: () => deferredTab(<AuditLogTab />) },
+  }
 
-  // The plumbing agents run on — providers and runtime, mostly set-once.
-  const infrastructureSections: SettingsPageSection[] = showAdminSettings
-    ? [
-
-        { id: 'account-provider', label: 'Account Provider', icon: <AnimatedNavIcon name="route" className="h-4 w-4" />, render: () => deferredTab(<AccountProviderTab />) },
-        { id: 'runtime', label: 'Container Runtime', icon: <AnimatedNavIcon name="runtime" className="h-4 w-4" />, render: () => deferredTab(<RuntimeTab />) },
-      ]
-    : []
-
-  // Read-only observability — places you check, not configure.
-  const activitySections: SettingsPageSection[] = [
-    { id: 'usage', label: 'Usage', icon: <AnimatedNavIcon name="usage" className="h-4 w-4" />, render: () => deferredTab(<UsageTab />) },
-    ...(showAdminSettings ? [{ id: 'audit-log', label: 'Audit Log', icon: <AnimatedNavIcon name="logs" className="h-4 w-4" />, render: () => deferredTab(<AuditLogTab />) }] : []),
-  ]
-
-  // Empty groups (e.g. Infrastructure for non-admin auth users) would render
-  // an orphaned header, so filter them out.
-  const groups: SettingsPageSectionGroup[] = [
-    { label: 'App Settings', sections: appSections },
-    { label: 'Agent Capabilities', sections: capabilitySections },
-    { label: 'Agent Infrastructure', sections: infrastructureSections },
-    { label: 'Agent Activity', sections: activitySections },
-  ].filter((group) => group.sections.length > 0)
+  const groups: SettingsPageSectionGroup[] = settingsGroupsFor(audience).map(({ label, pages }) => ({
+    label,
+    sections: pages.map((page) => ({
+      id: page.id,
+      label: page.label,
+      icon: <AnimatedNavIcon name={page.icon} className="h-4 w-4" />,
+      ...content[page.id],
+    })),
+  }))
 
   return (
     <SettingsPage

@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 const reconcile = vi.fn()
 const validateAuth = vi.fn().mockResolvedValue(undefined)
 const listAgents = vi.fn().mockResolvedValue([])
-const initializeAgents = vi.fn().mockResolvedValue(undefined)
+const wakeAgents = vi.fn().mockResolvedValue(undefined)
 const watchWebhookRelay = vi.fn((_relay: { snapshot(): { available: boolean } }) => () => {})
 // A relay that reports whether startup has started it.
 const relayState = vi.hoisted(() => ({ started: false }))
@@ -60,15 +60,19 @@ vi.mock('./agent-actor/agent-catalog', () => ({
 vi.mock('./services/agent-service', () => ({
   listAgents: () => listAgents(),
 }))
+// Waking every agent at startup and stopping them all at shutdown are asked of the agents' actors.
+vi.mock('./agent-actor/all-agents', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./agent-actor/all-agents')>()),
+  wakeAgents: async (...args: unknown[]) => wakeAgents(...args),
+  stopAllAgents: async () => { released.push('containers') },
+}))
 vi.mock('./container/container-host', async () => {
   const { hostFromManagerMock } = await import('@shared/lib/agent-actor/testing/host-from-manager-mock')
   return {
     containerHost: hostFromManagerMock({
-      initializeAgents: (...args: unknown[]) => initializeAgents(...args),
       watchWebhookRelay: (relay: { snapshot(): { available: boolean } }) => watchWebhookRelay(relay),
       ensureImageReady: () => ensureImageReady(),
       onBeforeContainerStop: null,
-      stopAll: async () => { released.push('containers') },
       clearClients: vi.fn(),
     }),
   }
@@ -117,9 +121,6 @@ vi.mock('../../api/credentials/credential-broker', () => ({
 }))
 vi.mock('../../main/browser-stream-proxy', () => ({ setupBrowserStreamProxy: vi.fn() }))
 vi.mock('../../main/cloud-stream-proxy', () => ({ setupCloudStreamProxy: vi.fn() }))
-vi.mock('./proxy/review-manager', () => ({ reviewManager: { rejectAll: vi.fn() } }))
-vi.mock('./proxy/account-reauth-manager', () => ({ accountReauthManager: { rejectAll: vi.fn() } }))
-vi.mock('./proxy/mcp-reauth-manager', () => ({ mcpReauthManager: { rejectAll: vi.fn() } }))
 vi.mock('./scheduler/task-scheduler', () => ({
   taskScheduler: { id: 'task-scheduler', phase: 'background', startupIo: true, start: () => taskSchedulerStart(), stop: () => { released.push('task-scheduler') } },
 }))
@@ -157,7 +158,7 @@ describe('initializeServices post-bind critical path', () => {
     reconcile.mockReset()
     validateAuth.mockReset().mockResolvedValue(undefined)
     listAgents.mockReset().mockResolvedValue([])
-    initializeAgents.mockReset().mockResolvedValue(undefined)
+    wakeAgents.mockReset().mockResolvedValue(undefined)
     watchWebhookRelay.mockReset().mockReturnValue(() => {})
     relayState.started = false
     released.length = 0
@@ -211,14 +212,14 @@ describe('initializeServices post-bind critical path', () => {
       order.push('watch')
       return () => {}
     })
-    initializeAgents.mockImplementation(async () => {
-      order.push(`initializeAgents:${getWebhookRelay().snapshot().unavailableReason ?? 'started'}`)
+    wakeAgents.mockImplementation(async () => {
+      order.push(`wakeAgents:${getWebhookRelay().snapshot().unavailableReason ?? 'started'}`)
     })
 
     const { initializeServices } = await import('./startup')
     await initializeServices()
 
-    expect(order).toEqual(['initializeAgents:started', 'watch'])
+    expect(order).toEqual(['wakeAgents:started', 'watch'])
   })
 
   it('overlaps auth validation with agent discovery, then gates container init on both', async () => {
@@ -234,15 +235,15 @@ describe('initializeServices post-bind critical path', () => {
       expect(validateAuth).toHaveBeenCalledTimes(1)
       expect(listAgents).toHaveBeenCalledTimes(1)
     })
-    expect(initializeAgents).not.toHaveBeenCalled()
+    expect(wakeAgents).not.toHaveBeenCalled()
 
     finishAgentList?.([])
     await Promise.resolve()
-    expect(initializeAgents).not.toHaveBeenCalled()
+    expect(wakeAgents).not.toHaveBeenCalled()
 
     finishAuth?.()
     await initializing
-    expect(initializeAgents).toHaveBeenCalledWith([])
+    expect(wakeAgents).toHaveBeenCalledWith([])
     expect(clearPendingApprovalBans).toHaveBeenCalledTimes(1)
   })
 
@@ -365,7 +366,7 @@ describe('initializeServices post-bind critical path', () => {
     validateAuth.mockRejectedValueOnce(new Error('platform unreachable'))
     const { initializeServices } = await import('./startup')
     await expect(initializeServices()).rejects.toThrow('platform unreachable')
-    expect(initializeAgents).not.toHaveBeenCalled()
+    expect(wakeAgents).not.toHaveBeenCalled()
     expect(staleUploads.startStaleUploadCleanup).toHaveBeenCalledOnce()
   })
 
@@ -418,12 +419,12 @@ describe('initializeServices post-bind critical path', () => {
         'computer-use', 'active-runner', 'agent-registry', 'containers',
         'webhook-relay', 'container-host', 'ollama-catalog', 'host-browser',
         'platform-notifications', 'agent-integrations', 'container-image', 'task-scheduler', 'webhook-triggers',
-        'session-auto-delete', 'api-log-auto-delete', 'account-sync', 'team-directory-provisioning', 'platform',
+        'session-auto-delete', 'api-log-auto-delete', 'mcp-oauth-client-cleanup', 'account-sync', 'team-directory-provisioning', 'platform',
       ])
       expect(new Set(Object.values(serviceHost().states()))).toEqual(new Set(['registered']))
       expect((taskManager() as import('./background-work/local-task-manager').LocalTaskManager).scheduled()).toEqual([])
       expect(relayState.started).toBe(false)
-      expect(initializeAgents).not.toHaveBeenCalled()
+      expect(wakeAgents).not.toHaveBeenCalled()
       expect(ensureImageReady).not.toHaveBeenCalled()
       expect(listAgents).not.toHaveBeenCalled()
     })
@@ -458,7 +459,7 @@ describe('initializeServices post-bind critical path', () => {
     })
 
     it('leaves the rest unstarted when the container host fails to initialize', async () => {
-      initializeAgents.mockRejectedValueOnce(new Error('runtime down'))
+      wakeAgents.mockRejectedValueOnce(new Error('runtime down'))
       const { afterBindInitialize, getServicesInitError } = await import('./startup')
       const error = vi.spyOn(console, 'error').mockImplementation(() => {})
       await afterBindInitialize({ degradedOnFailure: true })
@@ -526,7 +527,7 @@ describe('initializeServices post-bind critical path', () => {
       await afterBindInitialize({ degradedOnFailure: true })
       await new Promise(resolve => setTimeout(resolve, 10))
       expect(relayState.started).toBe(false)
-      expect(initializeAgents).not.toHaveBeenCalled()
+      expect(wakeAgents).not.toHaveBeenCalled()
       expect(ensureImageReady).not.toHaveBeenCalled()
       expect(taskSchedulerStart).not.toHaveBeenCalled()
     })
@@ -537,7 +538,7 @@ describe('initializeServices post-bind critical path', () => {
     const { afterBindInitialize, getServicesInitError } = await import('./startup')
     await afterBindInitialize({ degradedOnFailure: true })
     expect(getServicesInitError()).toBe('platform unreachable')
-    expect(initializeAgents).not.toHaveBeenCalled()
+    expect(wakeAgents).not.toHaveBeenCalled()
     expect(logBootTiming).toHaveBeenCalledTimes(1)
   })
 })

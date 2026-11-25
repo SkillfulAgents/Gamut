@@ -70,10 +70,9 @@ import type {
   UserInputRequestOutcome,
 } from '@shared/lib/tools/requests/request-schema'
 import type { SettledUserInputRequest } from '@shared/lib/tools/requests/agent-input-requests'
-import type { ReviewDecisionDetail, ReviewDetails, ReviewOutcome, ReviewRequest } from '@shared/lib/proxy/review-manager'
-import type { AccountReauthDetails } from '@shared/lib/proxy/account-reauth-manager'
-import type { McpReauthDetails } from '@shared/lib/proxy/mcp-reauth-manager'
-import type { ReauthOutcome } from '@shared/lib/proxy/reauth-waits'
+import type { ReviewDecisionDetail, ReviewOutcome, ReviewRequest, SessionGrantCheck, SessionGrantResult } from '@shared/lib/proxy/agent-reviews'
+import type { ReviewDetails } from '@shared/lib/proxy/review-display'
+import type { AccountReauthDetails, McpReauthDetails, ReauthOutcome } from '@shared/lib/proxy/reauth-waits'
 import type { ScopeLabel } from '@shared/lib/proxy/scope-metadata'
 import type { ComputerUsePermissionLevel, PermissionGrantType } from '@shared/lib/computer-use/types'
 import type { ComputerUseRun, HostRunOutcome, ScriptRun } from './host-runs'
@@ -86,16 +85,16 @@ import type { VolumeUploadOutcome } from '@shared/lib/volumes/volume-upload-guar
 export type AgentSlug = string
 
 export interface AgentRegistry {
-  /** Never fails and never does I/O; creates the handle on first use. */
+  /** Never fails and never does I/O; makes the agent's actor on first use. */
   get(slug: AgentSlug): AgentActor
+  /** The actors made so far and not evicted: what this process knows of its agents. */
+  held(): AgentActor[]
   /**
-   * Drop the handle and forget its container runtime, releasing everything
-   * the handle owns: parked reviews and re-auth waits are rejected, open
-   * input requests are settled as invalidated, in-memory grants and what
-   * the session index held in memory are gone. Does not stop the container.
+   * Drop the actor, which releases everything it holds here
+   * (`AgentActor.dispose`). Does not stop the container.
    */
   evict(slug: AgentSlug): Promise<void>
-  /** `evict` for every handle, at shutdown: parked callers are let go. Does not stop containers. */
+  /** `evict` for every actor, at shutdown: parked callers are let go. Does not stop containers. */
   evictAll(): Promise<void>
 }
 
@@ -124,6 +123,29 @@ export interface AgentActor {
   live(): Promise<AgentLiveSummary>
   /** What the agent list shows about the agent, read in one call. */
   listing(): Promise<AgentListing>
+  /**
+   * Settles once the actor knows whether its container runs: an actor is made
+   * without I/O, and reads its container first thing after. Startup waits for
+   * this on every agent, so one nobody opens still sees a container left
+   * running from before this launch.
+   */
+  ready(): Promise<void>
+  /**
+   * The registry is dropping the actor: release everything it holds in this
+   * process. Parked reviews and re-auth waits are rejected, open input
+   * requests are settled as invalidated, in-memory grants are gone, and its
+   * container runtime is forgotten (the container is not stopped). At
+   * `'shutdown'` what it has recorded and not stored yet is stored first,
+   * since nothing reads it again.
+   */
+  dispose(reason?: 'shutdown'): Promise<void>
+  /**
+   * The agent is being deleted: remove everything it stored, its workspace
+   * and its session index. The caller has stopped its container, and removes
+   * the agent from the catalog after: a removal that fails here leaves the
+   * agent listed, so the delete can be tried again.
+   */
+  delete(): Promise<void>
   readonly container: ContainerOps
   readonly sessions: SessionOps
   readonly messages: MessageOps
@@ -271,7 +293,10 @@ export interface AgentCatalog {
   resolve(input: string): Promise<AgentSlug | null>
   /** The agent for a display slug or a slug, or null when there is no such agent. */
   resolveRecord(input: string): Promise<AgentRecord | null>
-  /** Remove an agent and everything it owns. The caller stops its container first. */
+  /**
+   * Remove an agent from the catalog. What the agent stored is deleted
+   * first, by its actor (`AgentActor.delete`).
+   */
   remove(slug: AgentSlug): Promise<void>
 }
 
@@ -290,6 +315,12 @@ export interface ContainerOps {
    * marked stale (`AgentLiveSummary.container.stale`) for the user to restart.
    */
   invalidate(options?: { restart?: boolean }): Promise<'not-running' | 'marked-stale' | 'restarted'>
+  /**
+   * Whether a change to the agent's drives reaches it only through a restart:
+   * its container runs, or a start is past reading the drives. With
+   * `orStarting`, any start in flight counts too.
+   */
+  holdsDrives(options?: { orStarting?: boolean }): Promise<boolean>
   /** `client.getInfo` — queries the runtime; prefer `status()` unless freshness matters. */
   info(): Promise<ContainerInfo>
   /**
@@ -346,6 +377,8 @@ export interface SessionOps {
   listByIds(sessionIds: string[], options?: { excludeAutomated?: boolean }): Promise<SessionInfo[]>
   /** `getSession` */
   get(sessionId: string, already?: { metadata: SessionMetadata | null }): Promise<SessionInfo | null>
+  /** `getSessionWithMetadata` — `get`, with the session's metadata, from one read of its index entry. */
+  getWithMetadata(sessionId: string): Promise<{ session: SessionInfo; metadata: SessionMetadata | null } | null>
   /** `getSessionSummary` */
   summary(): Promise<SessionSummary>
   /** `sessionExists` */
@@ -821,6 +854,10 @@ export interface ReviewOps {
   get(id: string): Promise<({ id: string; displayText: string } & ReviewDetails) | null>
   /** `AgentReviews.submit` — only a review this agent holds can be found. */
   submit(id: string, decision: 'allow' | 'deny', detail?: ReviewDecisionDetail): Promise<boolean>
+  /** `AgentReviews.allowForSession`: "Allow for this session" on a review this agent holds. */
+  allowForSession(id: string): Promise<SessionGrantResult>
+  /** `AgentReviews.sessionAllows`: whether the calling session's grants cover a request. */
+  sessionAllows(check: SessionGrantCheck): Promise<boolean>
   /** `AgentReviews.resolveMatching` */
   resolveMatching(scope: string, decision: 'allow' | 'deny'): Promise<void>
   /** `AgentReviews.resolveMatchingByLabel` */

@@ -324,7 +324,8 @@ export async function getAgentActivityStats(
   let lastInvokedAtMs = Number.NEGATIVE_INFINITY
   for (const meta of Object.values(metadata)) {
     // Widget repairs share the inbound history, including its home entry.
-    if ((!meta.invokedByAgentSlug && !meta.isWidgetRepair) || !meta.createdAt) continue
+    // So do sessions started through the MCP server.
+    if ((!meta.invokedByAgentSlug && !meta.isWidgetRepair && !meta.mcpInvocation) || !meta.createdAt) continue
     const createdAt = new Date(meta.createdAt)
     if (!Number.isFinite(createdAt.getTime())) continue
     inboundTotal += 1
@@ -365,31 +366,27 @@ export async function getConnectionActivityStats(
     ? eq(remoteMcpServers.userId, options.ownerId)
     : undefined
 
-  const [accounts, mcps] = await Promise.all([
-    accountCondition
-      ? db.select({ id: connectedAccounts.id }).from(connectedAccounts).where(accountCondition)
-      : db.select({ id: connectedAccounts.id }).from(connectedAccounts),
-    mcpCondition
-      ? db.select({ id: remoteMcpServers.id }).from(remoteMcpServers).where(mcpCondition)
-      : db.select({ id: remoteMcpServers.id }).from(remoteMcpServers),
+  // The rollups name their connections with a subquery instead of the ids
+  // read here, so no read waits for another and all four are issued together.
+  // It is also one bound parameter at most, where a list of ids grew with the
+  // number of connections (Cloudflare D1 binds 100 per statement).
+  const accountIdQuery = db.select({ id: connectedAccounts.id }).from(connectedAccounts).where(accountCondition)
+  const mcpIdQuery = db.select({ id: remoteMcpServers.id }).from(remoteMcpServers).where(mcpCondition)
+
+  const [accounts, mcps, proxyRows, mcpRows] = await Promise.all([
+    accountIdQuery,
+    mcpIdQuery,
+    auditRollupQuery(proxyAuditLog, proxyAuditLog.accountId, and(
+      inArray(proxyAuditLog.accountId, accountIdQuery),
+      gte(proxyAuditLog.createdAt, from),
+    ), tzOffsetMinutes),
+    auditRollupQuery(mcpAuditLog, mcpAuditLog.remoteMcpId, and(
+      inArray(mcpAuditLog.remoteMcpId, mcpIdQuery),
+      gte(mcpAuditLog.createdAt, from),
+    ), tzOffsetMinutes),
   ])
   const accountIds = accounts.map((account) => account.id)
   const mcpIds = mcps.map((mcp) => mcp.id)
-
-  const [proxyRows, mcpRows] = await Promise.all([
-    accountIds.length > 0
-      ? auditRollupQuery(proxyAuditLog, proxyAuditLog.accountId, and(
-          inArray(proxyAuditLog.accountId, accountIds),
-          gte(proxyAuditLog.createdAt, from),
-        ), tzOffsetMinutes)
-      : Promise.resolve([]),
-    mcpIds.length > 0
-      ? auditRollupQuery(mcpAuditLog, mcpAuditLog.remoteMcpId, and(
-          inArray(mcpAuditLog.remoteMcpId, mcpIds),
-          gte(mcpAuditLog.createdAt, from),
-        ), tzOffsetMinutes)
-      : Promise.resolve([]),
-  ])
 
   const connectionIds = [
     ...accountIds.map((id) => `account-${id}`),

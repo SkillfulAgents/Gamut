@@ -270,6 +270,8 @@ export interface PendingReview {
   xAgent?: XAgentReview
   ruleOutcomes?: ReviewRuleOutcomeView[]
   ruleProposal?: RuleProposalReview
+  /** The review is one session's, not the whole agent's. */
+  sessionScoped?: boolean
 }
 
 export interface PendingAccountReauth {
@@ -399,6 +401,7 @@ export function reviewFromEnvelope(
     ...(xAgent ? { xAgent } : {}),
     ...(parseRuleOutcomes(payload.ruleOutcomes) ? { ruleOutcomes: parseRuleOutcomes(payload.ruleOutcomes) } : {}),
     ...(parseRuleProposal(payload.ruleProposal) ? { ruleProposal: parseRuleProposal(payload.ruleProposal) } : {}),
+    ...(request.scope.sessionId ? { sessionScoped: true } : {}),
   }
 }
 
@@ -1015,6 +1018,7 @@ export function usePendingRequests({
           requestBody: review.requestBody,
           ruleOutcomes: review.ruleOutcomes,
           ruleProposal: review.ruleProposal,
+          sessionScoped: review.sessionScoped,
           onComplete: handleProxyReviewComplete,
         })
       }
