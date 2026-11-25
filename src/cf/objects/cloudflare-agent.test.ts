@@ -988,7 +988,7 @@ describe('SavedWorkspace writing a large file from a stream', () => {
     vi.stubGlobal('crypto', {
       randomUUID: () => nodeCrypto.randomUUID(),
       subtle: nodeCrypto.subtle,
-      getRandomValues: <T extends ArrayBufferView>(array: T) => nodeCrypto.getRandomValues(array),
+      getRandomValues: nodeCrypto.getRandomValues.bind(nodeCrypto),
       DigestStream: class extends WritableStream<Uint8Array> {
         readonly digest: Promise<ArrayBuffer>
         constructor() {
