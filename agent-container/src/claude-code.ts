@@ -1135,7 +1135,7 @@ export class ClaudeCodeProcess extends EventEmitter {
 
     // Browser tools are bound per-session via a getter read on every request:
     // this.sessionId changes when the query (re)starts, and a module-global id
-    // shared across sessions stranded browser calls on the ownership lock.
+    // shared across sessions would drive one session's browser tab from another's.
     const browserMcpTools = createBrowserTools(() => this.sessionId);
 
     console.log(`[Session ${this.sessionId}] createQuery: model=${this.model ?? '(default)'}, effort=${this.effort ?? '(default)'}, speed=${this.speed ?? '(default)'}`);
@@ -1845,11 +1845,11 @@ export class ClaudeCodeProcess extends EventEmitter {
           // broadcast to the correct session in the session manager
           const previousSessionId = this.sessionId;
           this.sessionId = message.session_id;
-          // If this session already owns the browser under its previous id
-          // (query restart mid-browse), re-key the lock or every subsequent
-          // browser call 409s against our own browser.
+          // If this session already uses the browser under its previous id
+          // (query restart mid-browse), re-key it or every subsequent browser
+          // call finds no browser of this session's.
           if (previousSessionId !== this.sessionId && renameBrowserSession(previousSessionId, this.sessionId)) {
-            console.log(`[Session ${this.sessionId}] Re-keyed browser lock from ${previousSessionId}`);
+            console.log(`[Session ${this.sessionId}] Re-keyed the browser from ${previousSessionId}`);
           }
           console.log(`[Session ${this.sessionId}] Captured Claude session ID:`, this.claudeSessionId);
           this.emit('claude-session-id', this.claudeSessionId);

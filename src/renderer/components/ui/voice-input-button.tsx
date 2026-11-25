@@ -1,4 +1,4 @@
-import { useCallback } from 'react'
+import { useCallback, useEffect, useRef } from 'react'
 import { Button, buttonVariants } from '@renderer/components/ui/button'
 import { MiniWaveform } from '@renderer/components/ui/mini-waveform'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@renderer/components/ui/tooltip'
@@ -8,6 +8,8 @@ import { useUser } from '@renderer/context/user-context'
 import { useIsVoiceConfigured } from '@renderer/hooks/use-voice-input'
 import { cn } from '@shared/lib/utils'
 import type { useVoiceInput } from '@renderer/hooks/use-voice-input'
+import { isSubmitEnter } from '@renderer/lib/enter-key'
+import { dictationScope, dictationShortcutKeys, dictationShortcutLabel, registerDictationTarget } from '@renderer/lib/dictation-shortcut'
 
 type VoiceInputSize = 'default' | 'sm' | 'compact' | 'xs'
 
@@ -27,6 +29,12 @@ interface VoiceInputButtonProps {
   disabled?: boolean
   /** Button sizing variant. */
   size?: VoiceInputSize
+  /**
+   * Send what is in the input. With it, Enter while dictating stops and sends
+   * in one press, wherever focus is in the composer; the surface's own submit
+   * already waits for the final words. Without it Enter is left alone.
+   */
+  onSend?: () => void
   /** On a Liquid Glass surface (the quick-dispatch launcher): capsule shape, translucent idle fill. */
   glass?: boolean
 }
@@ -42,7 +50,22 @@ const GLASS_IDLE =
  *
  * Returns null if voice input is not supported by the browser.
  */
-export function VoiceInputButton({ voiceInput, message, disabled, size = 'default', glass = false }: VoiceInputButtonProps) {
+const HINT_KEY = 'inline-flex h-4 min-w-4 items-center justify-center rounded-sm border border-primary-foreground/25 bg-primary-foreground/15 px-1 font-sans text-[11px] leading-none'
+
+/** Put the caret at the end of a text field, so typing carries on after the dictated words. */
+function focusAtEnd(field: HTMLElement): void {
+  field.focus()
+  if (field instanceof HTMLTextAreaElement || field instanceof HTMLInputElement) {
+    field.setSelectionRange(field.value.length, field.value.length)
+    return
+  }
+  const selection = window.getSelection()
+  if (!selection) return
+  selection.selectAllChildren(field)
+  selection.collapseToEnd()
+}
+
+export function VoiceInputButton({ voiceInput, message, disabled, size = 'default', onSend, glass = false }: VoiceInputButtonProps) {
   const { openSettings } = useDialogs()
   const { isAuthMode, isAdmin } = useUser()
   const hasVoiceConfigured = useIsVoiceConfigured()
@@ -71,7 +94,71 @@ export function VoiceInputButton({ voiceInput, message, disabled, size = 'defaul
     }
   }, [hasVoiceConfigured, canConfigureVoice, openSettings, isRecording, isConnecting, isFinalizing, stopRecording, startRecording, message])
 
+  // The dictation shortcut reaches this mic through the registry, reading the
+  // latest render so the registration lasts as long as the button does.
+  const buttonRef = useRef<HTMLButtonElement>(null)
+  const latest = useRef({ handleToggle, onSend, active, isFinalizing, canStart: false })
+  latest.current = { handleToggle, onSend, active, isFinalizing, canStart: hasVoiceConfigured && !disabled && !active }
+  useEffect(() => registerDictationTarget({
+    element: () => buttonRef.current,
+    // Finalizing counts: the shortcut is this mic's until it is idle again.
+    isActive: () => latest.current.active,
+    canStart: () => latest.current.canStart,
+    toggle: () => latest.current.handleToggle(),
+  }), [])
+
+  // Enter while dictating: stop and send. Taken in the capture phase so it is
+  // one rule on every surface (some send on ⌘Enter when typing) and so Enter on
+  // the focused mic button does not just press it. An Enter that lands while
+  // the last words are still coming in is held until they have.
+  const sendWhenFinalRef = useRef(false)
+  const hasSend = !!onSend
+  useEffect(() => {
+    if (!active || !hasSend) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || !isSubmitEnter(event) || event.metaKey || event.ctrlKey || event.altKey) return
+      const button = buttonRef.current
+      const target = event.target
+      if (!button || !(target instanceof Node)) return
+      if (target !== document.body && !dictationScope(button).contains(target)) return
+      event.preventDefault()
+      event.stopPropagation()
+      if (event.repeat) return
+      if (latest.current.isFinalizing) sendWhenFinalRef.current = true
+      else latest.current.onSend?.()
+    }
+    window.addEventListener('keydown', onKeyDown, true)
+    return () => window.removeEventListener('keydown', onKeyDown, true)
+  }, [active, hasSend])
+
+  // Dictation over: hand the keyboard back to the text field when it was on
+  // the mic (a click) or nowhere (the shortcut), so the next key types.
+  const wasActive = useRef(false)
+  useEffect(() => {
+    if (active) {
+      wasActive.current = true
+      return
+    }
+    if (!wasActive.current) return
+    wasActive.current = false
+    const sendNow = sendWhenFinalRef.current
+    sendWhenFinalRef.current = false
+    if (sendNow) {
+      latest.current.onSend?.()
+      return
+    }
+    const button = buttonRef.current
+    if (!button || (document.activeElement !== button && document.activeElement !== document.body)) return
+    const frame = requestAnimationFrame(() => {
+      const field = dictationScope(button).querySelector<HTMLElement>('textarea:not([readonly]), [contenteditable="true"]')
+      if (field) focusAtEnd(field)
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [active])
+
   if (!voiceInput.isSupported) return null
+
+  const shortcut = dictationShortcutLabel()
 
   // Non-admin in auth mode without voice configured: show disabled mic-off with tooltip
   if (!hasVoiceConfigured && !canConfigureVoice) {
@@ -100,52 +187,73 @@ export function VoiceInputButton({ voiceInput, message, disabled, size = 'defaul
   }
 
   return (
-    <button
-      type="button"
-      onClick={handleToggle}
-      disabled={disabled && !active}
-      data-testid="voice-input-button"
-      // An outline button like the shared Button's, so surfaces that restyle those (Agent Home's glass) include it,
-      // except while recording, when it is the tinted pill.
-      data-variant="outline"
-      data-active={active || undefined}
-      className={cn(
-        buttonVariants({ variant: 'outline', size: 'icon' }),
-        'overflow-hidden px-0 transition-[width,padding,background-color,border-color,color,border-radius] duration-200 ease-out',
-        active
-          ? `${config.pill} gap-2 justify-between border-primary/30 bg-primary/10 px-2 text-foreground hover:bg-primary/15 dark:border-primary/40 dark:bg-primary/15 dark:hover:bg-primary/20`
-          : `gap-0 ${config.button}`,
-        glass && 'rounded-full',
-        glass && !active && GLASS_IDLE,
-      )}
-      aria-label={active ? 'Stop recording' : !hasVoiceConfigured ? 'Set up voice input' : 'Voice input'}
-      title={
-        active
-          ? 'Stop recording'
-          : !hasVoiceConfigured
-            ? 'Set up voice input'
-            : 'Voice input'
-      }
-    >
-      <span
-        className={cn(
-          'overflow-hidden transition-[max-width,opacity] duration-200 ease-out',
-          active ? 'max-w-[64px] opacity-100' : 'max-w-0 opacity-0'
-        )}
-      >
-        {/* Mounted only while engaged: its draw loop requests a frame every refresh for as long as it exists. */}
-        {active && <MiniWaveform analyserRef={voiceInput.analyserRef} color="currentColor" {...config.waveform} />}
-      </span>
-      {busy ? (
-        <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
-      ) : isRecording ? (
-        <Square className="h-3 w-3 shrink-0 fill-current" />
-      ) : (
-        <Mic className="h-4 w-4 shrink-0" />
-      )}
-    </button>
+    <TooltipProvider>
+      {/* Open for as long as dictation runs: the two ways to end it. */}
+      <Tooltip open={isRecording || isConnecting}>
+        <TooltipTrigger asChild>
+          <button
+            ref={buttonRef}
+            type="button"
+            onClick={handleToggle}
+            disabled={disabled && !active}
+            data-testid="voice-input-button"
+            // An outline button like the shared Button's, so surfaces that restyle those (Agent Home's glass) include it,
+            // except while recording, when it is the tinted pill.
+            data-variant="outline"
+            data-active={active || undefined}
+            className={cn(
+              buttonVariants({ variant: 'outline', size: 'icon' }),
+              'overflow-hidden px-0 transition-[width,padding,background-color,border-color,color,border-radius] duration-200 ease-out',
+              active
+                ? `${config.pill} gap-2 justify-between border-primary/30 bg-primary/10 px-2 text-foreground hover:bg-primary/15 dark:border-primary/40 dark:bg-primary/15 dark:hover:bg-primary/20`
+                : `gap-0 ${config.button}`,
+              glass && 'rounded-full',
+              glass && !active && GLASS_IDLE,
+            )}
+            aria-label={active ? 'Stop recording' : !hasVoiceConfigured ? 'Set up voice input' : 'Voice input'}
+            title={
+              active
+                ? 'Stop recording'
+                : !hasVoiceConfigured
+                  ? 'Set up voice input'
+                  : `Dictate (${shortcut})`
+            }
+            aria-keyshortcuts="Control+M"
+          >
+            <span
+              className={cn(
+                'overflow-hidden transition-[max-width,opacity] duration-200 ease-out',
+                active ? 'max-w-[64px] opacity-100' : 'max-w-0 opacity-0'
+              )}
+            >
+              {/* Mounted only while engaged: its draw loop requests a frame every refresh for as long as it exists. */}
+              {active && <MiniWaveform analyserRef={voiceInput.analyserRef} color="currentColor" {...config.waveform} />}
+            </span>
+            {busy ? (
+              <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
+            ) : isRecording ? (
+              <Square className="h-3 w-3 shrink-0 fill-current" />
+            ) : (
+              <Mic className="h-4 w-4 shrink-0" />
+            )}
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="top" align="end" className="flex items-center gap-1.5 px-2" data-testid="dictation-hint">
+          {dictationShortcutKeys().map((key) => <kbd key={key} className={HINT_KEY}>{key}</kbd>)}
+          <span>{onSend ? 'Stop' : 'Stop dictating'}</span>
+          {onSend && (
+            <>
+              <span className="opacity-50">·</span>
+              <kbd className={HINT_KEY}>↵</kbd>
+              <span>Stop and send</span>
+            </>
+          )}
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
   )
 }
+
 
 /** Inline error display for voice input errors. */
 export function VoiceInputError({ error, onDismiss, className }: { error: string | null; onDismiss?: () => void; className?: string }) {

@@ -1,5 +1,6 @@
 /**
- * Search palette - Cmd-K combo box that filters agents and sessions.
+ * Search palette - Cmd-K combo box that filters agents, sessions, dashboards
+ * and settings pages.
  *
  * Keep the primary search/navigation path as a real UI-created flow. API setup
  * is used for supporting cases once creation itself is covered, so the spec can
@@ -52,6 +53,17 @@ function searchSessionRow(
   return searchResults(page).locator(
     `[data-testid="search-session-row"][data-agent-slug="${agent.slug}"][data-session-id="${session.id}"]`,
   )
+}
+
+function searchSettingsRow(page: Page, tab: string) {
+  return searchResults(page).locator(
+    `[data-testid="search-settings-row"][data-settings-tab="${tab}"]`,
+  )
+}
+
+/** The `?from=` Settings' Back button returns to. */
+function settingsBackTarget(page: Page) {
+  return new URLSearchParams(page.url().split('?')[1] ?? '').get('from')
 }
 
 function searchSection(page: Page, label: string) {
@@ -291,5 +303,49 @@ test.describe('Search palette', () => {
     await expect(searchResults(page).getByText('No matches found')).toBeVisible()
     await expect(searchResults(page).getByTestId('search-agent-row')).toHaveCount(0)
     await expect(searchResults(page).getByTestId('search-session-row')).toHaveCount(0)
+    await expect(searchResults(page).getByTestId('search-settings-row')).toHaveCount(0)
+  })
+
+  test('API: a settings page opens in one click, and Back returns where search was opened', async ({ page, request }, testInfo) => {
+    const agent = await createAgentViaApi(request, uniqueName(testInfo, 'Search Settings Origin'))
+    await page.goto(`/agents/${agent.slug}`)
+    await expect(page.locator('[data-testid="agent-breadcrumb"]')).toHaveText(agent.name, { timeout: 15000 })
+
+    await openSearchWithKeyboard(page)
+    // Nothing from Settings before a query.
+    await expect(searchResults(page).getByTestId('search-settings-row')).toHaveCount(0)
+    await searchInput(page).fill('model providers')
+    await expect(searchSection(page, 'Settings')).toBeVisible()
+    await searchSettingsRow(page, 'llm').click()
+
+    await expect(searchInput(page)).not.toBeVisible()
+    await expect(page.locator('[data-testid="global-settings-page"]')).toBeVisible()
+    await expect(page).toHaveURL(/\/settings\/llm\?/)
+    expect(settingsBackTarget(page)).toBe(`/agents/${agent.slug}`)
+
+    await page.locator('[data-testid="settings-back"]').click()
+    await expect(page).toHaveURL(new RegExp(`/agents/${agent.slug}$`))
+  })
+
+  test('API: searching from inside Settings switches the page and keeps the Back target', async ({ page, request }, testInfo) => {
+    const agent = await createAgentViaApi(request, uniqueName(testInfo, 'Search Settings Inside'))
+    await page.goto(`/agents/${agent.slug}`)
+    await expect(page.locator('[data-testid="agent-breadcrumb"]')).toHaveText(agent.name, { timeout: 15000 })
+
+    await openSearchWithKeyboard(page)
+    await searchInput(page).fill('model providers')
+    await page.keyboard.press('Enter')
+    await expect(page).toHaveURL(/\/settings\/llm\?/)
+
+    // Opened over Settings, with the keyboard.
+    await openSearchWithKeyboard(page)
+    await searchInput(page).fill('browser use')
+    await expect(searchSettingsRow(page, 'browser')).toBeVisible()
+    await page.keyboard.press('Enter')
+    await expect(page).toHaveURL(/\/settings\/browser\?/)
+    expect(settingsBackTarget(page)).toBe(`/agents/${agent.slug}`)
+
+    await page.locator('[data-testid="settings-back"]').click()
+    await expect(page).toHaveURL(new RegExp(`/agents/${agent.slug}$`))
   })
 })

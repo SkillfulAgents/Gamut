@@ -38,6 +38,10 @@ voice.get('/configured', async (c) => {
   const live = configured ? sttProvider.getLiveConversation() : null
   return c.json({
     configured,
+    // What a dictation will connect with, known before its token is minted:
+    // the renderer opens the microphone at this protocol's rate on the click.
+    sttProvider: configured ? provider : undefined,
+    sttProtocol: configured ? sttProvider.getSttProtocol() : undefined,
     conversationEngine: configured ? sttProvider.getConversationEngine() : null,
     supportsTts,
     voices: supportsTts ? sttProvider.getTtsVoices() : [],

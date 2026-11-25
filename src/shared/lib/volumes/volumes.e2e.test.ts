@@ -1,3 +1,4 @@
+// @libsql-must-pass
 /**
  * The app's volume list, the real Docker client and the agent image, end to end.
  * Opt-in, needs Docker (Desktop, or native Linux), builds the image first:

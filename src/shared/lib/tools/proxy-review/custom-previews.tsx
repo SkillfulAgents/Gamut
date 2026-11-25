@@ -1,27 +1,32 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { gmailDraftCreateCustomPreview, gmailDraftUpdateCustomPreview, gmailSendCustomPreview } from './gmail-send'
 import { gitHubBlobCustomPreview, gitHubFileCommitCustomPreview, gitHubTreeCustomPreview } from './github'
+import { linearCommentCreateCustomPreview, linearIssueCreateCustomPreview, linearIssueUpdateCustomPreview } from './linear'
+import { outlookDraftCreateCustomPreview, outlookDraftUpdateCustomPreview, outlookSendCustomPreview } from './outlook-send'
 
 /** Draws one call from the request body the card already has, the way its service shows it. */
 export interface CustomPreview {
   toolkit: string
   method: string
   path: RegExp
+  /** The GraphQL root field the call runs, keyed as the scope map describes it (`Mutation: issueCreate`). Matches only a review whose endpoint says so. */
+  operation?: string
   /** The card's title for this call, in place of the endpoint description, once the body reads. */
   title: string | ((targetPath: string) => ReactNode)
   /** The call as its service shows it, or null for this title alone. Undefined when the body does not read, so the card keeps the endpoint title. */
   read: (requestBody: string) => Promise<ReactNode | undefined>
 }
 
-export const CUSTOM_PREVIEWS: readonly CustomPreview[] = [gmailSendCustomPreview, gmailDraftCreateCustomPreview, gmailDraftUpdateCustomPreview, gitHubBlobCustomPreview, gitHubFileCommitCustomPreview, gitHubTreeCustomPreview]
+export const CUSTOM_PREVIEWS: readonly CustomPreview[] = [gmailSendCustomPreview, gmailDraftCreateCustomPreview, gmailDraftUpdateCustomPreview, gitHubBlobCustomPreview, gitHubFileCommitCustomPreview, gitHubTreeCustomPreview, outlookSendCustomPreview, outlookDraftCreateCustomPreview, outlookDraftUpdateCustomPreview, linearIssueCreateCustomPreview, linearCommentCreateCustomPreview, linearIssueUpdateCustomPreview]
 
-export function customPreviewFor(toolkit: string, method: string, targetPath: string): CustomPreview | undefined {
-  return CUSTOM_PREVIEWS.find((preview) => preview.toolkit === toolkit && preview.method === method.toUpperCase() && preview.path.test(targetPath))
+export function customPreviewFor(toolkit: string, method: string, targetPath: string, endpointDescription?: string): CustomPreview | undefined {
+  return CUSTOM_PREVIEWS.find((preview) => preview.toolkit === toolkit && preview.method === method.toUpperCase() && preview.path.test(targetPath) &&
+    (preview.operation === undefined || !!endpointDescription?.startsWith(`${preview.operation} `)))
 }
 
 /** The matching custom preview's title and drawing, once it has read this body. */
-export function useCustomPreview(toolkit: string, method: string, targetPath: string, requestBody: string | undefined): { title: ReactNode; preview: ReactNode } | undefined {
-  const customPreview = customPreviewFor(toolkit, method, targetPath)
+export function useCustomPreview(toolkit: string, method: string, targetPath: string, requestBody: string | undefined, endpointDescription?: string): { title: ReactNode; preview: ReactNode } | undefined {
+  const customPreview = customPreviewFor(toolkit, method, targetPath, endpointDescription)
   const [read, setRead] = useState<{ customPreview: CustomPreview; requestBody: string; preview: ReactNode }>()
   useEffect(() => {
     if (!customPreview || !requestBody) return

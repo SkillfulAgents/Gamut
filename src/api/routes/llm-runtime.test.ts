@@ -1,3 +1,4 @@
+// @libsql-must-pass
 import Anthropic from '@anthropic-ai/sdk'
 import { createServer } from 'node:http'
 import { startLlmProxy } from '../../../agent-container/src/llm-proxy'

@@ -1,3 +1,4 @@
+// @libsql-must-pass
 /**
  * SUP-1507: the LLM paths read the settings once per operation (one listing,
  * one send, one helper call, one provider sync), however many connections,

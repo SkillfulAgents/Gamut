@@ -36,9 +36,9 @@ function GlobalSetting({ volume }: { volume: VolumeDefinitionSummary }) {
   return <div className="space-y-2" data-testid="global-drive-setting">
     <div className="flex items-center gap-3">
       <p className="min-w-0 flex-1 text-sm font-medium">Global</p>
-      <Select value={shown} disabled={!isPublic || current !== null || save.isPending}
+      <Select variant="row" value={shown} disabled={!isPublic || current !== null || save.isPending}
         onValueChange={value => { if (value === 'read' || value === 'write') setLevel(value) }}>
-        <SelectTrigger className="h-8 w-[120px]" aria-label="Access on every agent" title={current ? 'Turn off global to change access' : undefined}><SelectValue /></SelectTrigger>
+        <SelectTrigger aria-label="Access on every agent" title={current ? 'Turn off global to change access' : undefined}><SelectValue /></SelectTrigger>
         <SelectContent>{(['read', 'write'] as const).map(item => <SelectItem key={item} value={item}>{LEVEL_LABEL[item]}</SelectItem>)}</SelectContent>
       </Select>
       <Switch className="shrink-0" aria-label="Global drive" checked={current !== null} disabled={!isPublic || save.isPending} onCheckedChange={() => setConfirming(true)} />

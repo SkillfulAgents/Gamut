@@ -48,6 +48,10 @@ export class DockerContainerClient extends BaseContainerClient {
     return v4?.address ?? null
   }
 
+  static debugCliCommand(): string {
+    return 'docker'
+  }
+
   /**
    * Check if Docker is available on the system.
    */

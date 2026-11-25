@@ -238,13 +238,15 @@ class InputManager {
    * browser closes (possibly by a DIFFERENT session or agent than the one
    * that created the request, so per-session scoping is not enough here).
    * A blocked awaiter gets a clean error and can continue its turn instead
-   * of parking until the 24h human-input TTL.
+   * of parking until the 24h human-input TTL. With `sessionId`, only that
+   * session's (it alone stopped using the resource).
    * @returns number of requests rejected
    */
-  rejectByType(inputType: string, reason: string): number {
+  rejectByType(inputType: string, reason: string, sessionId?: string): number {
     let rejected = 0
     for (const [toolUseId, pending] of this.pending) {
       if (pending.inputType !== inputType) continue
+      if (sessionId !== undefined && pending.sessionId !== sessionId) continue
       console.log(
         `[InputManager] Rejecting ${pending.inputType} request ${toolUseId} (type invalidated): ${reason}`
       )

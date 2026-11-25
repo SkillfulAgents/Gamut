@@ -1,3 +1,4 @@
+// @libsql-must-pass
 import { PlatformLlmProvider } from '@shared/lib/llm-provider/platform-provider'
 import { getRequestUserId } from '@shared/lib/platform-attribution/request-context'
 import { BaseLlmProvider } from '@shared/lib/llm-provider/base-llm-provider'

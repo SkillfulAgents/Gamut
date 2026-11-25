@@ -3218,7 +3218,7 @@ export class MockContainerClient extends EventEmitter implements ContainerClient
     if (fetchPath === '/browser/status') {
       return new Response(JSON.stringify({
         active: this.activeBrowserSessionId !== null,
-        sessionId: this.activeBrowserSessionId,
+        sessionIds: this.activeBrowserSessionId ? [this.activeBrowserSessionId] : [],
       }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },

@@ -606,7 +606,7 @@ export function CreateAgentForm({ header, onAgentCreated, onNavigateAway, surfac
                   </Tooltip>
                 </TooltipProvider>
               )}
-              <VoiceInputButton voiceInput={composer.voiceInput} message={composer.message} disabled={isDisabled} size="compact" />
+              <VoiceInputButton voiceInput={composer.voiceInput} message={composer.message} disabled={isDisabled} size="compact" onSend={() => handleSubmitOrContinue({ preventDefault() {} })} />
               {/* As a step, the host's bottom row carries Continue. */}
               {!onContinue && (
                 <Button

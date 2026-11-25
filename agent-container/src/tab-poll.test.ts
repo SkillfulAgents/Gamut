@@ -95,4 +95,18 @@ describe('tab polling ownership', () => {
     vi.advanceTimersByTime(4000)
     expect(pollB).toHaveBeenCalledTimes(1)
   })
+
+  it('keeps one slot per viewer: two sessions\' viewers both poll, and each reconnect replaces only its own', () => {
+    const sessionA = vi.fn()
+    const sessionB = vi.fn()
+    const sessionAAgain = vi.fn()
+    started.push(startTabPolling(sessionA, 2000, 'a'))
+    started.push(startTabPolling(sessionB, 2000, 'b'))
+    started.push(startTabPolling(sessionAAgain, 2000, 'a'))
+
+    vi.advanceTimersByTime(2000)
+    expect(sessionA).not.toHaveBeenCalled()
+    expect(sessionB).toHaveBeenCalledTimes(1)
+    expect(sessionAAgain).toHaveBeenCalledTimes(1)
+  })
 })

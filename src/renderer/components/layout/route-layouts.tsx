@@ -16,7 +16,7 @@ import { GlobalNotificationHandler } from '@renderer/components/notifications/gl
 import { AgentStatusPush } from '@renderer/components/notifications/agent-status-push'
 import { SignupHandoffConsumer } from '@renderer/components/signup-handoff-consumer'
 import { OnboardingProvider } from '@renderer/context/onboarding-context'
-import { useSearch } from '@renderer/context/search-context'
+import { useSearchOpen } from '@renderer/context/search-context'
 import { useUserSettings } from '@renderer/hooks/use-user-settings'
 import { useTheme } from '@renderer/hooks/use-theme'
 import { useInsetRadius } from '@renderer/hooks/use-inset-radius'
@@ -40,6 +40,28 @@ const GettingStartedWizard = lazyRouteComponent(
 )
 
 /**
+ * Where the search dialog mounts. A leaf, so that opening and closing search
+ * renders this and the dialog, not the root layout and everything it wraps.
+ * The dialog stays off the boot graph until first opened, then stays mounted
+ * (closed) so Radix can play its exit animation and restore focus.
+ */
+function SearchDialogMount() {
+  const open = useSearchOpen()
+  const [everOpened, setEverOpened] = useState(false)
+
+  useEffect(() => {
+    if (open) setEverOpened(true)
+  }, [open])
+
+  if (!open && !everOpened) return null
+  return (
+    <Suspense fallback={null}>
+      <SearchDialog />
+    </Suspense>
+  )
+}
+
+/**
  * Root route: the always-mounted chrome (window controls, update toaster), the
  * app-level providers, and the wizard gate. Renders `<Outlet/>` for the app
  * shell.
@@ -55,13 +77,9 @@ function RootLayoutContent() {
 
   const [wizardOpen, setWizardOpen] = useState(false)
   const [wizardAgentOnly, setWizardAgentOnly] = useState(false)
-  // Latched on first open so the dialog stays mounted afterwards — unmounting
-  // an open Radix dialog would skip its close animation and focus restore.
-  const [searchEverOpened, setSearchEverOpened] = useState(false)
   const { data: userSettings } = useUserSettings()
   const { data: globalSettings } = useSettings()
   const { isAuthMode, isAdmin, user } = useUser()
-  const { open: searchOpen } = useSearch()
   const { identify } = useAnalyticsTracking()
   const search = useRouterState({
     select: (s) => s.location.search as Record<string, unknown>,
@@ -80,10 +98,6 @@ function RootLayoutContent() {
   useEffect(() => {
     identify()
   }, [identify])
-
-  useEffect(() => {
-    if (searchOpen) setSearchEverOpened(true)
-  }, [searchOpen])
 
   // Warm the search chunk once boot settles so the first cmd/ctrl-K opens
   // instantly instead of waiting on a network fetch. Off the critical path by
@@ -173,14 +187,8 @@ function RootLayoutContent() {
             <ContainerSetupHandler />
             <WindowControls />
             <UpdateToastNotifier />
-            {/* Rendered here (inside the router) so it can use useNavigate. The
-                dialog stays off the boot graph until first opened, then stays
-                mounted (closed) so Radix can play its exit animation. */}
-            {searchOpen || searchEverOpened ? (
-              <Suspense fallback={null}>
-                <SearchDialog />
-              </Suspense>
-            ) : null}
+            {/* Rendered here (inside the router) so it can use useNavigate. */}
+            <SearchDialogMount />
             {/* Above the wizard ternary: the wizard replaces the outlet, so a
                 consumer inside the outlet may never commit an effect. */}
             {/* Not on the consent page: an OAuth request carries `prompt=consent`,

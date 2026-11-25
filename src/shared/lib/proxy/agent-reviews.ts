@@ -10,6 +10,7 @@ import { generateReviewDisplayText, type ReviewDetails } from './review-display'
 import { heldByRequireRule, parseRuleProposal } from './rules/proposal-schema'
 import { getScopeLabel, type ScopeLabel } from './scope-metadata'
 import { getScopeDescriptors } from './scope-catalog'
+import { addSessionGrants, sessionGrantsCover, type SessionGrantRequest } from './session-grants'
 
 const REVIEW_TIMEOUT_MS = 5 * 60 * 1000 // 5 minutes
 
@@ -50,6 +51,31 @@ export type XAgentOperation = 'list' | 'read' | 'invoke' | 'create'
 export type ReviewRequest = Omit<ReviewDetails, 'agentSlug'> & {
   /** The session the proxied call came from, when the request named one. */
   callerSessionId?: string
+}
+
+/** How "Allow for this session" on a review ended. */
+export type SessionGrantResult =
+  /** Granted; the review and the session's other reviews it covers are released. */
+  | 'granted'
+  /** This agent holds no such review (already decided, or another agent's). */
+  | 'not_found'
+  /** The review cannot be allowed for a session: see `AgentReviews.sessionGrantOf`. */
+  | 'not_offered'
+
+/** A proxied call asking whether its session's grants cover it. */
+export type SessionGrantCheck = SessionGrantRequest & {
+  /** The session the proxied call came from, when the request named one. */
+  callerSessionId?: string
+}
+
+/** What a review's request matched, as a session grant names it. */
+function grantRequestOf(details: ReviewDetails): SessionGrantRequest {
+  return {
+    kind: details.reviewType ?? (details.targetPath.startsWith('tools/call') ? 'mcp' : 'api'),
+    targetId: details.accountId,
+    scopes: details.matchedScopes,
+    ambiguous: details.endpointAmbiguous === true,
+  }
 }
 
 export function isReviewEntry(r: PendingUserInputRequest): r is ReviewRegistryEntry {
@@ -131,6 +157,8 @@ export class AgentReviews {
     private readonly syncAwaiting: () => void,
     /** The session a card is scoped to, or undefined to scope it to the agent. See `createAgentState`. */
     private readonly cardSession: (callerSessionId: string | undefined) => string | undefined,
+    /** The session is at work: its turn runs, or background work it started does. */
+    private readonly sessionWorking: (sessionId: string) => boolean = () => false,
   ) {}
 
   private shadowSettlerCheck(context: string): void {
@@ -363,6 +391,64 @@ export class AgentReviews {
     const detail = this.details.get(id) ?? {}
     this.details.delete(id)
     return Promise.resolve(detail)
+  }
+
+  /**
+   * The session and request a review's "Allow for this session" would grant,
+   * or null when the card does not offer it: an x-agent review or a rule
+   * proposal, a card shown to the whole agent (no session to grant to), a
+   * request that matched no scope or tool (nothing to name the grant by), or
+   * one a require rule held (the rule would hold the next one too).
+   */
+  private sessionGrantOf(entry: ReviewRegistryEntry): { sessionId: string; request: SessionGrantRequest } | null {
+    const sessionId = entry.scope.sessionId
+    if (entry.kind !== 'proxy_review' || !sessionId) return null
+    const details = detailsOf(entry)
+    if (details.xAgent || details.ruleProposal || heldByRequireRule(details.ruleOutcomes)) return null
+    if (details.matchedScopes.length === 0) return null
+    return { sessionId, request: grantRequestOf(details) }
+  }
+
+  /**
+   * "Allow for this session": grant the review's session what its request
+   * matched, then release the review and that session's other reviews the
+   * grant covers. The grant is saved first, so a call that arrives meanwhile
+   * finds it instead of raising another card.
+   */
+  async allowForSession(id: string): Promise<SessionGrantResult> {
+    const entry = this.inputs.getOpenRequest(id)
+    if (!entry || !isReviewEntry(entry)) return 'not_found'
+    const grant = this.sessionGrantOf(entry)
+    if (!grant) return 'not_offered'
+    await addSessionGrants(this.slug, grant.sessionId, grant.request)
+
+    const granted = new Set(grant.request.scopes)
+    for (const sibling of this.entries()) {
+      if (sibling.id === id) continue
+      const other = this.sessionGrantOf(sibling)
+      if (!other || other.sessionId !== grant.sessionId) continue
+      if (other.request.kind !== grant.request.kind || other.request.targetId !== grant.request.targetId) continue
+      const covered = (scope: string) => granted.has(scope)
+      if (!(other.request.ambiguous ? other.request.scopes.every(covered) : other.request.scopes.some(covered))) continue
+      this.settleSwept(sibling, 'allow')
+    }
+    // Decided while the grant was being saved: the grant stands all the same.
+    const current = this.inputs.getOpenRequest(id)
+    if (current && isReviewEntry(current)) this.settleDecided(current, 'allow')
+    this.shadowSettlerCheck('allowForSession')
+    this.syncAwaiting()
+    return 'granted'
+  }
+
+  /**
+   * Whether the calling session's grants let this request through without a
+   * card. Only while that session is at work: a session id left in a script
+   * or a dashboard stops skipping the card once the session has stopped.
+   */
+  async sessionAllows(check: SessionGrantCheck): Promise<boolean> {
+    const { callerSessionId, ...request } = check
+    if (!callerSessionId || !this.sessionWorking(callerSessionId)) return false
+    return sessionGrantsCover(this.slug, callerSessionId, request)
   }
 
   resolveMatching(scope: string, decision: ReviewDecision): void {

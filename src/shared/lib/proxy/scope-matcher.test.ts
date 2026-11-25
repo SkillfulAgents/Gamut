@@ -90,6 +90,17 @@ describe('matchScopes', () => {
     expect(get.scopes.sort()).toEqual(post.scopes.sort())
   })
 
+  // Slack lists these as "No scopes required": they report only who the token signs in as.
+  it.each([['GET', '/api/auth.test'], ['POST', '/api/api.test'], ['GET', '/api/auth.teams.list']])('slack %s %s also matches the read-labelled login-check scope', (method, path) => {
+    const { scopes } = matchScopes('slack', method, path)
+    expect(scopes).toEqual(['slack.identity', 'slack.public'])
+    expect(scopes.map((scope) => getScopeLabel('slack', scope))).toEqual(['read', 'write'])
+  })
+
+  it('slack auth.revoke stays on the write-labelled catch-all scope alone', () => {
+    expect(matchScopes('slack', 'POST', '/api/auth.revoke').scopes).toEqual(['slack.public'])
+  })
+
   it('matches a Google Sheets batch update action', () => {
     const result = matchScopes(
       'googlesheets',

@@ -1,3 +1,4 @@
+// @libsql-must-pass
 import { createHmac } from 'node:crypto'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createTestDatabase, type TestDatabase } from '../db/testing/create-test-database'

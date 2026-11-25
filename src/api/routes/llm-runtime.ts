@@ -22,18 +22,33 @@ const requestSchema = z.object({
   llmProviderId: z.string().optional(),
   rejectedGeneration: z.number().int().optional(),
 })
+/** A settled read's value, or its failure thrown where the read used to be awaited. */
+function valueOf<T>(read: PromiseSettledResult<T>): T {
+  if (read.status === 'rejected') throw read.reason
+  return read.value
+}
 routes.post('/resolve', async (c) => {
   const parsed = requestSchema.safeParse(await c.req.json())
   if (!parsed.success) return c.json({ error: 'Invalid credential request' }, 400)
   const input = parsed.data
   const slug = c.get('agentSlug' as never) as string
   const actor = agentRegistry.get(slug)
-  if (!(await actor.sessions.isKnown(input.sessionId)))
-    return c.json({ error: 'Session not found' }, 404)
-  const metadata = await actor.sessions.metadata(input.sessionId)
-  const preferences = await actor.config.get('preferences')
-  // One settings read per callback: the selection and the runtime use it.
-  const settings = await getSettings()
+  // The four reads do not depend on each other, so they are in flight together:
+  // where each is a round trip, the callback waits for one, not four. Their
+  // outcomes are then taken in the order the reads used to run, so an unknown
+  // session is still a 404 whatever the other reads did, and the first failure
+  // in that order is still the one reported.
+  const [known, metadataRead, preferencesRead, settingsRead] = await Promise.allSettled([
+    actor.sessions.isKnown(input.sessionId),
+    actor.sessions.metadata(input.sessionId),
+    actor.config.get('preferences'),
+    // One settings read per callback: the selection and the runtime use it.
+    getSettings(),
+  ])
+  if (!valueOf(known)) return c.json({ error: 'Session not found' }, 404)
+  const metadata = valueOf(metadataRead)
+  const preferences = valueOf(preferencesRead)
+  const settings = valueOf(settingsRead)
   const selected = await resolveSelectionHierarchyFrom(
     settings,
     await storedSelection(metadata?.model, metadata?.llmProviderId, settings),

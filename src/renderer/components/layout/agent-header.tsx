@@ -1,4 +1,5 @@
-import { Power, Square, Clock, Loader2, Zap, MoreVertical } from 'lucide-react'
+import { Power, Square, Clock, Loader2, Zap, MoreVertical, Plug, Cable, GitFork, Wrench, type LucideIcon } from 'lucide-react'
+import type { ReactElement } from 'react'
 import { cn } from '@shared/lib/utils/cn'
 import { AppLink } from '@renderer/components/ui/app-link'
 import { useRouteLocation } from '@renderer/router/use-route-location'
@@ -6,6 +7,8 @@ import { useAgent, type useStartAgent, type useStopAgent } from '@renderer/hooks
 import { useNotableSessions, useSession } from '@renderer/hooks/use-sessions'
 import { useScheduledTask } from '@renderer/hooks/use-scheduled-tasks'
 import { useWebhookTrigger } from '@renderer/hooks/use-webhook-triggers'
+import { useAgentIntegration, useSessionAgentIntegrationId } from '@renderer/hooks/use-agent-integrations'
+import { formatProviderName } from '@shared/lib/agent-integrations/presentation'
 import { useConnectedAccounts } from '@renderer/hooks/use-connected-accounts'
 import { useRemoteMcps } from '@renderer/hooks/use-remote-mcps'
 import { useRuntimeStatus } from '@renderer/hooks/use-runtime-status'
@@ -56,6 +59,73 @@ function BreadcrumbSeparator() {
 }
 
 /**
+ * Where a session came from (its schedule, trigger, integration or caller) is a crumb before its name: a link back
+ * to that source, with the full sentence in its tooltip. That replaced a strip above the chat that said the same.
+ */
+const PROVENANCE_CRUMB =
+  'inline-flex items-center gap-1 align-top text-muted-foreground hover:text-foreground transition-colors'
+
+function CrumbIconLabel({ icon: Icon, label }: { icon: LucideIcon; label: string }) {
+  return (
+    <>
+      <Icon className="h-4 w-4 shrink-0" />
+      <span className="text-sm font-light">{label}</span>
+    </>
+  )
+}
+
+/** The source's own page (a schedule, a trigger): the same icon and name, as the current page. */
+function LeafCrumb({ icon, label }: { icon: LucideIcon; label: string }) {
+  return (
+    <span className="inline-flex items-center gap-1 align-top text-muted-foreground app-no-drag [&>span]:text-foreground">
+      <CrumbIconLabel icon={icon} label={label} />
+    </span>
+  )
+}
+
+function CrumbTooltip({ text, children }: { text: string; children: ReactElement }) {
+  return (
+    <TooltipProvider delayDuration={300}>
+      <Tooltip>
+        <TooltipTrigger asChild>{children}</TooltipTrigger>
+        <TooltipContent>
+          <p>{text}</p>
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  )
+}
+
+/** Who started a session from outside: another agent, an MCP client, or a widget's repair. Null for everything else. */
+function sessionCaller(session: {
+  invokedByAgentSlug?: string | null
+  invokedByAgentName?: string | null
+  mcpInvocation?: { clientName?: string | null } | null
+  isWidgetRepair?: boolean | null
+  widgetRepairSlug?: string | null
+}): { icon: LucideIcon; label: string; tooltip: string } | null {
+  if (session.isWidgetRepair) {
+    return {
+      icon: Wrench,
+      label: session.widgetRepairSlug || 'Widget',
+      tooltip: `Invoked to fix widget${session.widgetRepairSlug ? `: ${session.widgetRepairSlug}` : ''}`,
+    }
+  }
+  if (session.mcpInvocation) {
+    const client = session.mcpInvocation.clientName
+    return {
+      icon: Cable,
+      label: client || 'MCP',
+      tooltip: `Session started through MCP${client ? ` from "${client}"` : ''}`,
+    }
+  }
+  if (session.invokedByAgentSlug) {
+    const name = session.invokedByAgentName ?? session.invokedByAgentSlug
+    return { icon: GitFork, label: name, tooltip: `Session created by x-agent call from "${name}"` }
+  }
+  return null
+}
+/**
  * The agent header chrome (breadcrumb + start/stop) rendered by the shared
  * AgentShell layout, so it stays mounted across every agent sub-view. Which
  * crumbs show is derived from the URL via `useRouteLocation()`; the crumbs
@@ -87,6 +157,8 @@ export function AgentHeader({ slug, isViewOnly, startAgent, stopAgent }: AgentHe
   const { data: session } = useSession(sessionId, slug)
   const { data: scheduledTask } = useScheduledTask(scheduledTaskId)
   const { data: webhookTrigger } = useWebhookTrigger(webhookTriggerId)
+  const { data: integrationId } = useSessionAgentIntegrationId(slug, sessionId)
+  const { data: integration } = useAgentIntegration(integrationId ?? null)
   const { isWorking: hasActiveSessions, isAwaiting: hasSessionsAwaitingInput } = agentActivity(agent ?? {}, sessions)
   const { data: runtimeStatus, isPending: isRuntimePending } = useRuntimeStatus()
   const readiness = runtimeStatus?.runtimeReadiness
@@ -144,29 +216,24 @@ export function AgentHeader({ slug, isViewOnly, startAgent, stopAgent }: AgentHe
           const taskCrumbId = scheduledTaskId ?? (sessionId ? session?.scheduledTaskId ?? null : null)
           const taskCrumbName = scheduledTask?.name ?? (sessionId ? session?.scheduledTaskName : null)
           if (!taskCrumbId) return null
-          const isLeaf = !!scheduledTaskId
+          const label = taskCrumbName || 'Scheduled Task'
           return (
             <>
               <BreadcrumbSeparator />
-              {isLeaf ? (
-                <span className="inline-flex items-center gap-1 align-top text-muted-foreground app-no-drag">
-                  <Clock className="h-4 w-4 shrink-0" />
-                  <span className="text-sm font-light text-foreground">
-                    {taskCrumbName || 'Scheduled Task'}
-                  </span>
-                </span>
+              {scheduledTaskId ? (
+                <LeafCrumb icon={Clock} label={label} />
               ) : (
-                <AppLink
-                  to="/agents/$slug/tasks/$taskId"
-                  params={{ slug, taskId: taskCrumbId }}
-                  noDrag
-                  className="inline-flex items-center gap-1 align-top text-muted-foreground hover:text-foreground transition-colors"
-                >
-                  <Clock className="h-4 w-4 shrink-0" />
-                  <span className="text-sm font-light">
-                    {taskCrumbName || 'Scheduled Task'}
-                  </span>
-                </AppLink>
+                <CrumbTooltip text="Session created by this scheduled job">
+                  <AppLink
+                    to="/agents/$slug/tasks/$taskId"
+                    params={{ slug, taskId: taskCrumbId }}
+                    noDrag
+                    className={PROVENANCE_CRUMB}
+                    data-testid="schedule-breadcrumb"
+                  >
+                    <CrumbIconLabel icon={Clock} label={label} />
+                  </AppLink>
+                </CrumbTooltip>
               )}
             </>
           )
@@ -175,47 +242,72 @@ export function AgentHeader({ slug, isViewOnly, startAgent, stopAgent }: AgentHe
           const webhookCrumbId = webhookTriggerId ?? (sessionId ? session?.webhookTriggerId ?? null : null)
           const webhookCrumbName = webhookTrigger?.name ?? webhookTrigger?.triggerType ?? (sessionId ? session?.webhookTriggerName : null)
           if (!webhookCrumbId) return null
-          const isLeaf = !!webhookTriggerId
+          const label = webhookCrumbName || 'Webhook Trigger'
           return (
             <>
               <BreadcrumbSeparator />
-              {isLeaf ? (
-                <span className="inline-flex items-center gap-1 align-top text-muted-foreground app-no-drag">
-                  <Zap className="h-4 w-4 shrink-0" />
-                  <span className="text-sm font-light text-foreground">
-                    {webhookCrumbName || 'Webhook Trigger'}
-                  </span>
-                </span>
+              {webhookTriggerId ? (
+                <LeafCrumb icon={Zap} label={label} />
               ) : (
-                <AppLink
-                  to="/agents/$slug/webhooks/$webhookId"
-                  params={{ slug, webhookId: webhookCrumbId }}
-                  noDrag
-                  className="inline-flex items-center gap-1 align-top text-muted-foreground hover:text-foreground transition-colors"
-                >
-                  <Zap className="h-4 w-4 shrink-0" />
-                  <span className="text-sm font-light">
-                    {webhookCrumbName || 'Webhook Trigger'}
-                  </span>
-                </AppLink>
+                <CrumbTooltip text="Session created by this webhook trigger">
+                  <AppLink
+                    to="/agents/$slug/webhooks/$webhookId"
+                    params={{ slug, webhookId: webhookCrumbId }}
+                    noDrag
+                    className={PROVENANCE_CRUMB}
+                    data-testid="webhook-breadcrumb"
+                  >
+                    <CrumbIconLabel icon={Zap} label={label} />
+                  </AppLink>
+                </CrumbTooltip>
               )}
             </>
           )
         })()}
-        {sessionId && (session?.invokedByAgentSlug || session?.mcpInvocation || session?.isWidgetRepair) && (
+        {sessionId && integrationId && (
           <>
             <BreadcrumbSeparator />
-            <AppLink
-              to="/agents/$slug/called-from-agents"
-              params={{ slug }}
-              noDrag
-              className="text-sm font-light text-muted-foreground hover:text-foreground transition-colors"
-              data-testid="inbound-x-agent-breadcrumb"
+            <CrumbTooltip
+              text={integration
+                ? `Session from ${formatProviderName(integration.provider)} integration${integration.name ? ` "${integration.name}"` : ''}`
+                : 'Session from an agent integration'}
             >
-              Called from Other Agents
-            </AppLink>
+              <AppLink
+                to="/agents/$slug/chat/$integrationId"
+                params={{ slug, integrationId }}
+                search={{ session: sessionId }}
+                noDrag
+                className={PROVENANCE_CRUMB}
+                data-testid="integration-breadcrumb"
+              >
+                <CrumbIconLabel
+                  icon={Plug}
+                  label={integration ? integration.name || formatProviderName(integration.provider) : 'Integration'}
+                />
+              </AppLink>
+            </CrumbTooltip>
           </>
         )}
+        {sessionId && session && (() => {
+          const caller = sessionCaller(session)
+          if (!caller) return null
+          return (
+            <>
+              <BreadcrumbSeparator />
+              <CrumbTooltip text={caller.tooltip}>
+                <AppLink
+                  to="/agents/$slug/called-from-agents"
+                  params={{ slug }}
+                  noDrag
+                  className={PROVENANCE_CRUMB}
+                  data-testid="inbound-x-agent-breadcrumb"
+                >
+                  <CrumbIconLabel icon={caller.icon} label={caller.label} />
+                </AppLink>
+              </CrumbTooltip>
+            </>
+          )
+        })()}
         {sessionId && session?.agentSlug === agent?.slug && (
           <>
             <BreadcrumbSeparator />

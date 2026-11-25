@@ -4,7 +4,7 @@
  * installation's relay endpoint with one.
  */
 
-const BOT_SCOPES = [
+export const SLACK_BOT_SCOPES = [
   'users:read',
   'chat:write',
   'files:read',
@@ -75,7 +75,7 @@ export function slackAppManifest(app: SlackAppIdentity, webhookUrl?: string) {
         messages_tab_read_only_enabled: false,
       },
     },
-    oauth_config: { scopes: { bot: BOT_SCOPES } },
+    oauth_config: { scopes: { bot: SLACK_BOT_SCOPES } },
     settings: slackManifestSettings(webhookUrl),
   }
 }

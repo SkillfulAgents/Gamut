@@ -11,7 +11,15 @@ describe('runCommandRefusal', () => {
     expect(runCommandRefusal(['press', 'Enter'])).toBeNull()
   })
 
+  it('refuses the CLI\'s close and connect: the browser is the agent\'s, shared by its sessions', () => {
+    for (const verb of ['close', 'quit', 'exit']) expect(runCommandRefusal([verb])).toMatch(/browser_close/)
+    expect(runCommandRefusal(['close', '--all'])).toMatch(/browser_close/)
+    expect(runCommandRefusal(['connect', '9222'])).toMatch(/already connected/)
+    expect(runCommandRefusal(['tab', 'close', 't2'])).toBeNull()
+  })
+
   it('checks each command of a batch the same way', () => {
+    expect(runCommandRefusal(['batch', 'snapshot -i', 'close'])).toMatch(/browser_close/)
     expect(runCommandRefusal(['batch', 'network har start'])).toMatch(/browser_capture_traffic/)
     expect(runCommandRefusal(['batch', '--bail', 'snapshot -i', 'network har stop /workspace/x.har'])).toMatch(/browser_capture_traffic/)
     expect(runCommandRefusal(['batch', 'upload @e1 "/tmp/a b.png"'])).toMatch(/browser_upload/)

@@ -39,21 +39,18 @@ interface SettingRowProps {
   subtitle: ReactNode
   right: ReactNode
   htmlFor?: string
-  /** Stack the control under the label below `md` — for wide controls (e.g. the
-      timezone picker) that would otherwise crush the label on mobile. */
-  stack?: boolean
 }
 
-function SettingRow({ name, subtitle, right, htmlFor, stack }: SettingRowProps) {
+function SettingRow({ name, subtitle, right, htmlFor }: SettingRowProps) {
   const Name = htmlFor ? 'label' : 'div'
   return (
     <div className="py-3 px-4">
-      <div className={cn('flex gap-3', stack ? 'flex-col items-stretch md:flex-row md:items-center' : 'items-center')}>
+      <div className="flex items-center gap-3">
         <div className="min-w-0 flex-1">
           <Name htmlFor={htmlFor} className="text-xs font-medium truncate block cursor-default">{name}</Name>
           <div className="text-[11px] text-muted-foreground mt-0.5">{subtitle}</div>
         </div>
-        <div className={cn('flex items-center gap-2 shrink-0', stack && 'w-full md:w-auto')}>{right}</div>
+        <div className="flex items-center gap-2 shrink-0">{right}</div>
       </div>
     </div>
   )
@@ -276,15 +273,14 @@ export function GeneralTab({ onOpenWizard }: GeneralTabProps) {
           <SettingRow
             name="Timezone"
             subtitle="Used for interpreting scheduled task times"
-            stack
             right={
               <TimezonePicker
+                variant="row"
                 value={userSettings?.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone}
                 onValueChange={(value) => {
                   updateUserSettings.mutate({ timezone: value })
                 }}
                 disabled={isUserSettingsLoading}
-                className="w-full md:w-[300px] h-8"
               />
             }
           />

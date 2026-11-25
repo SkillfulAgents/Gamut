@@ -80,6 +80,8 @@ interface ProxyReviewRequestItemProps {
   ruleOutcomes?: ReviewRuleOutcomeView[]
   /** Present when the review asks to approve an agent's proxy rule. */
   ruleProposal?: RuleProposalReview
+  /** The card belongs to one session (not the whole agent), so its request can be allowed for that session. */
+  sessionScoped?: boolean
   sessionId?: string
   agentSlug: string
   readOnly?: boolean
@@ -162,6 +164,7 @@ function ScopeReviewRequestItem({
   endpointDescription,
   requestBody,
   ruleOutcomes,
+  sessionScoped,
   sessionId,
   agentSlug,
   readOnly,
@@ -171,7 +174,7 @@ function ScopeReviewRequestItem({
   const [error, setError] = useState<string | null>(null)
   const completeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const requestLabel = `${method} /${targetPath}`
-  const customPreview = useCustomPreview(toolkit, method, targetPath, requestBody)
+  const customPreview = useCustomPreview(toolkit, method, targetPath, requestBody, endpointDescription)
   const named = !!endpointDescription
 
   // The minimal (lowest-risk) label among the matched scopes. Allowing this whole
@@ -304,6 +307,35 @@ function ScopeReviewRequestItem({
     }
   }
 
+  const handleSession = async () => {
+    setStatus('submitting')
+    setError(null)
+    try {
+      const response = await apiFetch(
+        `/api/agents/${agentSlug}/proxy-review/${reviewId}/session`,
+        { method: 'POST' }
+      )
+      if (!response.ok) {
+        if (response.status === 404) {
+          setStatus('allowed')
+          completeTimerRef.current = setTimeout(() => onComplete(), 1000)
+          return
+        }
+        const data = await response.json()
+        throw new Error(data.error || 'Failed to allow for this session')
+      }
+      setStatus('allowed')
+      completeTimerRef.current = setTimeout(() => onComplete(), 2000)
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to allow for this session')
+      setStatus('pending')
+    }
+  }
+
+  // A grant is named by what the request matched, and made to the card's
+  // session: a card shown to the whole agent, or a request that matched
+  // nothing, has neither.
+  const offersSession = sessionScoped === true && matchedScopes.length > 0
 
   const isCompleted = status === 'allowed' || status === 'denied'
 
@@ -360,8 +392,14 @@ function ScopeReviewRequestItem({
           onDeny={(reason) => handleDecision('deny', reason)}
           onAllow={() => handleDecision('allow')}
           expanded={heldByRule ? undefined : {
-            label: 'Always Allow',
+            label: offersSession ? 'Allow More' : 'Always Allow',
             options: [
+              ...(offersSession ? [{
+                label: <span className="shrink-0">Allow for this session</span>,
+                hint: `${toolkitTitle} requests like this one run without asking for the rest of this session.`,
+                onSelect: handleSession,
+                testId: 'proxy-review-allow-session',
+              }] : []),
               // Smallest "allow all" that still covers this request. An unnamed API call's scopes union
               // every action on its path, so allowing any of them can allow a delete: those cards skip it.
               ...(isApiReview && named && minimalLabel ? [{

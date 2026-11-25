@@ -26,12 +26,13 @@ export function ChannelSetupDialog({ agentSlug, target, integrations, onClose }:
   const { provider, integrationId } = target
   const integration = integrations?.find(row => row.id === integrationId)
   const finished = integration && channelSetupComplete(integration)
+  const allowDefer = !integrations?.some(row => row.provider === provider.slug && channelSetupComplete(row))
   useEffect(() => {
     if (integrationId && integrations && (!integration || finished)) onClose()
   }, [integrationId, integrations, integration, finished, onClose])
 
   if (!integrationId) return <AgentIntegrationSetupDialog agentSlug={agentSlug} provider={provider}
-    allowDefer onIntegrationCreated={onClose} onOpenChange={open => { if (!open) onClose() }} />
+    allowDefer={allowDefer} onIntegrationCreated={onClose} onOpenChange={open => { if (!open) onClose() }} />
 
   if (!integration || finished) return null
   return <Dialog open onOpenChange={open => { if (!open) onClose() }}>
@@ -40,7 +41,7 @@ export function ChannelSetupDialog({ agentSlug, target, integrations, onClose }:
       {integration.provisionedApp
         ? <ProvisionedAppCard integration={integration} />
         : provider.ConnectionSettings && <provider.ConnectionSettings integration={integration} />}
-      <DeferChannelButton agentSlug={agentSlug} provider={provider.slug} onClose={onClose} />
+      {allowDefer && <DeferChannelButton agentSlug={agentSlug} provider={provider.slug} onClose={onClose} />}
     </DialogContent>
   </Dialog>
 }

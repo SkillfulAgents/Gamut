@@ -1,3 +1,4 @@
+// @libsql-must-pass
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { eq } from 'drizzle-orm'
 import { createTestDatabase, type TestDatabase } from '../db/testing/create-test-database'

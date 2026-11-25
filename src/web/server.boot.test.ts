@@ -43,6 +43,9 @@ const bindServerWithRetry = vi.fn(async () => {
 const afterBindInitialize = vi.fn(async () => {
   calls.push('afterBindInitialize')
 })
+const shutdownServices = vi.fn(async () => {
+  calls.push('shutdownServices')
+})
 
 vi.mock('../api', async () => {
   const { Hono } = await import('hono')
@@ -61,7 +64,7 @@ vi.mock('@shared/lib/startup', () => ({
   afterBindInitialize,
   registerBackgroundWork,
   setupServerHandlers: vi.fn(),
-  shutdownServices: vi.fn(),
+  shutdownServices,
 }))
 vi.mock('@shared/lib/boot-timing', () => ({ markBoot: vi.fn() }))
 
@@ -142,5 +145,40 @@ describe('web server boot order', () => {
     await boot()
     expect(calls).toEqual(['initErrorReporting', 'openDatabase', 'flushErrorReporting', 'exit:1', 'exit'])
     expect(exitSpy).toHaveBeenCalledWith(1)
+  })
+})
+
+describe('web server shutdown during boot', () => {
+  it('ends the process at once, and the boot under way stops before it binds', async () => {
+    process.env.NODE_ENV = 'test'
+    let finishOpening!: () => void
+    openDatabase.mockImplementationOnce(() => new Promise<void>((resolve) => {
+      calls.push('openDatabase')
+      finishOpening = resolve
+    }))
+    vi.resetModules()
+    await import('./server')
+    await vi.waitFor(() => expect(calls).toContain('openDatabase'))
+
+    // The handler is installed at module load, so a signal can land mid-boot,
+    // before there is a server to close.
+    process.emit('SIGTERM')
+    await vi.waitFor(() => expect(calls).toContain('exit'))
+    expect(exitSpy).toHaveBeenCalledWith(0)
+
+    // process.exit is mocked here, so the boot carries on: it must not bind.
+    finishOpening()
+    await vi.waitFor(() => expect(calls).toContain('registerBackgroundWork'))
+    expect(calls).toEqual([
+      'openDatabase',
+      'shutdownServices',
+      'exit:0',
+      'exit',
+      'attachErrorReportingIdentity',
+      'initializeLocalAppState',
+      'initializeAgentRegistry',
+      'initializeBackgroundWork',
+      'registerBackgroundWork',
+    ])
   })
 })

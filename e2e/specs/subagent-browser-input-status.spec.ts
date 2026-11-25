@@ -56,7 +56,7 @@ test.describe('Subagent Browser Input Status', () => {
     const sessionId = page.url().match(/\/sessions\/([^/?#]+)/)?.[1]
     if (!sessionId) throw new Error('Expected an established session')
     await page.route('**/api/agents/*/browser/status', (route) =>
-      route.fulfill({ json: { active: true, sessionId } }),
+      route.fulfill({ json: { active: true, sessionIds: [sessionId] } }),
     )
     await mockBrowserStream(page, 800, 450)
 

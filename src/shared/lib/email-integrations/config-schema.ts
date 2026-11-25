@@ -7,15 +7,18 @@ export const EMAIL_ACCESS_LEVELS = ['agent-users', 'agent-users-and-replies', 'a
 export const emailAccessSchema = z.enum(EMAIL_ACCESS_LEVELS)
 export type EmailAccessLevel = z.infer<typeof emailAccessSchema>
 const domain = z.string().trim().toLowerCase().max(253).regex(/^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,63}$/, 'Enter an exact domain, such as company.com')
+/** One allowed domain, for a form that checks each as it is added. */
+export const emailDomainSchema = domain
+export const EMAIL_ALLOWED_DOMAINS_MAX = 50
 export const emailPolicySchema = z.object({
   accessLevel: emailAccessSchema.default('agent-users-and-replies'),
-  allowedDomains: z.array(domain).max(50).default([]),
+  allowedDomains: z.array(domain).max(EMAIL_ALLOWED_DOMAINS_MAX).default([]),
 }).refine(v => v.accessLevel !== 'allowed-domains' || v.allowedDomains.length > 0, 'Add at least one allowed domain')
 export const emailSetupSchema = z.object({
   localPart: z.string().trim().toLowerCase().min(1).max(64).regex(/^[a-z0-9]+(?:[._-][a-z0-9]+)*$/, 'Use letters, numbers, dots, underscores or hyphens'),
   displayName: z.string().trim().min(1).max(200).refine(value => [...value].every(char => char.charCodeAt(0) >= 32 && char.charCodeAt(0) !== 127), 'Name cannot contain control characters'),
   accessLevel: emailAccessSchema.default('agent-users-and-replies'),
-  allowedDomains: z.array(domain).max(50).default([]),
+  allowedDomains: z.array(domain).max(EMAIL_ALLOWED_DOMAINS_MAX).default([]),
 }).strict().refine(v => v.accessLevel !== 'allowed-domains' || v.allowedDomains.length > 0, 'Add at least one allowed domain')
 /** What an agent may choose for an inbox it creates; `emailSetupSchema` then validates the values. */
 export const emailAgentSetupSchema = z.strictObject({ localPart: z.unknown(), displayName: z.unknown() }, 'An agent sets only localPart and displayName; the owner chooses who may email the inbox')
@@ -39,7 +42,7 @@ export type EmailConfig = z.infer<typeof emailConfigSchema>
 export const emailConfigPatchSchema = z.object({
   displayName: emailSetupSchema.shape.displayName.optional(),
   accessLevel: emailAccessSchema.optional(),
-  allowedDomains: z.array(domain).max(50).optional(),
+  allowedDomains: z.array(domain).max(EMAIL_ALLOWED_DOMAINS_MAX).optional(),
 }).strict()
 
 const authentication = z.object({ spf: z.string().optional(), dkim: z.string().optional(), dmarc: z.string().optional() }).nullable().optional()

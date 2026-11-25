@@ -1,3 +1,4 @@
+// @libsql-must-pass
 /** Real HTTP stalls must isolate SSO from password and installed-client auth. */
 import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'

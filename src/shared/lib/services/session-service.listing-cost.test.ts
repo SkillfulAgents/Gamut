@@ -1,3 +1,4 @@
+// @libsql-must-pass
 /**
  * listSessions's cost and coherence properties — what makes it safe to put
  * on the per-poll request path. Its visibility, ownership and ordering

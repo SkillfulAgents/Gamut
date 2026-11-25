@@ -70,7 +70,7 @@ Each half of an artifact is a named script: `start` serves the dashboard, `widge
 
 ## The refresh script contract
 
-The refresh runs `bun run widget`, so `scripts.widget` is whatever command builds the snapshot — `bun run widget.ts` from the template, but `python3 -m tools.build` or a chain with flags works just as well. It runs with cwd = the artifact directory, env `WIDGET_SLUG`, `WIDGET_DIR`, `WIDGET_OUTPUT` (absolute path to `widget.html`), `WIDGET_META` (absolute path to `widget.json`), plus everything in the agent's own environment (`.env` secrets, connected-account tokens, `PROXY_BASE_URL`).
+The refresh runs `bun run widget`, so `scripts.widget` is whatever command builds the snapshot — `bun run widget.ts` from the template, but `python3 -m tools.build` or a chain with flags works just as well. It runs with cwd = the artifact directory, env `WIDGET_SLUG`, `WIDGET_DIR`, `WIDGET_OUTPUT` (absolute path to `widget.html`), `WIDGET_META` (absolute path to `widget.json`), plus everything in the agent's own environment (`.env` secrets, connected-account tokens, `PROXY_BASE_URL`). Read `PROXY_BASE_URL` and `PROXY_TOKEN` from that environment when the script runs, and never paste their values into it: your shell's `PROXY_BASE_URL` belongs to your current session, and the refresh is given its own.
 
 - **Write the whole `widget.html`**, atomically (temp file + rename). Bake the data into the markup — no `fetch` in the page, no `<script>` that loads data.
 - **Write `widget.json`** with `{ "validUntil": "<ISO-8601>" }` — *when does this snapshot stop being true?* Compute it from the data, not from a constant:

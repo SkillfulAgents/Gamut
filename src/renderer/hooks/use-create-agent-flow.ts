@@ -49,6 +49,7 @@ export function useCreateAgentFlow({ onIdentityCreated, onAgentCreated, surface,
   const [addonBusy, setAddonBusy] = useState(false)
   const busy = useRef(false)
   const finished = useRef(false)
+  const skippedFirstJob = useRef(false)
   const confirmed = useRef(draft?.agent ? draft.identity : undefined)
   const submitRef = useRef<(() => Promise<void>) | null>(null)
   const continueRef = useRef<(() => Promise<void>) | null>(null)
@@ -95,8 +96,8 @@ export function useCreateAgentFlow({ onIdentityCreated, onAgentCreated, surface,
     setIdentity(chosen)
     // A resumed creation is already on the job step: nothing to move.
     if (stage !== 'describe') moveTo('describe')
+    let target = agent
     try {
-      let target = agent
       if (!target) {
         requestId.current ??= uuid()
         // Store the request before dispatch. A refresh can replay this exact create.
@@ -123,6 +124,8 @@ export function useCreateAgentFlow({ onIdentityCreated, onAgentCreated, surface,
       confirmed.current = chosen
       await saveOnboardingDraft?.({ agent: target, identity: chosen, sessionRequestId, stage: 'describe', prompt, runtimeOptions, dreamSelected })
     } catch (error) {
+      // The failure twin of `agent_created`, in the iOS app's terms: only while no agent exists yet, not a failed rename or orb.
+      if (!target) track('agent_creation_failed', { creation_method: 'new', reason_code: 'request_failed', ...(surface && { surface }) })
       toast.error('Could not save your agent', { description: error instanceof Error ? error.message : undefined })
       moveTo('name')
     } finally {
@@ -135,6 +138,8 @@ export function useCreateAgentFlow({ onIdentityCreated, onAgentCreated, surface,
     await onAgentCreated?.(result)
     finished.current = true
     saveCreationDraft(key, null)
+    // Skip is the only way out that neither starts a session nor installs anything, so it has no other event.
+    track('agent_creation_finished', { skipped_first_job: skippedFirstJob.current, dream_selected: dreamSelected, ...(surface && { surface }) })
   }
 
   /**
@@ -187,6 +192,7 @@ export function useCreateAgentFlow({ onIdentityCreated, onAgentCreated, surface,
     setSaving(true)
     try {
       if (destination === 'home') {
+        skippedFirstJob.current = true
         await navigate({ to: '/agents/$slug', params: { slug: agent.displaySlug }, replace: true })
         await complete(agent)
       } else {

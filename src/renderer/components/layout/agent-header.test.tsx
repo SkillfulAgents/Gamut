@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, fireEvent, render, screen } from '@testing-library/react'
-import type { ReactNode } from 'react'
+import type { AnchorHTMLAttributes, ReactNode } from 'react'
 import { AgentHeader } from './agent-header'
 import type { ApiAgent } from '@renderer/hooks/use-agents'
 import { HOVER_SCROLL_DELAY_MS } from '@renderer/components/ui/hover-scroll-text'
@@ -19,7 +19,14 @@ const mocks = vi.hoisted(() => ({
   },
   agentStatus: 'running' as 'running' | 'stopped',
   invokedByAgentSlug: undefined as string | undefined,
+  invokedByAgentName: undefined as string | undefined,
   isWidgetRepair: false,
+  widgetRepairSlug: undefined as string | undefined,
+  mcpInvocation: undefined as { clientName?: string } | undefined,
+  scheduledTaskId: undefined as string | undefined,
+  scheduledTaskName: undefined as string | undefined,
+  integrationId: null as string | null,
+  integration: undefined as { id: string; provider: string; name?: string } | undefined,
   sessionIsActive: true,
   forkedFromSessionId: undefined as string | undefined,
   forkedFromSessionName: undefined as string | undefined,
@@ -58,7 +65,12 @@ vi.mock('@renderer/hooks/use-sessions', () => ({
       name: 'Test Session',
       agentSlug: 'test-agent',
       invokedByAgentSlug: mocks.invokedByAgentSlug,
+      invokedByAgentName: mocks.invokedByAgentName,
       isWidgetRepair: mocks.isWidgetRepair,
+      widgetRepairSlug: mocks.widgetRepairSlug,
+      mcpInvocation: mocks.mcpInvocation,
+      scheduledTaskId: mocks.scheduledTaskId,
+      scheduledTaskName: mocks.scheduledTaskName,
       isActive: mocks.sessionIsActive,
       forkedFromSessionId: mocks.forkedFromSessionId,
       forkedFromSessionName: mocks.forkedFromSessionName,
@@ -74,6 +86,11 @@ vi.mock('@renderer/hooks/use-webhook-triggers', () => ({
   useWebhookTrigger: () => ({ data: undefined }),
 }))
 
+vi.mock('@renderer/hooks/use-agent-integrations', () => ({
+  useSessionAgentIntegrationId: (_slug: string, sessionId: string | null) => ({ data: sessionId ? mocks.integrationId : undefined }),
+  useAgentIntegration: (id: string | null) => ({ data: id ? mocks.integration : undefined }),
+}))
+
 vi.mock('@renderer/hooks/use-runtime-status', () => ({
   useRuntimeStatus: () => ({
     data: {
@@ -84,17 +101,32 @@ vi.mock('@renderer/hooks/use-runtime-status', () => ({
   }),
 }))
 
-vi.mock('@renderer/components/ui/app-link', () => ({
-  AppLink: ({
-    children,
-    className,
-    'data-testid': testId,
-  }: {
-    children: ReactNode
-    className?: string
-    'data-testid'?: string
-  }) => <a href="/agents/test-agent" className={className} data-testid={testId}>{children}</a>,
-}))
+vi.mock('@renderer/components/ui/app-link', async () => {
+  const { forwardRef } = await import('react')
+  type Props = {
+    to?: string
+    params?: unknown
+    search?: unknown
+    noDrag?: boolean
+    activeOptions?: unknown
+  } & AnchorHTMLAttributes<HTMLAnchorElement>
+  // Forwards its ref and the rest of its props, as the real one does, so a tooltip trigger can wrap it.
+  const AppLink = forwardRef<HTMLAnchorElement, Props>(
+    ({ children, to, params, search, noDrag: _noDrag, activeOptions: _activeOptions, ...rest }, ref) => (
+      <a
+        ref={ref}
+        href="/agents/test-agent"
+        data-to={to}
+        data-params={params ? JSON.stringify(params) : undefined}
+        data-search={search ? JSON.stringify(search) : undefined}
+        {...rest}
+      >
+        {children}
+      </a>
+    ),
+  )
+  return { AppLink }
+})
 
 // The Todo board's header chrome has its own tests (todo-session-chrome.test.tsx).
 vi.mock('@renderer/components/todo/todo-session-chrome', () => ({
@@ -159,7 +191,14 @@ describe('AgentHeader breadcrumbs', () => {
     mocks.routeView = { kind: 'session', id: 'session-1' }
     mocks.agentStatus = 'running'
     mocks.invokedByAgentSlug = undefined
+    mocks.invokedByAgentName = undefined
     mocks.isWidgetRepair = false
+    mocks.widgetRepairSlug = undefined
+    mocks.mcpInvocation = undefined
+    mocks.scheduledTaskId = undefined
+    mocks.scheduledTaskName = undefined
+    mocks.integrationId = null
+    mocks.integration = undefined
     mocks.sessionIsActive = true
     mocks.forkedFromSessionId = undefined
     mocks.forkedFromSessionName = undefined
@@ -246,10 +285,8 @@ describe('AgentHeader breadcrumbs', () => {
     expect(screen.getByTestId('session-breadcrumb-context-menu')).toHaveAttribute('data-is-active', 'false')
   })
 
-  it('inserts Called from Other Agents as the parent crumb for x-agent sessions', () => {
-    mocks.invokedByAgentSlug = 'caller-agent'
+  const renderHeader = () => {
     const mutation = { mutate: vi.fn(), isPending: false }
-
     render(
       <AgentHeader
         slug="test-agent"
@@ -258,27 +295,71 @@ describe('AgentHeader breadcrumbs', () => {
         stopAgent={mutation as never}
       />,
     )
+  }
+
+  it('names the calling agent in a crumb before the session, linking to Called from Other Agents', () => {
+    mocks.invokedByAgentSlug = 'caller-agent'
+    mocks.invokedByAgentName = 'Caller Agent'
+    renderHeader()
 
     const trail = screen.getByTestId('breadcrumb-trail')
-    const parentCrumb = screen.getByTestId('inbound-x-agent-breadcrumb')
-    expect(parentCrumb).toHaveTextContent('Called from Other Agents')
-    expect(trail).toContainElement(parentCrumb)
+    const callerCrumb = screen.getByTestId('inbound-x-agent-breadcrumb')
+    expect(callerCrumb).toHaveTextContent('Caller Agent')
+    expect(callerCrumb).toHaveAttribute('data-to', '/agents/$slug/called-from-agents')
+    expect(trail).toContainElement(callerCrumb)
     expect(trail).toContainElement(screen.getByTestId('session-breadcrumb'))
   })
 
-  it('uses the inbound history breadcrumb for widget repairs without a caller agent', () => {
+  it('names the widget a repair session was invoked to fix', () => {
     mocks.isWidgetRepair = true
-    const mutation = { mutate: vi.fn(), isPending: false }
-    render(
-      <AgentHeader
-        slug="test-agent"
-        isViewOnly={false}
-        startAgent={mutation as never}
-        stopAgent={mutation as never}
-      />,
-    )
+    mocks.widgetRepairSlug = 'weather'
+    renderHeader()
 
-    expect(screen.getByTestId('inbound-x-agent-breadcrumb')).toHaveTextContent('Called from Other Agents')
+    expect(screen.getByTestId('inbound-x-agent-breadcrumb')).toHaveTextContent('weather')
+  })
+
+  it('names the MCP client that started the session', () => {
+    mocks.mcpInvocation = { clientName: 'Claude Desktop' }
+    renderHeader()
+
+    expect(screen.getByTestId('inbound-x-agent-breadcrumb')).toHaveTextContent('Claude Desktop')
+  })
+
+  it('links a scheduled session back to its schedule', () => {
+    mocks.scheduledTaskId = 'task-1'
+    mocks.scheduledTaskName = 'Proactive heartbeat'
+    renderHeader()
+
+    const crumb = screen.getByTestId('schedule-breadcrumb')
+    expect(crumb).toHaveTextContent('Proactive heartbeat')
+    expect(crumb).toHaveAttribute('data-params', JSON.stringify({ slug: 'test-agent', taskId: 'task-1' }))
+  })
+
+  it('names an integration session\'s integration and links to its open conversation', () => {
+    mocks.integrationId = 'int-1'
+    mocks.integration = { id: 'int-1', provider: 'slack', name: 'Support bot' }
+    renderHeader()
+
+    const crumb = screen.getByTestId('integration-breadcrumb')
+    expect(crumb).toHaveTextContent('Support bot')
+    expect(crumb).toHaveAttribute('data-to', '/agents/$slug/chat/$integrationId')
+    expect(crumb).toHaveAttribute('data-params', JSON.stringify({ slug: 'test-agent', integrationId: 'int-1' }))
+    expect(crumb).toHaveAttribute('data-search', JSON.stringify({ session: 'session-1' }))
+  })
+
+  it('still offers the integration crumb before the integration loads', () => {
+    mocks.integrationId = 'int-1'
+    renderHeader()
+
+    expect(screen.getByTestId('integration-breadcrumb')).toHaveTextContent('Integration')
+  })
+
+  it('shows no provenance crumbs for an ordinary session', () => {
+    renderHeader()
+
+    expect(screen.queryByTestId('inbound-x-agent-breadcrumb')).toBeNull()
+    expect(screen.queryByTestId('integration-breadcrumb')).toBeNull()
+    expect(screen.queryByTestId('schedule-breadcrumb')).toBeNull()
   })
 
   it('marks a forked session with an icon that opens a link to the source on hover', () => {

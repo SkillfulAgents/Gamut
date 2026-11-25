@@ -68,7 +68,7 @@ export function ChatIntegrationSettingsCard({ integration, canManageAccess }: {
               />
               <ToggleRow
                 label="Reply in thread (recommended)"
-                helperText="Without it, the agent answers a top-level message at the top of the channel, in one conversation shared by the whole channel."
+                helperText="Replies under the message, not in the channel."
                 checked={!!settings.answerInThread}
                 disabled={updateIntegration.isPending}
                 onCheckedChange={(checked) =>
@@ -81,7 +81,7 @@ export function ChatIntegrationSettingsCard({ integration, canManageAccess }: {
               {!!settings.answerInThread && (
                 <ToggleRow
                   label="Separate conversation per thread (recommended)"
-                  helperText="Without it, every thread shares one conversation, and a reply can land in another request's thread."
+                  helperText="Each thread stays separate, so requests don’t mix."
                   checked={!!settings.newSessionPerThread}
                   disabled={updateIntegration.isPending}
                   onCheckedChange={(checked) =>

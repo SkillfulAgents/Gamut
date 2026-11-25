@@ -1218,7 +1218,7 @@ export function HomePage() {
             data-testid="header-search-trigger"
           >
             <Search className="h-3.5 w-3.5 shrink-0" />
-            <span className="flex-1 text-left truncate">Search agents and sessions...</span>
+            <span className="flex-1 text-left truncate">Search agents, sessions, and settings...</span>
             <kbd className="shrink-0 font-mono text-[11px] text-muted-foreground/70">
               {isMac ? '⌘K' : 'Ctrl+K'}
             </kbd>

@@ -1,3 +1,4 @@
+// @libsql-must-pass
 import { eq, sql } from 'drizzle-orm'
 import { chatIntegrations } from '../db/schema'
 import { createAgentIntegrationSession } from '../services/agent-integration-session-service'

@@ -63,6 +63,8 @@ function channels(color: string): [number, number, number] {
 export function DisplacedDotField({
   className,
   alpha = 0.2,
+  spacing = SPACING,
+  dotRadius = DOT_RADIUS,
   rippleExclude,
   intro = false,
 }: {
@@ -70,6 +72,10 @@ export function DisplacedDotField({
   className?: string
   /** Every dot's opacity, moving or not. */
   alpha?: number
+  /** Pixels between dots, for a finer or coarser grid than the website's. */
+  spacing?: number
+  /** Each dot's radius in pixels. */
+  dotRadius?: number
   /** Extra selector for regions whose clicks shouldn't ripple. Controls never ripple. */
   rippleExclude?: string
   /** Boot the grid up with a wave on load (skipped with reduced motion). */
@@ -122,8 +128,8 @@ export function DisplacedDotField({
       height = rect.height
       canvas.width = Math.round(width * dpr)
       canvas.height = Math.round(height * dpr)
-      cols = Math.ceil(width / SPACING) + 1
-      rows = Math.ceil(height / SPACING) + 1
+      cols = Math.ceil(width / spacing) + 1
+      rows = Math.ceil(height / spacing) + 1
       const n = cols * rows
       ox = new Float32Array(n)
       oy = new Float32Array(n)
@@ -138,8 +144,8 @@ export function DisplacedDotField({
     }
 
     // Center the lattice so the margins match on both sides.
-    const originX = () => (width - (cols - 1) * SPACING) / 2
-    const originY = () => (height - (rows - 1) * SPACING) / 2
+    const originX = () => (width - (cols - 1) * spacing) / 2
+    const originY = () => (height - (rows - 1) * spacing) / 2
 
     // Returns [max speed, max offset] across the field: maxima, so a few
     // stragglers can't park off-grid in a darker shade.
@@ -156,9 +162,9 @@ export function DisplacedDotField({
       const maxR = Math.hypot(width, height) + RIPPLE_BAND
       const rings = ripples.map((rp) => ({ ...rp, kick: RIPPLE_KICK * (1 - 0.6 * (rp.r / maxR)) }))
       for (let r = 0, i = 0; r < rows; r++) {
-        const gy = y0 + r * SPACING
+        const gy = y0 + r * spacing
         for (let c = 0; c < cols; c++, i++) {
-          const gx = x0 + c * SPACING
+          const gx = x0 + c * spacing
           for (const ring of rings) {
             const dx = gx - ring.x
             const dy = gy - ring.y
@@ -211,9 +217,9 @@ export function DisplacedDotField({
       const cy = INTRO_ORIGIN.y * height
       const buckets = new Map<number, { paths: Path2D[]; count: number }>()
       for (let r = 0, i = 0; r < rows; r++) {
-        const gy = y0 + r * SPACING
+        const gy = y0 + r * spacing
         for (let c = 0; c < cols; c++, i++) {
-          const gx = x0 + c * SPACING
+          const gx = x0 + c * spacing
           const since = elapsed - Math.hypot(gx - cx, gy - cy) / INTRO_SPEED
           if (since <= 0) continue
           const fade = Math.min(1, since / INTRO_FADE)
@@ -227,7 +233,7 @@ export function DisplacedDotField({
           const path = bucket.paths[bucket.paths.length - 1]
           const x = gx + ox[i]
           const y = gy + oy[i]
-          const rad = DOT_RADIUS * (1 + 0.6 * (g / (LEVELS - 1)))
+          const rad = dotRadius * (1 + 0.6 * (g / (LEVELS - 1)))
           path.moveTo(x + rad, y)
           path.arc(x, y, rad, 0, Math.PI * 2)
         }
@@ -256,10 +262,10 @@ export function DisplacedDotField({
       ctx.beginPath()
       for (let r = 0, i = 0; r < rows; r++) {
         for (let c = 0; c < cols; c++, i++) {
-          const x = x0 + c * SPACING + ox[i]
-          const y = y0 + r * SPACING + oy[i]
-          ctx.moveTo(x + DOT_RADIUS, y)
-          ctx.arc(x, y, DOT_RADIUS, 0, Math.PI * 2)
+          const x = x0 + c * spacing + ox[i]
+          const y = y0 + r * spacing + oy[i]
+          ctx.moveTo(x + dotRadius, y)
+          ctx.arc(x, y, dotRadius, 0, Math.PI * 2)
           if ((i + 1) % DOTS_PER_PATH === 0) {
             ctx.fill()
             ctx.beginPath()
@@ -401,7 +407,7 @@ export function DisplacedDotField({
       window.removeEventListener('click', onClick)
       document.documentElement.removeEventListener('pointerleave', onPointerLeave)
     }
-  }, [alpha, rippleExclude, intro])
+  }, [alpha, spacing, dotRadius, rippleExclude, intro])
 
   useEffect(() => {
     refreshColorRef.current?.()

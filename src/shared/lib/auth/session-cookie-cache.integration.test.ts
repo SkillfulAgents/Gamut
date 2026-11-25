@@ -1,3 +1,4 @@
+// @libsql-must-pass
 /**
  * The session cookie cache on the real Better Auth endpoints, adapter and cookies: with it on, a
  * signed-in browser's session is read from its signed cookie; with it off, from the database on

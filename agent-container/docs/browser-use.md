@@ -128,6 +128,9 @@ Use `browser_run("tab")` to inspect stable tab IDs such as `t1` and `t2`.
 - Check tabs periodically during long workflows and after links that may open a
   new tab.
 - Use stable string IDs; bare numeric tab indexes are not valid.
+- Other sessions of this agent can use the browser at the same time. Their tabs
+  are listed too, marked `opened by another session`, and `another session is on
+  it now` for the tab one of them is on: that tab can't be switched to or closed.
 
 `browser_open` automatically switches to an existing tab with the same URL when
 possible.

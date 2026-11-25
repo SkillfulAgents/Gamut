@@ -1,3 +1,4 @@
+// @libsql-must-pass
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Hono, type MiddlewareHandler } from 'hono'
 import { eq } from 'drizzle-orm'

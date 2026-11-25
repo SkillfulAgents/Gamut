@@ -1,3 +1,4 @@
+// @libsql-must-pass
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { Hono } from 'hono'
 import { createTestDatabase, type TestDatabase } from '@shared/lib/db/testing/create-test-database'
@@ -40,7 +41,7 @@ vi.mock('@shared/lib/webhook-relay', async (importOriginal) => ({
   getWebhookRelay: () => ({ createEndpoint: relay.create, updateEndpoint: relay.update, disableEndpoint: relay.disable, register: vi.fn() }),
 }))
 import { sql } from 'drizzle-orm'
-import { getAgentIntegration } from '@shared/lib/services/agent-integration-service'
+import { createAgentIntegration, getAgentIntegration } from '@shared/lib/services/agent-integration-service'
 import { slackVerificationProfile } from '@shared/lib/chat-integrations/slack-webhooks'
 import router from './agent-integrations'
 
@@ -79,6 +80,20 @@ it('creates a Slack installation with its webhook URL before the app exists, the
   expect(runtime.resume).toHaveBeenCalledWith(row.id)
   expect((await stored(row.id)).config).toMatchObject({ botToken: 'xoxb-1', signingSecret: 'signing-secret', onlyMentioned: true, relay: { endpointId: 'whep_1' } })
   expect(await finished.json()).toMatchObject({ hasCredentials: true, slack: { botTokenSaved: true, signingSecretSaved: true } })
+})
+
+it('saves behavior on a directory-created app without connecting before installation', async () => {
+  const id = await createAgentIntegration({ agentSlug: 'agent', provider: 'slack', status: 'disconnected', config: {
+    onlyMentioned: true, signingSecret: 'fixture-secret',
+    relay: { endpointId: 'endpoint', url: 'https://relay.test/endpoint', scope: 'fixture' },
+    provisionedApp: { directoryId: 'directory', app: {}, installUrl: 'https://slack.test/install', installed: false, name: 'Helper', iconSet: false },
+  } })
+  const result = await patch(id, { config: { onlyMentioned: false }, showToolCalls: true })
+  expect(result.status).toBe(200)
+  expect(await result.json()).toMatchObject({ status: 'disconnected', showToolCalls: true, provisionedApp: { installed: false } })
+  expect((await stored(id)).config.onlyMentioned).toBe(false)
+  expect(runtime.remove).not.toHaveBeenCalled()
+  expect(runtime.add).not.toHaveBeenCalled()
 })
 
 it('keeps a waiting installation as it was when its bot token is mistyped', async () => {
