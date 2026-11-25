@@ -3,8 +3,21 @@ import * as SelectPrimitive from "@radix-ui/react-select"
 import { Check, ChevronDown, ChevronUp } from "lucide-react"
 
 import { cn } from "@shared/lib/utils"
+import { PickerTrigger, type PickerVariant } from "./picker-trigger"
 
-const Select = SelectPrimitive.Root
+/** Row pickers align their list to the trigger's right edge. */
+const SelectVariantContext = React.createContext<PickerVariant>("outline")
+
+function Select({
+  variant = "outline",
+  ...props
+}: React.ComponentProps<typeof SelectPrimitive.Root> & { variant?: PickerVariant }) {
+  return (
+    <SelectVariantContext.Provider value={variant}>
+      <SelectPrimitive.Root {...props} />
+    </SelectVariantContext.Provider>
+  )
+}
 
 const SelectGroup = SelectPrimitive.Group
 
@@ -13,21 +26,29 @@ const SelectValue = SelectPrimitive.Value
 const SelectTrigger = React.forwardRef<
   React.ElementRef<typeof SelectPrimitive.Trigger>,
   React.ComponentPropsWithoutRef<typeof SelectPrimitive.Trigger>
->(({ className, children, ...props }, ref) => (
-  <SelectPrimitive.Trigger
-    ref={ref}
-    className={cn(
-      "flex h-9 w-full items-center justify-between whitespace-nowrap rounded-control border border-input bg-transparent px-3 py-2 text-xs shadow-sm ring-offset-background data-[placeholder]:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50 [&>span]:line-clamp-1",
-      className
-    )}
-    {...props}
-  >
-    {children}
-    <SelectPrimitive.Icon asChild>
-      <ChevronDown className="h-4 w-4 opacity-50" />
-    </SelectPrimitive.Icon>
-  </SelectPrimitive.Trigger>
-))
+>(({ className, children, ...props }, ref) => {
+  const variant = React.useContext(SelectVariantContext)
+  return (
+    <PickerTrigger
+      asChild
+      variant={variant}
+      className={cn(
+        "flex items-center whitespace-nowrap rounded-control ring-offset-background focus:outline-none disabled:cursor-not-allowed disabled:opacity-50 [&>span]:line-clamp-1",
+        variant === "row"
+          ? "shrink-0 focus-visible:ring-1 focus-visible:ring-ring"
+          : "h-9 w-full justify-between border border-input bg-transparent px-3 py-2 text-xs shadow-sm data-[placeholder]:text-muted-foreground focus:ring-1 focus:ring-ring",
+        className
+      )}
+      outlineIcon={
+        <SelectPrimitive.Icon asChild>
+          <ChevronDown className="h-4 w-4 opacity-50" />
+        </SelectPrimitive.Icon>
+      }
+    >
+      <SelectPrimitive.Trigger ref={ref} {...props}>{children}</SelectPrimitive.Trigger>
+    </PickerTrigger>
+  )
+})
 SelectTrigger.displayName = SelectPrimitive.Trigger.displayName
 
 const SelectScrollUpButton = React.forwardRef<
@@ -68,7 +89,9 @@ SelectScrollDownButton.displayName =
 const SelectContent = React.forwardRef<
   React.ElementRef<typeof SelectPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof SelectPrimitive.Content>
->(({ className, children, position = "popper", ...props }, ref) => (
+>(({ className, children, position = "popper", align, ...props }, ref) => {
+  const variant = React.useContext(SelectVariantContext)
+  return (
   <SelectPrimitive.Portal>
     <SelectPrimitive.Content
       ref={ref}
@@ -79,6 +102,7 @@ const SelectContent = React.forwardRef<
         className
       )}
       position={position}
+      align={align ?? (variant === "row" && position === "popper" ? "end" : undefined)}
       {...props}
     >
       <SelectScrollUpButton />
@@ -94,7 +118,8 @@ const SelectContent = React.forwardRef<
       <SelectScrollDownButton />
     </SelectPrimitive.Content>
   </SelectPrimitive.Portal>
-))
+  )
+})
 SelectContent.displayName = SelectPrimitive.Content.displayName
 
 const SelectLabel = React.forwardRef<

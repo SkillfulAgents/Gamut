@@ -28,11 +28,12 @@ interface AutoDeleteSelectProps {
 export function AutoDeleteSelect({ value, onChange, disabled }: AutoDeleteSelectProps) {
   return (
     <Select
+      variant="row"
       value={(value ?? 0).toString()}
       onValueChange={(val) => onChange(parseInt(val, 10))}
       disabled={disabled}
     >
-      <SelectTrigger className="h-8 w-[140px]" aria-label="Session auto-delete">
+      <SelectTrigger aria-label="Session auto-delete">
         <SelectValue />
       </SelectTrigger>
       <SelectContent>

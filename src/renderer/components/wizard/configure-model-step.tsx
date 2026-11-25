@@ -147,6 +147,7 @@ export function ConfigureModelStep() {
             <div className="flex items-center justify-between gap-3 border-t px-3 py-3">
               <span className="text-xs text-muted-foreground">Model</span>
               <SettingsModelSelect
+                variant="row"
                 model={agentModel}
                 onModelChange={persistSelection}
                 align="end"
