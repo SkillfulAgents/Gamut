@@ -36,14 +36,16 @@ describe('ExperimentsTab', () => {
     expect(screen.getByTestId('experiments-empty')).toHaveTextContent('No experiments right now.')
   })
 
-  it('lists each experiment with its own switch, reflecting what the user stored', () => {
+  it('lists each experiment with its own switch, reflecting what the user stored', async () => {
     state.experiments = [
       { id: 'alpha', name: 'Alpha', description: 'The first one.' },
       { id: 'beta', name: 'Beta', description: 'The second one.' },
     ]
     state.switches = { beta: true }
     renderWithProviders(<ExperimentsTab />)
-    expect(screen.getByText('The first one.')).toBeInTheDocument()
+    // The description sits behind the row's help icon.
+    fireEvent.focus(screen.getByRole('button', { name: 'About Alpha' }))
+    expect((await screen.findAllByText('The first one.')).length).toBeGreaterThan(0)
     expect(screen.getByRole('switch', { name: 'Alpha' })).toHaveAttribute('aria-checked', 'false')
     expect(screen.getByRole('switch', { name: 'Beta' })).toHaveAttribute('aria-checked', 'true')
   })
