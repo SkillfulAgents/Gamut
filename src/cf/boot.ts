@@ -34,6 +34,7 @@ import type { ExecutionContext } from 'cloudflare:workers'
 import { CloudflareAppState } from './objects/cloudflare-app-state'
 import { CloudflareBlobStore, CloudflareUploadByteStore } from './cloudflare-host-files'
 import { CloudflareImageService } from './cloudflare-image-service'
+import { withoutDefaultCache } from './lib/request-cache'
 import { createCloudflareErrorReporter } from './lib/cloudflare-error-reporting'
 import { CloudflareKeyManager } from './cloudflare-key-manager'
 import { CloudflareTaskManager, announceSessionStart, runHostToolInTaskManager } from './objects/cloudflare-task-manager'
@@ -192,6 +193,7 @@ function installFetch(): void {
   if (fetchInstalled) return
   fetchInstalled = true
   globalThis.fetch = errorOnRedirect(globalThis.fetch)
+  globalThis.Request = withoutDefaultCache(globalThis.Request)
 }
 
 /**
