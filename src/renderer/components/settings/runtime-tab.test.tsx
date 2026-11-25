@@ -107,23 +107,27 @@ describe('RuntimeTab', () => {
   })
 
   it('disables save when agent image is blank', async () => {
+    const user = userEvent.setup()
     renderWithProviders(<RuntimeTab />)
 
-    const agentImageInput = screen.getByLabelText('Agent Image')
-    fireEvent.change(agentImageInput, { target: { value: '   ' } })
+    await user.click(screen.getByRole('combobox', { name: 'Agent image' }))
+    await user.click(screen.getByRole('option', { name: 'Custom…' }))
+    fireEvent.change(screen.getByLabelText('Custom agent image'), { target: { value: '   ' } })
 
     expect(screen.getByText('Agent image is required.')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Apply' })).toBeDisabled()
   })
 
   it('trims agent image before saving', async () => {
     const user = userEvent.setup()
     renderWithProviders(<RuntimeTab />)
 
-    const agentImageInput = screen.getByLabelText('Agent Image')
+    await user.click(screen.getByRole('combobox', { name: 'Agent image' }))
+    await user.click(screen.getByRole('option', { name: 'Custom…' }))
+    const agentImageInput = screen.getByLabelText('Custom agent image')
     await user.clear(agentImageInput)
     await user.type(agentImageInput, '  ghcr.io/custom/image:latest  ')
-    await user.click(screen.getByRole('button', { name: 'Save' }))
+    await user.click(screen.getByRole('button', { name: 'Apply' }))
 
     expect(mockUpdateSettings.mutateAsync).toHaveBeenCalledWith({
       container: {
@@ -143,9 +147,19 @@ describe('RuntimeTab', () => {
 
     renderWithProviders(<RuntimeTab />)
 
-    await user.click(screen.getByRole('button', { name: 'Use default' }))
+    // A stored custom image reads as the row's value, with no field showing.
+    const trigger = screen.getByRole('combobox', { name: 'Agent image' })
+    expect(trigger).toHaveTextContent('ghcr.io/custom/image:latest')
+    expect(screen.queryByLabelText('Custom agent image')).not.toBeInTheDocument()
 
-    expect(screen.getByLabelText('Agent Image')).toHaveValue(getDefaultAgentImage())
+    await user.click(trigger)
+    await user.click(screen.getByRole('option', { name: 'Default' }))
+    expect(trigger).toHaveTextContent('Default')
+
+    await user.click(screen.getByRole('button', { name: 'Apply' }))
+    expect(mockUpdateSettings.mutateAsync).toHaveBeenCalledWith(
+      expect.objectContaining({ container: expect.objectContaining({ agentImage: getDefaultAgentImage() }) }),
+    )
   })
 
   describe('runner without custom agent image support (e.g. lambda-microvm)', () => {
@@ -163,11 +177,11 @@ describe('RuntimeTab', () => {
       ]
     })
 
-    it('disables the Agent Image input and hides Use default', () => {
+    it('disables the agent image dropdown and offers no field', () => {
       renderWithProviders(<RuntimeTab />)
 
-      expect(screen.getByLabelText('Agent Image')).toBeDisabled()
-      expect(screen.queryByRole('button', { name: 'Use default' })).not.toBeInTheDocument()
+      expect(screen.getByRole('combobox', { name: 'Agent image' })).toBeDisabled()
+      expect(screen.queryByLabelText('Custom agent image')).not.toBeInTheDocument()
       expect(
         screen.getByText('Agent image is managed by the deployment for this runner and cannot be changed here.')
       ).toBeInTheDocument()
@@ -236,11 +250,11 @@ describe('RuntimeTab', () => {
     const user = userEvent.setup()
     renderWithProviders(<RuntimeTab />)
 
-    await user.click(screen.getByRole('button', { name: 'Add Variable' }))
+    await user.click(screen.getByRole('button', { name: 'Add variable' }))
     await user.type(screen.getByLabelText('Variable Name'), 'claude code max output tokens')
     await user.type(screen.getByLabelText('Value'), '32000')
     const dialog = screen.getByRole('dialog')
-    await user.click(within(dialog).getByRole('button', { name: 'Add Variable' }))
+    await user.click(within(dialog).getByRole('button', { name: 'Add variable' }))
 
     expect(mockUpdateSettings.mutateAsync).toHaveBeenCalledWith({
       customEnvVars: {
@@ -253,11 +267,11 @@ describe('RuntimeTab', () => {
     const user = userEvent.setup()
     renderWithProviders(<RuntimeTab />)
 
-    await user.click(screen.getByRole('button', { name: 'Add Variable' }))
+    await user.click(screen.getByRole('button', { name: 'Add variable' }))
     await user.type(screen.getByLabelText('Variable Name'), 'PROXY_BASE_URL')
     await user.type(screen.getByLabelText('Value'), 'evil')
     const dialog = screen.getByRole('dialog')
-    await user.click(within(dialog).getByRole('button', { name: 'Add Variable' }))
+    await user.click(within(dialog).getByRole('button', { name: 'Add variable' }))
 
     // The reserved-runtime-var error is surfaced…
     expect(await screen.findByText(/reserved runtime variable/i)).toBeInTheDocument()
@@ -352,7 +366,7 @@ describe('RuntimeTab', () => {
 
       renderWithProviders(<RuntimeTab />)
 
-      const cpuTrigger = screen.getByRole('combobox', { name: 'CPU Limit' })
+      const cpuTrigger = screen.getByRole('combobox', { name: 'CPU limit per agent' })
       expect(cpuTrigger).toHaveTextContent('1.5 cores')
     })
 
@@ -361,7 +375,7 @@ describe('RuntimeTab', () => {
 
       renderWithProviders(<RuntimeTab />)
 
-      const memoryTrigger = screen.getByRole('combobox', { name: 'Memory Limit' })
+      const memoryTrigger = screen.getByRole('combobox', { name: 'Memory limit per agent' })
       expect(memoryTrigger).toHaveTextContent('3g')
     })
 
@@ -371,7 +385,7 @@ describe('RuntimeTab', () => {
 
       renderWithProviders(<RuntimeTab />)
 
-      const cpuTrigger = screen.getByRole('combobox', { name: 'CPU Limit' })
+      const cpuTrigger = screen.getByRole('combobox', { name: 'CPU limit per agent' })
       cpuTrigger.focus()
       // Radix Select in jsdom is unreliable via click; keyboard nav is deterministic.
       await user.keyboard('[Enter]')
@@ -380,7 +394,7 @@ describe('RuntimeTab', () => {
 
       expect(cpuTrigger).toHaveTextContent('4 cores')
 
-      await user.click(screen.getByRole('button', { name: 'Save' }))
+      await user.click(screen.getByRole('button', { name: 'Apply' }))
 
       expect(mockUpdateSettings.mutateAsync).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -398,10 +412,10 @@ it('directs LLM-specific variables to the provider editor instead of saving glob
   mockUpdateSettings.mutateAsync.mockClear()
   mockSettings.data.customEnvVars = {}
   renderWithProviders(<RuntimeTab />)
-  await userEvent.click(screen.getByRole('button', { name: 'Add Variable' }))
+  await userEvent.click(screen.getByRole('button', { name: 'Add variable' }))
   await userEvent.type(screen.getByLabelText('Variable Name'), 'ANTHROPIC_AUTH_TOKEN')
   await userEvent.type(screen.getByLabelText('Value', { exact: true }), 'unused-secret')
-  await userEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Add Variable' }))
+  await userEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Add variable' }))
   expect(mockUpdateSettings.mutateAsync).not.toHaveBeenCalled()
   expect(screen.getByText(/Set LLM provider variables in Settings/)).toBeInTheDocument()
 })
