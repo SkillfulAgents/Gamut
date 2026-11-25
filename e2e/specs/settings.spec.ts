@@ -415,7 +415,7 @@ test.describe('Settings persistence', () => {
 
       await page.locator('#provider-user-id').fill(userId)
 
-      const saveBtn = page.getByRole('button', { name: 'Save User ID' })
+      const saveBtn = page.getByRole('button', { name: 'Save user ID' })
       await expect(saveBtn).toBeVisible()
 
       const savePromise = waitForSettingsSave(page)
@@ -432,7 +432,7 @@ test.describe('Settings persistence', () => {
       const persisted = await settings(request)
       expect(persisted.accountProviderUserId).toBe(userId)
 
-      const removeBtn = page.getByRole('button', { name: 'Remove User ID' })
+      const removeBtn = page.getByRole('button', { name: 'Remove user ID' })
       const removePromise = waitForSettingsSave(page)
       await removeBtn.click()
       await removePromise
