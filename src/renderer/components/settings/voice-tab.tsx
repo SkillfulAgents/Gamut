@@ -26,6 +26,8 @@ import type { ApiKeyStatus, VoiceProvider } from '@shared/lib/config/settings'
 import { TTS_SPEEDS, resolveHoldSound, resolveTtsSpeed, resolveUserMusic, type TtsVoiceInfo } from '@shared/lib/voice/tts-preferences'
 import { userMusicSupported } from '@renderer/hooks/use-user-music'
 import { MicrophoneSettings } from './microphone-settings'
+import { SETTINGS_CARD_CLASS, SETTINGS_SECTION_HEADING, SettingRow } from './setting-row'
+import { cn } from '@shared/lib/utils/cn'
 
 function SttApiKeyInput({ provider, disabled }: { provider: ApiKeyProvider; disabled: boolean }) {
   const { data: settings } = useSettings()
@@ -173,18 +175,18 @@ function SttApiKeyInput({ provider, disabled }: { provider: ApiKeyProvider; disa
                 Validating...
               </>
             ) : (
-              'Validate & Save'
+              'Validate & save'
             )}
           </Button>
         )}
         {apiKeyStatus?.source === 'settings' && (
           <Button
             size="sm"
-            variant="outline"
+            variant="soft"
             onClick={handleRemoveApiKey}
             disabled={isBusy}
           >
-            {isRemoving ? 'Removing...' : 'Remove Saved Key'}
+            {isRemoving ? 'Removing...' : 'Remove saved key'}
           </Button>
         )}
       </div>
@@ -237,28 +239,32 @@ const VALID_PROVIDERS = new Set(VOICE_PROVIDER_OPTIONS.map(p => p.value))
 const VOICE_PREVIEW_ID = 'settings-voice-preview'
 const VOICE_PREVIEW_TEXT = 'Hi! This is how your agent will sound when it reads a reply out loud.'
 
-function VoicePreviewButton() {
+function VoicePreviewRow() {
   const { status, toggle, error } = useReadAloud(VOICE_PREVIEW_ID, VOICE_PREVIEW_TEXT)
   const busy = status === 'connecting'
   return (
-    <div className="space-y-2">
-      <Button size="sm" variant="outline" onClick={toggle} disabled={busy} data-testid="voice-preview-button">
-        {busy ? (
-          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-        ) : status === 'speaking' ? (
-          <Square className="h-4 w-4 mr-2 fill-current" />
-        ) : (
-          <Volume2 className="h-4 w-4 mr-2" />
-        )}
-        {status === 'speaking' ? 'Stop' : 'Preview voice'}
-      </Button>
+    <SettingRow
+      name="Hear a sample"
+      right={
+        <Button size="sm" variant="soft" onClick={toggle} disabled={busy} data-testid="voice-preview-button">
+          {busy ? (
+            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+          ) : status === 'speaking' ? (
+            <Square className="h-4 w-4 mr-2 fill-current" />
+          ) : (
+            <Volume2 className="h-4 w-4 mr-2" />
+          )}
+          {status === 'speaking' ? 'Stop' : 'Preview voice'}
+        </Button>
+      }
+    >
       {error && (
-        <Alert variant="destructive">
+        <Alert variant="destructive" className="mt-2">
           <AlertTriangle className="h-4 w-4" />
           <AlertDescription>{error}</AlertDescription>
         </Alert>
       )}
-    </div>
+    </SettingRow>
   )
 }
 
@@ -284,8 +290,13 @@ function VoicePicker({ id, voices, value, onChange, disabled, workspaceDefault }
   /** Offer following the workspace default, labelled with this voice. */
   workspaceDefault?: string
 }) {
+  // The list describes each voice; the row shows only the pick's name.
+  const picked = value
+    ? voiceLabel(voices, value)
+    : workspaceDefault ? `Workspace Default (${voiceLabel(voices, workspaceDefault)})` : undefined
   return (
     <Select
+      variant="row"
       value={value ?? WORKSPACE_DEFAULT}
       onValueChange={(v) => {
         if (v === WORKSPACE_DEFAULT) onChange(null)
@@ -294,7 +305,7 @@ function VoicePicker({ id, voices, value, onChange, disabled, workspaceDefault }
       disabled={disabled}
     >
       <SelectTrigger id={id}>
-        <SelectValue />
+        <SelectValue>{picked}</SelectValue>
       </SelectTrigger>
       <SelectContent>
         {workspaceDefault && (
@@ -333,69 +344,76 @@ function PersonalVoiceSection({ heading, offerWorkspaceDefault }: { heading: str
   const userMusic = resolveUserMusic(userSettings?.voice?.userMusic)
 
   return (
-    <div className="space-y-4" data-testid="personal-voice-section">
-      <h3 className="text-sm font-medium">{heading}</h3>
-      <div className="space-y-2">
-        <Label htmlFor="tts-voice">Voice</Label>
-        <VoicePicker
-          id="tts-voice"
-          voices={voices}
-          value={offerWorkspaceDefault ? ownVoice : (ownVoice ?? workspaceDefault ?? null)}
-          disabled={isLoading}
-          workspaceDefault={offerWorkspaceDefault ? workspaceDefault : undefined}
-          onChange={(ttsVoice) => updateUserSettings.mutate({ voice: { ttsVoice } }, { onSuccess: () => readAloud.restart() })}
+    <div className="space-y-2" data-testid="personal-voice-section">
+      <h3 className={SETTINGS_SECTION_HEADING}>{heading}</h3>
+      <div className={SETTINGS_CARD_CLASS}>
+        <SettingRow
+          name="Voice"
+          help="Used when an agent's reply is read aloud. Only you hear your choice."
+          htmlFor="tts-voice"
+          right={
+            <VoicePicker
+              id="tts-voice"
+              voices={voices}
+              value={offerWorkspaceDefault ? ownVoice : (ownVoice ?? workspaceDefault ?? null)}
+              disabled={isLoading}
+              workspaceDefault={offerWorkspaceDefault ? workspaceDefault : undefined}
+              onChange={(ttsVoice) => updateUserSettings.mutate({ voice: { ttsVoice } }, { onSuccess: () => readAloud.restart() })}
+            />
+          }
         />
-      </div>
-      <div className="space-y-2">
-        <Label htmlFor="tts-speed">Speed</Label>
-        <Select
-          value={String(speed)}
-          onValueChange={(v) => updateUserSettings.mutate({ voice: { ttsSpeed: Number(v) } }, { onSuccess: () => readAloud.restart() })}
-          disabled={isLoading}
-        >
-          <SelectTrigger id="tts-speed">
-            {/* A stored speed off the preset list still needs a readable trigger. */}
-            <SelectValue>{speedOption?.label ?? `${speed}×`}</SelectValue>
-          </SelectTrigger>
-          <SelectContent>
-            {TTS_SPEEDS.map((s) => (
-              <SelectItem key={s.value} value={String(s.value)}>{s.label}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-      <p className="text-xs text-muted-foreground">
-        Used when reading agent replies aloud. Only you hear these choices.
-      </p>
-      <VoicePreviewButton />
-      <div className="flex items-center justify-between gap-4 pt-2">
-        <div className="space-y-1">
-          <Label htmlFor="voice-hold-sound">Hold sound in voice mode</Label>
-          <p className="text-xs text-muted-foreground">A soft loop while the agent works, so silence never reads as a dropped call.</p>
-        </div>
-        <Switch
-          id="voice-hold-sound"
-          checked={holdSound}
-          disabled={isLoading}
-          onCheckedChange={(holdSound) => updateUserSettings.mutate({ voice: { holdSound } })}
+        <SettingRow
+          name="Speed"
+          htmlFor="tts-speed"
+          right={
+            <Select
+              variant="row"
+              value={String(speed)}
+              onValueChange={(v) => updateUserSettings.mutate({ voice: { ttsSpeed: Number(v) } }, { onSuccess: () => readAloud.restart() })}
+              disabled={isLoading}
+            >
+              <SelectTrigger id="tts-speed">
+                {/* A stored speed off the preset list still needs a readable trigger. */}
+                <SelectValue>{speedOption?.label ?? `${speed}×`}</SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                {TTS_SPEEDS.map((s) => (
+                  <SelectItem key={s.value} value={String(s.value)}>{s.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          }
         />
-      </div>
-      {userMusicSupported() && (
-        <div className="flex items-center justify-between gap-4 pt-2">
-          <div className="space-y-1">
-            <Label htmlFor="voice-user-music">Use my music as the hold sound</Label>
-            <p className="text-xs text-muted-foreground">
-              When Spotify, Music or a browser is already playing, voice mode pauses it while anyone speaks and, with the hold sound on, lets it play while the agent works.
-            </p>
-          </div>
-          <Switch
-            id="voice-user-music"
-            checked={userMusic}
-            disabled={isLoading}
-            onCheckedChange={(userMusic) => updateUserSettings.mutate({ voice: { userMusic } })}
+        <VoicePreviewRow />
+        <SettingRow
+          name="Hold sound in voice mode"
+          help="A soft loop while the agent works, so silence never reads as a dropped call."
+          htmlFor="voice-hold-sound"
+          right={
+            <Switch
+              id="voice-hold-sound"
+              checked={holdSound}
+              disabled={isLoading}
+              onCheckedChange={(holdSound) => updateUserSettings.mutate({ voice: { holdSound } })}
+            />
+          }
+        />
+        {userMusicSupported() && (
+          <SettingRow
+            name="Use my music as the hold sound"
+            help="When Spotify, Music or a browser is already playing, voice mode pauses it while anyone speaks and, with the hold sound on, lets it play while the agent works."
+            htmlFor="voice-user-music"
+            right={
+              <Switch
+                id="voice-user-music"
+                checked={userMusic}
+                disabled={isLoading}
+                onCheckedChange={(userMusic) => updateUserSettings.mutate({ voice: { userMusic } })}
+              />
+            }
           />
-        </div>
-      )}
+        )}
+      </div>
     </div>
   )
 }
@@ -411,20 +429,22 @@ function DefaultVoiceSection({ disabled }: { disabled: boolean }) {
   const updateSettings = useUpdateSettings()
 
   return (
-    <div className="pt-4 border-t space-y-4" data-testid="default-voice-section">
-      <h3 className="text-sm font-medium">Default Voice</h3>
-      <div className="space-y-2">
-        <Label htmlFor="tts-default-voice">Voice</Label>
-        <VoicePicker
-          id="tts-default-voice"
-          voices={voices}
-          value={defaultVoice ?? null}
-          disabled={disabled}
-          onChange={(ttsVoice) => { if (ttsVoice) updateSettings.mutate({ voice: { ttsVoice } }) }}
+    <div className="space-y-2" data-testid="default-voice-section">
+      <h3 className={SETTINGS_SECTION_HEADING}>Default voice</h3>
+      <div className={SETTINGS_CARD_CLASS}>
+        <SettingRow
+          name="Voice for anyone who hasn't picked their own"
+          htmlFor="tts-default-voice"
+          right={
+            <VoicePicker
+              id="tts-default-voice"
+              voices={voices}
+              value={defaultVoice ?? null}
+              disabled={disabled}
+              onChange={(ttsVoice) => { if (ttsVoice) updateSettings.mutate({ voice: { ttsVoice } }) }}
+            />
+          }
         />
-        <p className="text-xs text-muted-foreground">
-          What everyone hears until they pick their own voice above.
-        </p>
       </div>
     </div>
   )
@@ -452,74 +472,44 @@ export function VoiceTab() {
       : isApiKeyProvider(selectedProvider) && settings?.apiKeyStatus?.[PROVIDER_CONFIG[selectedProvider].statusField]?.isConfigured
   )
 
+  const providerInfo = selectedProvider ? VOICE_PROVIDER_OPTIONS.find(p => p.value === selectedProvider) : undefined
+
   return (
     <div className="space-y-6">
       <MicrophoneSettings />
 
       {ttsAvailable && (
-        <div className="pt-4 border-t">
-          <PersonalVoiceSection heading={isAuthMode ? 'Your Voice' : 'Text-to-Speech'} offerWorkspaceDefault={isAuthMode} />
-        </div>
+        <PersonalVoiceSection heading={isAuthMode ? 'Your voice' : 'Text-to-speech'} offerWorkspaceDefault={isAuthMode} />
       )}
 
       {conversationNotice && (
-        <p className="text-sm text-muted-foreground">
+        <p className="px-1 text-[11px] text-muted-foreground">
           {conversationNotice}
         </p>
       )}
       {!ttsAvailable && !conversationEngine && !showAdminFeatures && (
-        <p className="text-sm text-muted-foreground" data-testid="voice-unavailable-note">
+        <p className="px-1 text-[11px] text-muted-foreground" data-testid="voice-unavailable-note">
           Text-to-speech isn&apos;t set up for this workspace yet. Ask an admin to configure a voice provider.
         </p>
       )}
 
       {showAdminFeatures && (
         <>
-          <div className="space-y-4 pt-4 border-t">
-            <h3 className="text-sm font-medium">Voice Provider</h3>
-            <div className="space-y-2">
-              <Label htmlFor="stt-provider">Provider</Label>
-              <Select
-                value={selectedProvider ?? ''}
-                onValueChange={(value) => {
-                  if (value === 'platform' && !isPlatformConnected) return
-                  updateSettings.mutate({ voice: { sttProvider: value as VoiceProvider } })
-                }}
-                disabled={isLoading}
-              >
-                <SelectTrigger id="stt-provider">
-                  <SelectValue placeholder="Select a provider" />
-                </SelectTrigger>
-                <SelectContent>
-                  {VOICE_PROVIDER_OPTIONS.map((provider) => (
-                    <SelectItem
-                      key={provider.value}
-                      value={provider.value}
-                      disabled={'platformOnly' in provider && provider.platformOnly && !isPlatformConnected}
-                    >
-                      {provider.label}
-                      {'platformOnly' in provider && provider.platformOnly && !isPlatformConnected
-                        ? <span className="text-muted-foreground ml-2">(requires platform login)</span>
-                        : <span className="text-muted-foreground ml-2">({provider.model})</span>
-                      }
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <p className="text-xs text-muted-foreground">
-                Choose which service to use for transcription and speech.
-              </p>
-              {selectedProvider && (() => {
-                const info = VOICE_PROVIDER_OPTIONS.find(p => p.value === selectedProvider)
-                if (!info) return null
-                return (
-                  <p className="text-xs text-muted-foreground">
-                    {info.note}
-                    {info.docsUrl && (
+          <div className="space-y-2">
+            <h3 className={SETTINGS_SECTION_HEADING}>Voice provider</h3>
+            <div className={SETTINGS_CARD_CLASS}>
+              <SettingRow
+                name="Provider"
+                htmlFor="stt-provider"
+                // What the selected provider needs and costs: it changes with the pick.
+                status={providerInfo && (
+                  <>
+                    {providerInfo.note}
+                    {providerInfo.docsUrl && (
                       <>
                         {' '}
                         <a
-                          href={info.docsUrl}
+                          href={providerInfo.docsUrl}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="text-primary hover:underline inline-flex items-center gap-0.5"
@@ -529,28 +519,60 @@ export function VoiceTab() {
                         </a>
                       </>
                     )}
-                  </p>
-                )
-              })()}
+                  </>
+                )}
+                right={
+                  <Select
+                    variant="row"
+                    value={selectedProvider ?? ''}
+                    onValueChange={(value) => {
+                      if (value === 'platform' && !isPlatformConnected) return
+                      updateSettings.mutate({ voice: { sttProvider: value as VoiceProvider } })
+                    }}
+                    disabled={isLoading}
+                  >
+                    <SelectTrigger id="stt-provider">
+                      {/* The list names each provider's models; the row shows only the provider. */}
+                      <SelectValue placeholder="Select a provider">{providerInfo?.label}</SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      {VOICE_PROVIDER_OPTIONS.map((provider) => (
+                        <SelectItem
+                          key={provider.value}
+                          value={provider.value}
+                          disabled={'platformOnly' in provider && provider.platformOnly && !isPlatformConnected}
+                        >
+                          {provider.label}
+                          {'platformOnly' in provider && provider.platformOnly && !isPlatformConnected
+                            ? <span className="text-muted-foreground ml-2">(requires platform login)</span>
+                            : <span className="text-muted-foreground ml-2">({provider.model})</span>
+                          }
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                }
+              />
             </div>
           </div>
 
           {selectedProvider && isApiKeyProvider(selectedProvider) && (
-            <div className="pt-4 border-t space-y-4">
-              <h3 className="text-sm font-medium">API Key</h3>
-              <SttApiKeyInput key={selectedProvider} provider={selectedProvider} disabled={isLoading} />
+            <div className="space-y-2">
+              <h3 className={SETTINGS_SECTION_HEADING}>API key</h3>
+              <div className={cn(SETTINGS_CARD_CLASS, 'py-3 px-4')}>
+                <SttApiKeyInput key={selectedProvider} provider={selectedProvider} disabled={isLoading} />
+              </div>
             </div>
           )}
 
           {ttsAvailable && isAuthMode && <DefaultVoiceSection disabled={isLoading} />}
 
           {hasKeyConfigured && selectedProvider && (
-            <div className="pt-4 border-t space-y-4">
-              <h3 className="text-sm font-medium">Test</h3>
-              <p className="text-xs text-muted-foreground">
-                Verify your microphone and STT provider are working correctly.
-              </p>
-              <VoiceTest />
+            <div className="space-y-2">
+              <h3 className={SETTINGS_SECTION_HEADING}>Test</h3>
+              <div className={cn(SETTINGS_CARD_CLASS, 'py-3 px-4')}>
+                <VoiceTest />
+              </div>
             </div>
           )}
         </>

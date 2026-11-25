@@ -2,7 +2,6 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { AlertTriangle, Loader2, Mic, RefreshCw, Square } from 'lucide-react'
 import { Alert, AlertDescription } from '@renderer/components/ui/alert'
 import { Button } from '@renderer/components/ui/button'
-import { Label } from '@renderer/components/ui/label'
 import {
   Select,
   SelectContent,
@@ -18,6 +17,7 @@ import {
   type MicrophoneDeviceOption,
 } from '@renderer/lib/voice/shared/microphone-device'
 import { subscribeToAmbientFrames } from '@renderer/lib/ambient-frames'
+import { SETTINGS_CARD_CLASS, SETTINGS_SECTION_HEADING, SettingRow } from './setting-row'
 
 const SYSTEM_DEFAULT = 'system-default'
 
@@ -169,92 +169,101 @@ export function MicrophoneSettings() {
     && !devices.some((device) => device.deviceId === selectedDeviceId)
 
   return (
-    <div className="space-y-4" data-testid="microphone-settings">
-      <h3 className="text-sm font-medium">Microphone</h3>
-      <div className="space-y-2">
-        <Label htmlFor="microphone-device">Input device</Label>
-        <div className="flex items-center gap-2">
-          <Select
-            value={selectedDeviceId ?? SYSTEM_DEFAULT}
-            disabled={!supported || status !== 'idle'}
-            onValueChange={(value) => {
-              const deviceId = value === SYSTEM_DEFAULT ? null : value
-              setPreferredMicrophoneDeviceId(deviceId)
-              setSelectedDeviceId(deviceId)
-              setError(null)
-            }}
-          >
-            <SelectTrigger id="microphone-device" className="min-w-0 flex-1">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={SYSTEM_DEFAULT}>System default</SelectItem>
-              {unavailableSelection && selectedDeviceId && (
-                <SelectItem value={selectedDeviceId}>Saved microphone (not currently listed)</SelectItem>
-              )}
-              {devices.map((device) => (
-                <SelectItem key={device.deviceId} value={device.deviceId}>{device.label}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Button
-            type="button"
-            size="icon"
-            variant="outline"
-            aria-label="Refresh microphones"
-            disabled={!supported || status !== 'idle'}
-            onClick={() => { void refreshDevices() }}
-          >
-            <RefreshCw className="h-4 w-4" />
-          </Button>
-        </div>
-        <p className="text-xs text-muted-foreground">
-          Used for dictation and voice mode on this device. Choose System default to follow your computer&apos;s input setting.
-        </p>
-        {unavailableSelection && (
-          <p className="text-xs text-amber-700 dark:text-amber-300">
-            The saved microphone is not currently listed. The system default will be used if it cannot be opened.
-          </p>
-        )}
-      </div>
-
-      <div className="space-y-2">
-        <div className="flex items-center gap-3">
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            disabled={!supported || status === 'starting'}
-            onClick={() => { if (status === 'testing') stopTest(); else void startTest() }}
-          >
-            {status === 'starting' ? (
-              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-            ) : status === 'testing' ? (
-              <Square className="h-4 w-4 mr-2 fill-current" />
-            ) : (
-              <Mic className="h-4 w-4 mr-2" />
-            )}
-            {status === 'starting' ? 'Starting test...' : status === 'testing' ? 'Stop test' : 'Test microphone'}
-          </Button>
-          {status === 'testing' && (
-            <div
-              className="h-2 flex-1 overflow-hidden rounded-full bg-muted"
-              role="progressbar"
-              aria-label="Microphone input level"
-              aria-valuemin={0}
-              aria-valuemax={100}
-              aria-valuenow={Math.round(level * 100)}
-            >
-              <div className="h-full bg-primary transition-[width] duration-75" style={{ width: `${Math.max(2, level * 100)}%` }} />
-            </div>
+    <div className="space-y-2" data-testid="microphone-settings">
+      <h3 className={SETTINGS_SECTION_HEADING}>Microphone</h3>
+      <div className={SETTINGS_CARD_CLASS}>
+        <SettingRow
+          name="Input device"
+          htmlFor="microphone-device"
+          right={
+            <>
+              <Select
+                variant="row"
+                value={selectedDeviceId ?? SYSTEM_DEFAULT}
+                disabled={!supported || status !== 'idle'}
+                onValueChange={(value) => {
+                  const deviceId = value === SYSTEM_DEFAULT ? null : value
+                  setPreferredMicrophoneDeviceId(deviceId)
+                  setSelectedDeviceId(deviceId)
+                  setError(null)
+                }}
+              >
+                <SelectTrigger id="microphone-device" className="max-w-[280px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={SYSTEM_DEFAULT}>System default</SelectItem>
+                  {unavailableSelection && selectedDeviceId && (
+                    <SelectItem value={selectedDeviceId}>Saved microphone (not currently listed)</SelectItem>
+                  )}
+                  {devices.map((device) => (
+                    <SelectItem key={device.deviceId} value={device.deviceId}>{device.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Button
+                type="button"
+                size="icon"
+                variant="ghost"
+                className="h-8 w-8"
+                aria-label="Refresh microphones"
+                disabled={!supported || status !== 'idle'}
+                onClick={() => { void refreshDevices() }}
+              >
+                <RefreshCw className="h-4 w-4" />
+              </Button>
+            </>
+          }
+        >
+          {unavailableSelection && (
+            <p className="mt-2 text-[11px] text-amber-700 dark:text-amber-300">
+              The saved microphone is not currently listed. The system default will be used if it cannot be opened.
+            </p>
           )}
-        </div>
-        {usingFallback && (
-          <p className="text-xs text-amber-700 dark:text-amber-300">Testing the system default because the saved microphone is unavailable.</p>
-        )}
-        {!supported && (
-          <p className="text-xs text-muted-foreground">Microphone access is not supported in this browser.</p>
-        )}
+        </SettingRow>
+
+        <SettingRow
+          name="Input level"
+          right={
+            <>
+              {status === 'testing' && (
+                <div
+                  className="h-2 w-32 overflow-hidden rounded-full bg-muted"
+                  role="progressbar"
+                  aria-label="Microphone input level"
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={Math.round(level * 100)}
+                >
+                  <div className="h-full bg-primary transition-[width] duration-75" style={{ width: `${Math.max(2, level * 100)}%` }} />
+                </div>
+              )}
+              <Button
+                type="button"
+                size="sm"
+                variant="soft"
+                disabled={!supported || status === 'starting'}
+                onClick={() => { if (status === 'testing') stopTest(); else void startTest() }}
+              >
+                {status === 'starting' ? (
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                ) : status === 'testing' ? (
+                  <Square className="h-4 w-4 mr-2 fill-current" />
+                ) : (
+                  <Mic className="h-4 w-4 mr-2" />
+                )}
+                {status === 'starting' ? 'Starting test...' : status === 'testing' ? 'Stop test' : 'Test microphone'}
+              </Button>
+            </>
+          }
+        >
+          {usingFallback && (
+            <p className="mt-2 text-[11px] text-amber-700 dark:text-amber-300">Testing the system default because the saved microphone is unavailable.</p>
+          )}
+          {!supported && (
+            <p className="mt-2 text-[11px] text-muted-foreground">Microphone access is not supported in this browser.</p>
+          )}
+        </SettingRow>
       </div>
 
       {error && (
