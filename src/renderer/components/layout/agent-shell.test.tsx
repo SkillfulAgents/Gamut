@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { StrictMode, useState, type ComponentType, type ReactNode } from 'react'
+import { Fragment, StrictMode, useState, type ComponentType, type ReactNode } from 'react'
 import { act, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
@@ -32,6 +32,7 @@ const shell = vi.hoisted(() => {
     navigate: (() => {}) as (...args: unknown[]) => void,
     user: null as { id: string; name: string; email: string } | null,
     version: 0,
+    contentShellRenders: 0,
     subscribe(listener: () => void) {
       listeners.add(listener)
       return () => listeners.delete(listener)
@@ -97,7 +98,11 @@ vi.mock('@renderer/components/ui/error-boundary', () => ({
 }))
 
 vi.mock('./content-shell', () => ({
-  ContentShell: ({ children }: { children: ReactNode }) => <>{children}</>,
+  // Stands for everything the shell renders itself: header, banners, frame.
+  ContentShell: ({ children }: { children: ReactNode }) => {
+    shell.contentShellRenders += 1
+    return <>{children}</>
+  },
 }))
 
 vi.mock('./agent-header', () => ({ AgentHeader: () => null }))
@@ -126,6 +131,96 @@ describe('AgentShell pending session seed', () => {
 
     expect(screen.getByText('Hello from wizard')).toBeTruthy()
     await waitFor(() => expect(peekPendingSessionSeed('session-1')).toBeUndefined())
+  })
+
+  // The session route is a lazy chunk: it can render after the shell has
+  // committed, and nothing has to render the shell again before it does.
+  describe.each([
+    ['StrictMode', StrictMode],
+    ['no StrictMode', Fragment],
+  ])('a session view that mounts after the shell (%s)', (_name, Wrapper) => {
+    let showView: (show: boolean) => void = () => {}
+    let actions: PendingMessagesContextValue | null = null
+
+    function SeedRows() {
+      const { getPendingMessages } = usePendingMessages()
+      return <div data-testid="seed-rows">{getPendingMessages('session-1').map((m) => m.text).join(',')}</div>
+    }
+
+    function DelayedView() {
+      const [show, setShow] = useState(false)
+      showView = setShow
+      actions = usePendingMessages()
+      return show ? <SeedRows /> : null
+    }
+
+    const rows = () => screen.getByTestId('seed-rows').textContent
+    const contextUsageEvent = () =>
+      act(() => {
+        shell.contextUsage = { totalTokens: shell.version + 1, contextWindow: 200_000 }
+        shell.emit()
+      })
+
+    function mountThenShowView() {
+      seedPendingSessionMessage('session-1', 'Hello from wizard', 'message-1')
+      shell.Body = DelayedView
+      render(
+        <Wrapper>
+          <AgentShell />
+        </Wrapper>,
+      )
+      act(() => showView(true))
+      expect(rows()).toBe('Hello from wizard')
+    }
+
+    it('takes the seed for good once it is copied, with no shell render in between', () => {
+      mountThenShowView()
+
+      expect(peekPendingSessionSeed('session-1')).toBeUndefined()
+    })
+
+    it.each([
+      ['a context_usage event', true],
+      ['nothing', false],
+    ])('does not bring the prompt back once the transcript has it, after %s', async (_what, usage) => {
+      mountThenShowView()
+      if (usage) await contextUsageEvent()
+
+      act(() => actions!.onPendingMessageAppeared('message-1'))
+
+      expect(rows()).toBe('')
+      expect(peekPendingSessionSeed('session-1')).toBeUndefined()
+      // And it stays gone through later renders of the shell and the view.
+      await contextUsageEvent()
+      act(() => showView(false))
+      act(() => showView(true))
+      expect(rows()).toBe('')
+    })
+
+    it('shows the prompt once on leaving and reopening before the transcript has it, then drops it', async () => {
+      mountThenShowView()
+      await contextUsageEvent()
+
+      act(() => showView(false))
+      await contextUsageEvent()
+      act(() => showView(true))
+      expect(rows()).toBe('Hello from wizard')
+
+      act(() => actions!.onPendingMessageAppeared('message-1'))
+      expect(rows()).toBe('')
+      act(() => showView(false))
+      act(() => showView(true))
+      expect(rows()).toBe('')
+      expect(peekPendingSessionSeed('session-1')).toBeUndefined()
+    })
+
+    it('drops a cleared session for good', () => {
+      mountThenShowView()
+
+      act(() => actions!.clearPendingMessagesForSession('session-1'))
+
+      expect(rows()).toBe('')
+    })
   })
 })
 
@@ -194,6 +289,7 @@ describe('AgentShell context renders', () => {
     renders.actions = 0
     renders.pending = 0
     renders.usage = 0
+    shell.contentShellRenders = 0
     seen.values.clear()
     seen.values.add(seen.value!)
   }
@@ -221,6 +317,8 @@ describe('AgentShell context renders', () => {
 
     for (let i = 0; i < 4; i += 1) rerenderShell()
 
+    // The shell did render; the count below is not zero for want of renders.
+    expect(shell.contentShellRenders).toBe(4)
     expect(seen.values.size).toBe(1)
     expect(renders).toEqual({ actions: 0, pending: 0, usage: 0 })
   })
@@ -236,6 +334,8 @@ describe('AgentShell context renders', () => {
     expect(screen.getByTestId('usage').textContent).toBe('4000/200000')
     expect(renders).toEqual({ actions: 0, pending: 0, usage: 4 })
     expect(seen.values.size).toBe(1)
+    // Nor the shell itself: its header, banners and frame render with it.
+    expect(shell.contentShellRenders).toBe(0)
   })
 
   it('a turn re-renders pending-message readers once per change to the store, and no more', () => {
@@ -258,6 +358,8 @@ describe('AgentShell context renders', () => {
     emitContextUsage(4_000)
 
     expect(renders).toEqual({ actions: 3, pending: 3, usage: 4 })
+    // Three store changes and two unrelated renders; none for the four usage events.
+    expect(shell.contentShellRenders).toBe(5)
   })
 
   it('does not re-render anyone for a change that leaves the store as it was', () => {

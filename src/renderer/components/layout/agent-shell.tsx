@@ -57,6 +57,7 @@ export function AgentShell() {
     isElectron() && getPlatform() === 'darwin' && sidebarState === 'collapsed' && !isFullScreen
   const pendingMessagesRef = useRef(new Map<string, PendingMessage[]>())
   const copiedSeedSessionIdsRef = useRef(new Set<string>())
+  const committedRef = useRef(false)
   const [pendingVersion, forceUpdate] = useState(0)
 
   const getPendingMessages = useCallback(
@@ -64,9 +65,13 @@ export function AgentShell() {
       if (!sessionId) return EMPTY_PENDING_MESSAGES
       const existing = pendingMessagesRef.current.get(sessionId)
       if (existing) return existing
-      // Read without consuming during render. StrictMode and concurrent React
-      // may discard this render, so the module-level seed is only cleared after
-      // the render that copied it into this shell's ref has committed.
+      // Read without consuming while this shell is still mounting. StrictMode
+      // and concurrent React may discard that render and its ref with it, so
+      // the module-level seed is cleared by the mount effect below. Once the
+      // shell has committed its ref is kept, so a copy made later (a session
+      // route that loads after the shell) takes the seed there and then: no
+      // render of the shell is due to clear it, and a seed left behind would
+      // be copied again after the transcript has replaced the row.
       const seeded = peekPendingSessionSeed(sessionId)
       if (seeded) {
         const arr = [
@@ -76,7 +81,8 @@ export function AgentShell() {
           },
         ]
         pendingMessagesRef.current.set(sessionId, arr)
-        copiedSeedSessionIdsRef.current.add(sessionId)
+        if (committedRef.current) clearPendingSessionSeed(sessionId)
+        else copiedSeedSessionIdsRef.current.add(sessionId)
         return arr
       }
       return EMPTY_PENDING_MESSAGES
@@ -85,11 +91,12 @@ export function AgentShell() {
   )
 
   useEffect(() => {
+    committedRef.current = true
     for (const sessionId of copiedSeedSessionIdsRef.current) {
       clearPendingSessionSeed(sessionId)
     }
     copiedSeedSessionIdsRef.current.clear()
-  })
+  }, [])
 
   const onMessageSent = useCallback(
     (content: string, localId: string, queued: boolean) => {
