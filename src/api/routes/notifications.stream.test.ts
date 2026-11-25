@@ -93,6 +93,7 @@ vi.mock('../middleware/auth', () => ({
     return next()
   },
   HasNotificationAccess: () => async (_c: unknown, next: () => Promise<void>) => next(),
+  getNotificationAccess: () => undefined,
 }))
 
 vi.mock('@shared/lib/services/notification-read-state', () => ({

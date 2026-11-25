@@ -24,6 +24,8 @@ vi.mock('../auth/mode', () => ({ isAuthMode: () => true }))
 vi.mock('../../../api/middleware/auth', () => ({
   Authenticated: () => async (c: Context, next: () => Promise<void>) => { c.set('user', { id: 'viewer' }); await next() },
   HasNotificationAccess: () => async (_c: Context, next: () => Promise<void>) => next(),
+  // The middleware said nothing, so the handler asks the database which agent to report.
+  getNotificationAccess: () => undefined,
 }))
 
 import { createNotification, getNotification } from './notification-service'
