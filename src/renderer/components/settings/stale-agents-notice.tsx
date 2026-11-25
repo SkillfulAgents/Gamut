@@ -34,7 +34,7 @@ export function StaleAgentsNotice() {
                   ? ' still uses the old settings. Stop it and it starts fresh on its next message.'
                   : ' still use the old settings. Stop them and they start fresh on their next message.'}
               </p>
-              <Button size="sm" variant="outline" className="shrink-0" disabled={isStopping} onClick={stopAll}>
+              <Button size="sm" variant="soft" className="shrink-0" disabled={isStopping} onClick={stopAll}>
                 {isStopping ? 'Stopping…' : 'Stop all'}
               </Button>
             </div>
