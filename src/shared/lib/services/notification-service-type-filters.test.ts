@@ -1,3 +1,4 @@
+// @libsql-must-pass
 /**
  * The Notifications page's type filters: list, count and read-all narrowed to
  * some types, and the per-type totals behind the tab counts. Visibility rules

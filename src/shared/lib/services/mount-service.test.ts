@@ -1,3 +1,4 @@
+// @libsql-must-pass
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { runtimeCapabilities } from '@shared/lib/facts/capabilities'
 import { declareServerCapabilities } from '@shared/lib/facts/server-facts'

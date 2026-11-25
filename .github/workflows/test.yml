@@ -104,9 +104,9 @@ jobs:
           json-final-path: ./coverage/coverage-final.json
 
   # The same unit tests against libsql: asynchronous, batch-only, the in-process
-  # stand-in for Cloudflare D1. Only the files in scripts/libsql-must-pass.txt
-  # run here; the list grows as directories are converted to awaited access
-  # (SUP-865) and never shrinks.
+  # stand-in for Cloudflare D1. Only the test files marked `// @libsql-must-pass`
+  # run here; markers are added as directories are converted to awaited access
+  # (SUP-865) and never removed.
   unit-tests-libsql:
     runs-on: blacksmith-8vcpu-ubuntu-2404
     steps:
@@ -127,7 +127,7 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Run the libsql must-pass list
+      - name: Run the libsql must-pass tests
         run: npm run test:libsql
 
   # The same unit tests with every agent actor behind the serializing test

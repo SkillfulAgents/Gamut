@@ -2,7 +2,8 @@
  * A private in-memory database with the bundled migrations applied, on the
  * driver CI asks for. `DB_DRIVER=libsql` runs a test against libsql, the
  * asynchronous, batch-only stand-in for Cloudflare D1; unset, it is
- * better-sqlite3, the desktop driver.
+ * better-sqlite3, the desktop driver. CI runs the test files marked
+ * `// @libsql-must-pass` on libsql (scripts/run-libsql-tests.mjs).
  *
  *   let testDb: AppDatabase
  *   vi.mock('@shared/lib/db', () => ({ get db() { return testDb } }))

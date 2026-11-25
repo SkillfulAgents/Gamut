@@ -1,3 +1,4 @@
+// @libsql-must-pass
 /**
  * Who can reach `/mcp` in the desktop app (`process.type === 'browser'`, where
  * Electron main hosts the API on 0.0.0.0), through the real app: the request's

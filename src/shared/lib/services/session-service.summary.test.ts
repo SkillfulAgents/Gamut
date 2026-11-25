@@ -1,3 +1,4 @@
+// @libsql-must-pass
 /**
  * The session summary as read from the agent's session index: what a read
  * costs on the filesystem, and how the index follows the transcripts

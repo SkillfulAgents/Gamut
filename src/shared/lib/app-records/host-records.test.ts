@@ -1,3 +1,4 @@
+// @libsql-must-pass
 /**
  * The identities a deployment creates once (tenant id, auth secret, host
  * container tokens, platform client instance id), created concurrently by

@@ -1,3 +1,4 @@
+// @libsql-must-pass
 /**
  * `/mcp` in an auth-mode deployment, as the real app mounts it
  * (src/api/index.ts): the deployment as its own OAuth authorization server

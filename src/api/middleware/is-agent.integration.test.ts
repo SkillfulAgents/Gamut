@@ -1,3 +1,4 @@
+// @libsql-must-pass
 /**
  * IsAgent() against a real database: in auth mode the proxy token and the
  * agent's owner are read in one statement, and the agent and owner it finds

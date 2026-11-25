@@ -1,3 +1,4 @@
+// @libsql-must-pass
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Hono, type Context } from 'hono'
 import type { AppDatabase } from '../db/drivers/types'

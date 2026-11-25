@@ -1,3 +1,4 @@
+// @libsql-must-pass
 /**
  * Claiming an invited user (team directories) through the real Better Auth:
  * a Platform OIDC sign-in links to the invited row and gets its role, a plain

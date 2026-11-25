@@ -1,3 +1,4 @@
+// @libsql-must-pass
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import crypto from 'node:crypto'
 import { eq } from 'drizzle-orm'

@@ -1,3 +1,4 @@
+// @libsql-must-pass
 /**
  * One-click agent apps through the generic setup host: a test integration
  * provider and a test-only directory that can create its apps go through

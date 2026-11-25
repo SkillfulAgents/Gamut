@@ -1,3 +1,4 @@
+// @libsql-must-pass
 /**
  * GET /api/runtime-status is polled by every open window, so what it reads is
  * pinned here for each state of the app default.

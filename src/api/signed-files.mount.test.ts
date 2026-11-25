@@ -1,3 +1,4 @@
+// @libsql-must-pass
 /**
  * The signed files router as the real app mounts it (src/api/index.ts), in
  * auth mode: a request that carries only the URL, no session cookie or

@@ -1,3 +1,4 @@
+// @libsql-must-pass
 /**
  * Removing a user through Better Auth's admin remove-user endpoint (what
  * Settings → Users → Delete calls) removes everything they own: their provider

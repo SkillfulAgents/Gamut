@@ -1,3 +1,4 @@
+// @libsql-must-pass
 /**
  * App records over the app database, on the test driver (DB_DRIVER=libsql
  * runs them on libsql): the stored-text operations' contract, typed reads,

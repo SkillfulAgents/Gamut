@@ -1,3 +1,4 @@
+// @libsql-must-pass
 import { getConfiguredLlmClient, configuredHelperModel } from './helpers'
 import { calculateCost } from '../services/usage-service'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
