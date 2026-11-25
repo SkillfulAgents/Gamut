@@ -89,14 +89,25 @@ export class WebSocket {
   }
 
   // ws's { binary: false } sends bytes as a text frame; the runtime sends any bytes as binary.
-  send(data: string | ArrayBuffer | ArrayBufferView, options?: { binary?: boolean }): void {
-    if (!this.socket || this.readyState !== WebSocket.OPEN) throw new Error('WebSocket is not open')
-    if (options?.binary === false && typeof data !== 'string') {
-      const bytes = data instanceof ArrayBuffer ? new Uint8Array(data) : new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
-      this.socket.send(new TextDecoder().decode(bytes))
+  // As ws: a caller that passes a callback hears there how the send went (the Slack SDK waits on
+  // it before it handles an event); one that passes none gets the error thrown.
+  send(data: string | ArrayBuffer | ArrayBufferView, options?: { binary?: boolean } | ((error?: Error) => void), callback?: (error?: Error) => void): void {
+    const done = typeof options === 'function' ? options : callback
+    const binary = typeof options === 'function' ? undefined : options?.binary
+    try {
+      if (!this.socket || this.readyState !== WebSocket.OPEN) throw new Error('WebSocket is not open')
+      if (binary === false && typeof data !== 'string') {
+        const bytes = data instanceof ArrayBuffer ? new Uint8Array(data) : new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
+        this.socket.send(new TextDecoder().decode(bytes))
+      } else {
+        this.socket.send(data as string | ArrayBuffer)
+      }
+    } catch (error) {
+      if (!done) throw error
+      done(error instanceof Error ? error : new Error(String(error)))
       return
     }
-    this.socket.send(data as string | ArrayBuffer)
+    done?.()
   }
 
   close(code?: number, reason?: string): void {

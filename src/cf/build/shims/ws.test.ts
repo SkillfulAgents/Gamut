@@ -106,6 +106,25 @@ describe('ws shim', () => {
     expect(global).not.toHaveBeenCalled()
   })
 
+  it('tells the callback of a send how it went, as ws does', () => {
+    const { socket } = fakeSocket()
+    const sent: unknown[] = []
+    ;(socket as unknown as { send: (data: unknown) => void }).send = (data) => sent.push(data)
+    const ws = WebSocket.accepted(socket)
+    const results: Array<Error | undefined> = []
+
+    // The Slack SDK acknowledges each event this way, and handles the event once the callback runs.
+    ws.send('{"envelope_id":"1"}', (error) => results.push(error))
+    ws.send(Buffer.from('frame'), { binary: true }, (error) => results.push(error))
+    expect(sent).toHaveLength(2)
+    expect(results).toEqual([undefined, undefined])
+
+    ws.terminate()
+    ws.send('late', (error) => results.push(error))
+    expect(results[2]?.message).toBe('WebSocket is not open')
+    expect(() => ws.send('late')).toThrow('WebSocket is not open')
+  })
+
   it('offers no subprotocol header for an empty list, as ws does', async () => {
     const { socket } = fakeSocket()
     const upgrade = vi.fn(async (_url: string, _init: RequestInit) => ({ status: 101, headers: new Headers(), webSocket: socket }) as unknown as Response)
