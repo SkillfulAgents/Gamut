@@ -72,8 +72,17 @@ function searchSection(page: Page, label: string) {
   )
 }
 
+/**
+ * Open, not just showing: a palette that has just closed stays up for its exit
+ * animation, field and all, so a visible field alone can be the closing one.
+ */
+async function expectSearchOpen(page: Page) {
+  await expect(page.getByRole('dialog').filter({ has: searchInput(page) })).toHaveAttribute('data-state', 'open')
+}
+
 async function openSearchWithKeyboard(page: Page) {
   await page.keyboard.press('ControlOrMeta+k')
+  await expectSearchOpen(page)
   await expect(searchInput(page)).toBeVisible()
   await expect(searchInput(page)).toBeFocused()
   await expect(searchResults(page)).toBeVisible()
@@ -81,6 +90,7 @@ async function openSearchWithKeyboard(page: Page) {
 
 async function openSearchWithSidebarButton(page: Page) {
   await page.locator('[data-testid="search-button"]').click()
+  await expectSearchOpen(page)
   await expect(searchInput(page)).toBeVisible()
   await expect(searchInput(page)).toBeFocused()
   await expect(searchResults(page)).toBeVisible()
