@@ -21,6 +21,8 @@ import { agentHomeId } from '@renderer/context/drafts-context'
 import './team-brain.css'
 import { useAgentMounts } from '@renderer/hooks/use-mounts'
 import { AgentAvatar } from '@renderer/components/agents/agent-avatar/agent-avatar'
+import { AgentIdentityEditor } from '@renderer/components/agents/agent-avatar/agent-identity-editor'
+import { BRAIN_SHAPE } from '@shared/lib/types/agent-avatar-shapes'
 import { useMinuteClock } from '@renderer/hooks/use-minute-clock'
 import type { TeamBrainNode } from '@renderer/lib/team-brain/team-brain-structure'
 import { useTeamBrainDrive } from '@renderer/hooks/use-team-brain-drive'
@@ -682,6 +684,12 @@ function SettingsPanel({ agent, placement, open, onClose, onClosed, views, recor
       <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-8" data-testid="team-brain-details">
         <SyncCard agentSlug={agent.slug} />
         <div className={SECTIONS_CARD_CLASS}>
+          {/* Its name and look, as Agent Home's header edits any agent's; only here is the brain on offer. */}
+          {canAdminAgent(agent.slug) && (
+            <div className="px-3.5 py-2" data-testid="team-brain-identity">
+              <AgentIdentityEditor agent={agent} size={28} nameClassName="text-sm font-medium" extraShapes={[BRAIN_SHAPE]} />
+            </div>
+          )}
           <StorageSection agent={agent} />
           <SourcesSection agentSlug={agent.slug} />
           <AgentsSection brainSlug={agent.slug} volumeId={agent.teamBrain?.volumeId} agents={agents} canManage={canManage} />

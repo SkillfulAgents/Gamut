@@ -1,6 +1,6 @@
 import type { AgentAvatar } from '@shared/lib/types/agent-avatar'
 import { OFFERED_ORBS, hexMix, type AvatarOrb } from '@shared/lib/types/agent-avatar-orbs'
-import { ORB_SHAPES, type OrbShape } from '@shared/lib/types/agent-avatar-shapes'
+import { orbShape, type OrbShape } from '@shared/lib/types/agent-avatar-shapes'
 
 export interface AvatarSource {
   orb: AvatarOrb
@@ -11,7 +11,7 @@ export interface AvatarSource {
 export function avatarSource(avatar: AgentAvatar): AvatarSource {
   return {
     orb: OFFERED_ORBS.find(orb => orb.name === avatar.color)!,
-    shape: ORB_SHAPES.find(shape => shape.name === avatar.shape)!,
+    shape: orbShape(avatar.shape),
   }
 }
 

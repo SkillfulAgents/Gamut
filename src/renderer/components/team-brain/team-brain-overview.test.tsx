@@ -30,6 +30,9 @@ vi.mock('@renderer/hooks/use-agents', () => ({
   useDeleteAgent: () => ({ mutate: app.deleteAgent, isPending: false }),
   // Mention chips look their agents and people up for avatars.
   useAgents: () => ({ data: undefined }),
+  // The settings panel's name and look editor.
+  useUpdateAgent: () => ({ mutate: vi.fn() }),
+  useUpdateAgentAvatar: () => ({ mutate: vi.fn() }),
 }))
 vi.mock('@renderer/hooks/use-agent-members', () => ({ useAgentMembers: () => ({ data: undefined }) }))
 // The Team Brain agent's own drive, in Dropbox.
@@ -700,13 +703,16 @@ describe('TeamBrainOverview', () => {
     // The agent's own settings are its owners', as on any agent: an owner who is not an admin sees them, an admin who
     // is not an owner does not.
     expect(screen.queryByTestId('team-brain-advanced-settings')).toBeNull()
+    expect(screen.queryByTestId('team-brain-identity')).toBeNull()
     await userEvent.click(screen.getByTestId('team-brain-agents-toggle'))
     expect(screen.getByTestId('team-brain-agent-writer')).toBeDisabled()
     cleanup()
     Object.assign(user, { owner: true })
-    render(<TeamBrainOverview agent={BRAIN} />)
+    render(<TeamBrainOverview agent={{ ...BRAIN, avatar: { color: 'tonal-blush', shape: 'brain' } }} />)
     await userEvent.click(screen.getByTestId('team-brain-menu'))
     expect(await screen.findByTestId('team-brain-advanced-settings')).toBeInTheDocument()
+    await userEvent.click(within(screen.getByTestId('team-brain-identity')).getByRole('button', { name: "Edit Team Brain's name and avatar" }))
+    expect(screen.getByRole('button', { name: 'Brain' })).toBeInTheDocument()
     cleanup()
     Object.assign(user, { isAdmin: true, owner: false })
     render(<TeamBrainOverview agent={BRAIN} />)
