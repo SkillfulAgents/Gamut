@@ -1,23 +1,23 @@
 {
   "storyId": "browser-test",
   "passed": true,
-  "reason": "Sent the browser-task prompt to agent QA-20261124-084714-s08m and verified the reply reports the example.com page title as \"Example Domain\".",
+  "reason": "Sent the browser-task prompt to agent QA-20261125-082114-q9pu and verified the reply reports the example.com page title as \"Example Domain\".",
   "steps": [
-    "Step 1: Navigated to http://localhost:47891 — Gamut app loaded with the sidebar listing \"QA-20261124-084714-s08m\" under Your Agents.",
-    "Step 2: Clicked the \"QA-20261124-084714-s08m\" agent in the sidebar — navigated to /agents/qa-20261124-084714-s08m-7pl2b5e04x, showing an empty chat composer and status \"idle\".",
-    "Step 3: Typed \"Open a browser and go to https://example.com. Tell me the page title.\" into the composer and pressed Enter — Enter only inserted a newline and did not send. I then clicked the Send button, which created session \"Check Example.com Page Title\" and showed the message in the transcript with status \"Working...\". This is consistent with the composer placeholder \"Press cmd+enter to send\", so I did not log it as a bug.",
-    "Step 4: Waited for the response — the agent finished within about 5 seconds of sending (the wait_for call returned once \"Example Domain\" appeared, well inside the 3-minute limit). The turn showed \"Worked for 5s · 3 tool calls · 164,575 tokens\" and the agent status returned to \"idle\".",
-    "Step 5: The agent's reply reads \"The page title at https://example.com is \"Example Domain\". I've closed the browser.\" — the expected text is present. Screenshot taken (step5-response-verified.png)."
+    "Step 1: Navigated to http://localhost:47891 — Gamut home page loaded, sidebar listed QA-20261125-082114-q9pu and QA-20261125-082113-5dr0. Screenshot step1-home.png taken.",
+    "Step 2: Clicked the QA-20261125-082114-q9pu entry in the sidebar — agent page opened at /agents/qa-20261125-082114-q9pu-wa5swy6p5r with an empty message composer.",
+    "Step 3: Typed \"Open a browser and go to https://example.com. Tell me the page title.\" and clicked Send — a session \"Check Example.com Page Title\" was created, the message appeared in the chat, and the agent showed \"Working...\" with a ToolSearch tool card. Screenshot step3-message-sent.png taken.",
+    "Step 4: Waited for the text \"Example Domain\" (180s limit) — it appeared well within the limit. The agent status changed from working to idle.",
+    "Step 5: Response reads \"The page title of https://example.com is \"Example Domain\". I've closed the browser.\" The \"Worked for 7s · 3 tool calls · 164,183 tokens\" summary was shown above it. Screenshot step5-response.png taken."
   ],
   "bugs": [],
-  "durationMs": 73750,
-  "sessionId": "26f2e8e1-1e6d-47c0-91da-00ecda5d261f",
+  "durationMs": 71416,
+  "sessionId": "cc694bbb-bad3-40a5-b342-c25e9f28c393",
   "cost": {
-    "inputTokens": 8029,
-    "outputTokens": 5553,
-    "cacheCreationTokens": 48645,
-    "cacheReadTokens": 779904,
+    "inputTokens": 8236,
+    "outputTokens": 5473,
+    "cacheCreationTokens": 49455,
+    "cacheReadTokens": 619690,
     "model": "claude-haiku-5-5",
-    "totalCostUsd": 0.174591
+    "totalCostUsd": 0.159389
   }
 }

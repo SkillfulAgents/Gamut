@@ -1,24 +1,24 @@
 {
   "storyId": "agent-chat",
   "passed": true,
-  "reason": "Sent \"Hello! What is 2+2?\" to agent QA-20261124-084713-1g15 in the browser and confirmed the reply contains 4.",
+  "reason": "Sent \"Hello! What is 2+2?\" to agent QA-20261125-082113-5dr0 and verified the reply contains 4.",
   "steps": [
-    "1. Navigated to http://localhost:47891 — the Gamut home page loaded with the sidebar listing QA-20261124-084713-1g15.",
-    "2. Clicked QA-20261124-084713-1g15 in the sidebar — its agent page opened (URL /agents/qa-20261124-084713-1g15-2xwuaemu1e). Screenshot: step2-agent-selected.png.",
-    "3. Checked the agent status — the header shows \"idle\", which satisfies the running-or-idle requirement.",
-    "4. Typed \"Hello! What is 2+2?\" in the composer and clicked Send — a new session \"Basic Arithmetic Greeting Check\" opened, showing the message and \"Working...\" with the agent status \"working\". Screenshot: step4-message-typed.png.",
-    "5. Waited for \"Working...\" to disappear (up to 180 seconds) — the reply \"2 + 2 = 4.\" appeared and the agent returned to \"idle\" well within the limit.",
-    "6. Verified the response mentions 4 — \"2 + 2 = 4.\" is shown in the chat. Screenshot: step6-response-verified.png."
+    "1. Navigated to http://localhost:47891 — Gamut home loaded with the sidebar listing QA-20261125-082114-q9pu and QA-20261125-082113-5dr0.",
+    "2. Clicked QA-20261125-082113-5dr0 in the sidebar — agent page opened at /agents/qa-20261125-082113-5dr0-seg0hp5m67.",
+    "3. Verified status — header shows \"idle\" (accepted as running or idle). Screenshot saved as step3-agent-idle.png.",
+    "4. Typed \"Hello! What is 2+2?\" in the message box and clicked Send — a new session \"Basic Arithmetic Question Check\" opened, and the user message appeared in the chat.",
+    "5. Waited for the response — the activity indicator showed \"Working...\" and then returned to idle. The wait was about 30 seconds, well within the 3-minute limit.",
+    "6. Verified the response — the assistant replied \"2 + 2 = 4.\" Screenshot saved as step6-response-verified.png."
   ],
   "bugs": [],
-  "durationMs": 72158,
-  "sessionId": "61528360-f95d-4747-bd81-8c1818127551",
+  "durationMs": 65646,
+  "sessionId": "fee64460-aed3-4b21-b610-5ae3bd614afe",
   "cost": {
-    "inputTokens": 8632,
-    "outputTokens": 6050,
-    "cacheCreationTokens": 65811,
-    "cacheReadTokens": 793169,
+    "inputTokens": 8420,
+    "outputTokens": 5099,
+    "cacheCreationTokens": 76298,
+    "cacheReadTokens": 829451,
     "model": "claude-haiku-5-5",
-    "totalCostUsd": 0.200463
+    "totalCostUsd": 0.212233
   }
 }
