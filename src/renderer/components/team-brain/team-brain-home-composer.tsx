@@ -133,7 +133,7 @@ export function TeamBrainHomeComposer({ agent, reference, onDismissReference, on
           )}
           rightActions={(
             <>
-              <VoiceInputButton voiceInput={composer.voiceInput} message={composer.message} disabled={isDisabled} size="compact" />
+              <VoiceInputButton voiceInput={composer.voiceInput} message={composer.message} disabled={isDisabled} size="compact" onSend={() => { if (composer.canSubmit) void composer.handleSubmit({ preventDefault() {} }) }} />
               <Button
                 type="submit"
                 size="icon"

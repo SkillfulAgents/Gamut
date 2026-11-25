@@ -37,6 +37,9 @@ export function withImages(html: string, images: ReadonlyMap<string, string>): s
  */
 const EMAIL_HTML_STYLE = 'html,body{margin:0;overflow:hidden;height:auto!important;min-height:0!important}body{display:flow-root;position:relative;padding:12px;font:small Arial,Helvetica,sans-serif;overflow-wrap:anywhere}pre{white-space:pre-wrap}img,table{max-width:100%}'
 
+/** In a row beside its label: no page padding, and no margin above the first block or below the last, so the body lines up with the label. */
+const EMAIL_HTML_INLINE = 'body{padding:0}body>:first-child{margin-top:0}body>:last-child{margin-bottom:0}'
+
 // React 18's HTML attribute types predate the now-baseline `inert` attribute. On a frame it makes the page inside inert too.
 const INERT = { inert: '' }
 
@@ -47,9 +50,9 @@ const INERT = { inert: '' }
  * link tag is renamed to one the browser ignores. The rename runs on the final markup, so no tag can appear by reparsing it.
  * Same-origin, with scripts off, only so the card can read the document's height.
  */
-export function EmailHtml({ html }: { html: string }) {
+export function EmailHtml({ html, inline }: { html: string; inline?: boolean }) {
   const dark = useIsDark()
-  const srcDoc = useMemo(() => `<!DOCTYPE html><html><head><meta http-equiv="Content-Security-Policy" content="${EMAIL_HTML_CSP}"><style>${EMAIL_HTML_STYLE}${dark ? EMAIL_HTML_DARK : ''}</style></head><body>${html.replace(/<(meta|link)\b/gi, '<x-$1')}`, [html, dark])
+  const srcDoc = useMemo(() => `<!DOCTYPE html><html><head><meta http-equiv="Content-Security-Policy" content="${EMAIL_HTML_CSP}"><style>${EMAIL_HTML_STYLE}${inline ? EMAIL_HTML_INLINE : ''}${dark ? EMAIL_HTML_DARK : ''}</style></head><body>${html.replace(/<(meta|link)\b/gi, '<x-$1')}`, [html, inline, dark])
   const [height, setHeight] = useState(0)
   const observer = useRef<ResizeObserver | null>(null)
   useEffect(() => () => observer.current?.disconnect(), [])
@@ -125,16 +128,20 @@ const WEB_ADDRESS = /\bhttps?:\/\/[^\s"'<>()\\`]+/gi
 /** As WEB_ADDRESS, or one with no scheme (`//host/path`) where an attribute value, a `url(`, or a list item starts. */
 const DECODED_WEB_ADDRESS = /(?:\bhttps?:|(?<![^\s=(,'"]))\/\/[^\s"'<>()\\`]+/gi
 
+/** Every attribute value and style sheet in the page, as the browser decodes them: where an email names what it loads. */
+export function decodedValues(page: Document): string[] {
+  return [
+    ...[...page.querySelectorAll('*')].flatMap((element) => [...element.attributes].map(({ value }) => value)),
+    ...[...page.querySelectorAll('style')].map((style) => style.textContent ?? ''),
+  ]
+}
+
 /**
  * Every web address the HTML names: links, images, and refreshes, as the recipient's mail app would follow or load them. Also read from
  * each attribute and style sheet as the browser decodes them, so an address spelled with character references, or with no scheme, counts.
  */
 export function webAddresses(html: string): string[] {
-  const page = new DOMParser().parseFromString(html, 'text/html')
-  const decoded = [
-    ...[...page.querySelectorAll('*')].flatMap((element) => [...element.attributes].map(({ value }) => value)),
-    ...[...page.querySelectorAll('style')].map((style) => style.textContent ?? ''),
-  ]
+  const decoded = decodedValues(new DOMParser().parseFromString(html, 'text/html'))
   const found = [
     ...(html.match(WEB_ADDRESS) ?? []).map((address) => address.replace(/&amp;/g, '&')),
     ...decoded.flatMap((value) => value.match(DECODED_WEB_ADDRESS) ?? []),

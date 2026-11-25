@@ -241,7 +241,7 @@ export const AgentHomeComposer = forwardRef<AgentHomeComposerHandle, AgentHomeCo
           )}
           rightActions={(
             <>
-              <VoiceInputButton voiceInput={composer.voiceInput} message={composer.message} disabled={isDisabled} size="compact" />
+              <VoiceInputButton voiceInput={composer.voiceInput} message={composer.message} disabled={isDisabled} size="compact" onSend={() => { if (composer.canSubmit) void composer.handleSubmit({ preventDefault() {} }) }} />
               {!isFreshUntitled && (
                 <VoiceModeButton onClick={() => void startVoiceSession('home')} disabled={isDisabled} className="h-7 w-7" />
               )}

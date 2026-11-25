@@ -262,6 +262,22 @@ describe('limactlCommand', () => {
   })
 })
 
+describe('LimaContainerClient.debugCliCommand', () => {
+  const originalResourcesPath = process.resourcesPath
+
+  afterEach(() => {
+    setResourcesPath(originalResourcesPath)
+  })
+
+  it('runs nerdctl inside our VM through limactl', () => {
+    setResourcesPath(undefined)
+
+    expect(LimaContainerClient.debugCliCommand()).toBe(
+      `LIMA_HOME="/Users/testuser/.superagent/lima" "limactl" shell ${LIMA_VM_NAME} -- sudo nerdctl`
+    )
+  })
+})
+
 describe('getLimactlPath', () => {
   const originalResourcesPath = process.resourcesPath
 

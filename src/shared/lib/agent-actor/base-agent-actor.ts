@@ -376,6 +376,7 @@ function createSessionOps(
     list: (...args) => sessionService.listSessions(store, ...args),
     listByIds: (...args) => sessionService.listSessionsByIds(store, ...args),
     get: (...args) => sessionService.getSession(store, ...args),
+    getWithMetadata: (sessionId) => sessionService.getSessionWithMetadata(store, sessionId),
     summary: () => sessionService.getSessionSummary(store),
     exists: (sessionId) => sessionService.sessionExists(store, sessionId),
     isKnown: (sessionId) => sessionService.sessionIsKnown(store, sessionId),

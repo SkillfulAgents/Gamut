@@ -537,7 +537,7 @@ export function QuickDispatch() {
           </ModelTooltip>
           <div className="ml-auto flex items-center gap-2">
             <span className="inline-flex">
-              <VoiceInputButton voiceInput={composer.voiceInput} message={composer.message} disabled={isDisabled} glass={glass} />
+              <VoiceInputButton voiceInput={composer.voiceInput} message={composer.message} disabled={isDisabled} glass={glass} onSend={() => { if (composer.canSubmit) void composer.handleSubmit({ preventDefault() {} }) }} />
             </span>
             <Button
               type="submit"

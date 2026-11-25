@@ -39,7 +39,7 @@ vi.mock('@shared/lib/voice', () => ({
     effectiveApiKeyFrom: () => 'session-token',
     // The hangup's key: the provider's as configured when it hangs up.
     getEffectiveApiKey: async () => 'session-token',
-    apiKeyStatusFrom: () => ({ isConfigured: true }), supportsTts: () => true, getTtsVoices: () => OPENAI_TTS_VOICES, resolveTtsVoice: () => 'marin', getConversationEngine: () => 'openai-live',
+    apiKeyStatusFrom: () => ({ isConfigured: true }), supportsTts: () => true, getTtsVoices: () => OPENAI_TTS_VOICES, resolveTtsVoice: () => 'marin', getConversationEngine: () => 'openai-live', getSttProtocol: () => 'openai-realtime',
   }),
 }))
 vi.mock('@shared/lib/auth/config', () => ({ getCurrentUserId: () => mocks.user }))
@@ -169,6 +169,8 @@ describe('Live voice routes', () => {
     expect(await (await voice.request('/configured')).json()).toMatchObject({
       conversationEngine: 'openai-live', supportsTts: true, defaultVoice: 'marin', voices: OPENAI_TTS_VOICES,
       liveVoices: LIVE_VOICES, liveDefaultVoice: 'marin',
+      // What a dictation opens the microphone for, ahead of its token.
+      sttProtocol: 'openai-realtime',
     })
   })
   it('requires authentication before calling a provider', async () => {

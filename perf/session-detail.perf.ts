@@ -12,7 +12,7 @@
  */
 import * as fs from 'fs'
 import * as path from 'path'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { bootPerfApp, expectWithinBudget, measure, type PerfApp } from './harness'
 
 const LARGE_TRANSCRIPT_BYTES = 10 * 1024 * 1024
@@ -76,6 +76,32 @@ describe('single-session read — small profile', () => {
       bytesRead: 0,
       wallMs: 100,
     })
+  })
+
+  it('GET /api/agents/:id/sessions/:sid reads the session\'s own index entry, not the agent\'s every session', async () => {
+    const { db } = await import('@shared/lib/db')
+    const { agentRegistry } = await import('@shared/lib/agent-actor')
+    const listed = await (await perf.request(`/api/agents/${slug}/sessions`)).json()
+    const other = listed.find((s: { id: string }) => s.id !== sessionId)
+    // A write to any session of the agent (a running turn's activity, a
+    // rename) makes the index forget what it listed, so a read of every entry
+    // would be a statement here. Was 5 statements, the first of them every
+    // row of the agent, each one awaited before the next.
+    await agentRegistry.get(slug).sessions.updateMetadata(other.id, { starred: true })
+    const prepare = vi.spyOn((db as unknown as { session: { prepareQuery(query: { sql: string }): unknown } }).session, 'prepareQuery')
+    let statements: string[]
+    try {
+      const result = await perf.request(`/api/agents/${slug}/sessions/${sessionId}`)
+      expect(result.status).toBe(200)
+      statements = prepare.mock.calls.map(([query]) => query.sql)
+    } finally {
+      prepare.mockRestore()
+    }
+    const ofTheIndex = statements.filter((sql) => sql.includes('"agent_sessions"'))
+    expect(ofTheIndex).toHaveLength(1)
+    expect(ofTheIndex[0]).toMatch(/"session_id" = \?/)
+    // The agent (the route's guard), the entry, the settings, the pending wake.
+    expect(statements.length).toBeLessThanOrEqual(4)
   })
 
   it('PATCH /api/agents/:id/sessions/:sid (rename) on a large transcript', async () => {

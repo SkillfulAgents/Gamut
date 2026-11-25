@@ -3,10 +3,13 @@ import { useQueries, useQueryClient } from '@tanstack/react-query'
 import { Bot, Search } from 'lucide-react'
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from '@renderer/components/ui/dialog'
 import { HighlightMatch } from '@renderer/components/ui/highlight-match'
+import { AnimatedNavIcon } from '@renderer/components/ui/animated-nav-icon'
+import { settingsPagesFor, useSettingsAudience } from '@renderer/components/settings/settings-catalog'
 import { AgentAvatarWithBadge } from '@renderer/components/agents/agent-avatar/agent-avatar-with-badge'
 import { WorkingDots } from '@renderer/components/agents/status-indicators'
 import { useAgents, type ApiAgent } from '@renderer/hooks/use-agents'
 import { useSearch } from '@renderer/context/search-context'
+import { useDialogs } from '@renderer/context/dialog-context'
 import { useIsMobile } from '@renderer/hooks/use-mobile'
 import { allSessionsQueryOptions } from '@renderer/hooks/use-sessions'
 import { useNavigate } from '@tanstack/react-router'
@@ -15,6 +18,9 @@ import { agentAvatarState } from '@shared/lib/types/agent-activity-status'
 import { cn } from '@shared/lib/utils/cn'
 import { compactAgo } from '@renderer/lib/last-run'
 import { flattenSections, getRecent, searchAll, type FlatItem, type SearchSections } from './filter'
+import type { SettingsResult } from './settings-match'
+
+const NO_RESULTS: SearchSections = { agents: [], sessions: [], dashboards: [], settings: [] }
 
 /**
  * Rendered inside the router, so it can use the `useNavigate` hook directly.
@@ -23,6 +29,7 @@ import { flattenSections, getRecent, searchAll, type FlatItem, type SearchSectio
  */
 export function SearchDialog() {
   const { open, closeSearch } = useSearch()
+  const { openSettings } = useDialogs()
   const navigate = useNavigate()
   const [query, setQuery] = useState('')
   const [activeIndex, setActiveIndex] = useState(0)
@@ -30,6 +37,12 @@ export function SearchDialog() {
   const listRef = useRef<HTMLDivElement>(null)
   const isMobile = useIsMobile()
   const { data: agents } = useAgents({ poll: false })
+  // Only the settings pages this viewer's nav shows them.
+  const { isAuthMode, isAdmin, computerUse } = useSettingsAudience()
+  const settingsPages = useMemo(
+    () => settingsPagesFor({ isAuthMode, isAdmin, computerUse }),
+    [isAuthMode, isAdmin, computerUse]
+  )
 
   const queryClient = useQueryClient()
   const sessionQueries = useQueries({
@@ -83,12 +96,11 @@ export function SearchDialog() {
   const trimmedQuery = query.trim()
   const isSearchMode = trimmedQuery.length > 0
 
+  // Settings match without the agents loaded, so they are not waited on.
   const sections = useMemo<SearchSections>(() => {
-    if (!agents) return { agents: [], sessions: [], dashboards: [] }
-    return isSearchMode
-      ? searchAll(agents, sessionsByAgent, query)
-      : getRecent(agents, sessionsByAgent)
-  }, [agents, sessionsByAgent, query, isSearchMode])
+    if (isSearchMode) return searchAll(agents ?? [], sessionsByAgent, query, settingsPages)
+    return agents ? getRecent(agents, sessionsByAgent) : NO_RESULTS
+  }, [agents, sessionsByAgent, query, isSearchMode, settingsPages])
 
   const flatItems = useMemo<FlatItem[]>(() => flattenSections(sections), [sections])
 
@@ -111,7 +123,11 @@ export function SearchDialog() {
     // Close the dialog BEFORE navigating: the route transition otherwise strands
     // the Radix overlay open (it intercepts pointer events on the page beneath).
     closeSearch()
-    if (item.kind === 'agent') {
+    if (item.kind === 'settings') {
+      // Records where the palette was opened from as Settings' Back target
+      // (or keeps the one it has, when opened over Settings).
+      openSettings(item.result.page.id)
+    } else if (item.kind === 'agent') {
       void navigate({ to: '/agents/$slug', params: { slug: item.agent.slug } })
     } else if (item.kind === 'dashboard') {
       void navigate({
@@ -152,10 +168,10 @@ export function SearchDialog() {
         // holds still as results come and go; the list scrolls inside it.
         className="search-anim flex h-[560px] max-w-[640px] flex-col p-0 gap-0 overflow-hidden top-4 translate-y-0 mt-[env(safe-area-inset-top)] md:top-[50%] md:-translate-y-1/2 md:mt-0 [&>button]:top-6 [&>button]:right-5 md:[&>button]:hidden"
         onKeyDown={handleKeyDown}
-        aria-label="Search agents, dashboards, and sessions"
+        aria-label="Search agents, sessions, dashboards, and settings"
       >
-        <DialogTitle className="sr-only">Search agents, dashboards, and sessions</DialogTitle>
-        <DialogDescription className="sr-only">Find agents, dashboards, and sessions by name</DialogDescription>
+        <DialogTitle className="sr-only">Search agents, sessions, dashboards, and settings</DialogTitle>
+        <DialogDescription className="sr-only">Find agents, sessions, and dashboards by name, and settings pages by what is on them</DialogDescription>
         {/* The header is the field alone: large type, no rule beneath it, and from md
             no close button (Escape or a click outside closes; touch keeps the X, so
             the field leaves room for it). Its icon sits on the rows' left edge. */}
@@ -169,7 +185,7 @@ export function SearchDialog() {
               setQuery(e.target.value)
               setActiveIndex(0)
             }}
-            placeholder="Search agents, dashboards, and sessions..."
+            placeholder="Search agents, sessions, dashboards, and settings..."
             className="min-w-0 flex-1 bg-transparent text-lg outline-none placeholder:text-muted-foreground/60"
             data-testid="search-input"
           />
@@ -244,6 +260,22 @@ export function SearchDialog() {
                       data-agent-slug={agent.slug}
                       data-dashboard-name={dashboard.name}
                       data-dashboard-slug={dashboard.slug}
+                    />
+                  )
+                })}
+              </ResultSection>
+              <ResultSection label="Settings" count={sections.settings.length}>
+                {sections.settings.map((result, i) => {
+                  const index = sections.agents.length + sections.sessions.length + sections.dashboards.length + i
+                  return (
+                    <SettingsResultRow
+                      key={result.page.id}
+                      index={index}
+                      active={activeIndex === index}
+                      result={result}
+                      query={trimmedQuery}
+                      onSelect={() => handleSelect({ kind: 'settings', result })}
+                      onActivate={setActiveIndex}
                     />
                   )
                 })}
@@ -339,6 +371,64 @@ function ResultRow({
             <span className={cn('sr-only', state === 'working' && 'motion-reduce:not-sr-only motion-reduce:shrink-0')}>
               ({state})
             </span>
+          )}
+        </span>
+      </span>
+    </button>
+  )
+}
+
+/**
+ * A settings page, on two lines like the rows above it: the page's name behind
+ * its nav icon, and beneath, the nav group it sits in and, when the page was
+ * listed for something on it rather than its name, that ("Anthropic").
+ */
+function SettingsResultRow({
+  index,
+  active,
+  result,
+  query,
+  onSelect,
+  onActivate,
+}: {
+  index: number
+  active: boolean
+  result: SettingsResult
+  query: string
+  onSelect: () => void
+  onActivate: (index: number) => void
+}) {
+  const { page, matched } = result
+  return (
+    <button
+      type="button"
+      data-index={index}
+      onClick={onSelect}
+      // Move, not enter: as for the rows above.
+      onMouseMove={() => onActivate(index)}
+      className={cn(
+        'flex w-full items-center gap-4 rounded-item px-3 py-2.5 text-left',
+        active && 'bg-accent text-accent-foreground'
+      )}
+      data-testid="search-settings-row"
+      data-settings-tab={page.id}
+    >
+      {/* The size of an agent's avatar, so every row's name starts at one edge. */}
+      {/* h-7, not size-7: the height is what rounded-control's radius follows. */}
+      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-control border bg-muted/40 text-muted-foreground">
+        <AnimatedNavIcon name={page.icon} className="h-4 w-4" />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-sm">
+          <HighlightMatch text={page.label} query={query} />
+        </span>
+        <span className="block truncate text-xs text-muted-foreground/70">
+          {page.group}
+          {matched && (
+            <>
+              {' · '}
+              <HighlightMatch text={matched} query={query} />
+            </>
           )}
         </span>
       </span>

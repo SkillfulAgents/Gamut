@@ -19,6 +19,7 @@ src/shared/lib/llm-provider/connections.test.ts
 src/shared/lib/llm-provider/connection-bootstrap.test.ts
 src/api/routes/llm-connections.test.ts
 src/api/routes/llm-runtime.test.ts
+src/api/routes/llm-runtime.reads.test.ts
 src/shared/lib/notifications/push/apns-device-service.test.ts
 src/shared/lib/notifications/push/push-subscription-service.test.ts
 src/shared/lib/notifications/channels/push-recipients.integration.test.ts
@@ -164,3 +165,5 @@ src/api/mcp.reach.test.ts
 src/api/routes/mcp-server-settings.test.ts
 src/shared/lib/mcp-server/mcp-server-settings.test.ts
 src/api/routes/runtime-status.test.ts
+src/api/routes/notifications.mark-read.integration.test.ts
+src/shared/lib/services/home-reads-one-wave.test.ts

@@ -34,6 +34,10 @@ export class PodmanContainerClient extends BaseContainerClient {
     return ':U'
   }
 
+  static debugCliCommand(): string {
+    return 'podman'
+  }
+
   /**
    * Check if Podman is available on the system.
    */

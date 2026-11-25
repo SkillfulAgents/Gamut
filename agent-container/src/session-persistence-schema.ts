@@ -2,7 +2,6 @@ import { withoutProviderCredentials } from './connection-runtime';
 import { z } from 'zod';
 import { agentCapabilityPoliciesSchema, speedLevelSchema } from './capability-policies';
 import { globalInstructionsSchema } from './global-instructions';
-import { modelContextWindowsSchema, subagentModelCatalogSchema } from './subagent-model-catalog';
 import { preloadToolsetsSchema } from './preload-toolsets';
 
 export const sessionMetadataSchema = z
@@ -15,14 +14,11 @@ export const sessionMetadataSchema = z
     // A host delete stopped the process but has not yet confirmed file removal.
     releasedForDeletion: z.boolean().optional(),
     systemPrompt: z.string().optional(),
-    modelPromptHints: z.array(z.string()).optional(),
     availableEnvVars: z.array(z.string()).optional(),
     model: z.string().optional(),
     llmProviderId: z.string().optional(),
     browserModel: z.string().optional(),
     dashboardBuilderModel: z.string().optional(),
-    subagentModels: subagentModelCatalogSchema,
-    modelContextWindows: modelContextWindowsSchema,
     webSearchProvider: z.string().optional(),
     webFetchProvider: z.string().optional(),
     availableIntegrationFamilies: z.array(z.string()).optional(),

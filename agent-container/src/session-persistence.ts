@@ -16,6 +16,10 @@ export type SessionUpdate = Partial<Pick<
 const SESSIONS_FILE =
   process.env.SUPERAGENT_SESSIONS_FILE || '/workspace/.superagent-sessions.json';
 
+// The host sends these with every connection runtime, so a session record no
+// longer keeps them. Older builds stored a full copy in each record.
+const RETIRED_FIELDS = ['subagentModels', 'modelContextWindows', 'modelPromptHints'];
+
 export class SessionPersistence {
   private sessions: Map<string, SessionMetadata> = new Map();
 
@@ -40,6 +44,7 @@ export class SessionPersistence {
     try {
       const rawSessions = persistedSessionsFileSchema.parse(JSON.parse(data));
       const sessions = new Map<string, SessionMetadata>();
+      let pruned = false;
       for (const [sessionId, rawSession] of Object.entries(rawSessions)) {
         const parsed = sessionMetadataSchema.safeParse(rawSession);
         if (!parsed.success) {
@@ -49,10 +54,18 @@ export class SessionPersistence {
           );
           continue;
         }
+        for (const field of RETIRED_FIELDS) {
+          if (field in parsed.data) {
+            delete parsed.data[field];
+            pruned = true;
+          }
+        }
         sessions.set(sessionId, parsed.data);
       }
       this.sessions = sessions;
       console.log(`Loaded ${this.sessions.size} persisted sessions`);
+      // Rewrite at start, so the file shrinks before the next message.
+      if (pruned) this.save();
     } catch (error) {
       // Corrupt JSON (e.g. a torn write from an older build, or disk damage). Do
       // NOT silently overwrite it on the next save() — preserve it aside for

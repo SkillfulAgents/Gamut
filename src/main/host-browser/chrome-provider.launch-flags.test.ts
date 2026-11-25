@@ -68,8 +68,11 @@ const h = vi.hoisted(() => {
   // When set, fs.mkdirSync throws ENOSPC — simulates disk pressure failing a
   // launch before Chrome is spawned or the instance registered.
   const state = { failMkdir: false }
+  // Every string written through fs.writeFileSync (Chrome's Preferences goes
+  // through writeFileAtomicSync, which writes to an fd).
+  const writes: string[] = []
 
-  return { netMock, spawnMock, execSyncMock, state }
+  return { netMock, spawnMock, execSyncMock, state, writes }
 })
 
 const pm = vi.hoisted(() => ({
@@ -100,7 +103,9 @@ vi.mock('fs', () => {
     readFileSync: () => {
       throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' })
     },
-    writeFileSync: () => undefined,
+    writeFileSync: (_target: unknown, content: unknown) => {
+      if (typeof content === 'string') h.writes.push(content)
+    },
     openSync: () => 1,
     fsyncSync: () => undefined,
     fchmodSync: () => undefined,
@@ -168,6 +173,7 @@ describe('ChromeProvider launch flags (profile disk growth)', () => {
   beforeEach(async () => {
     Object.defineProperty(process, 'platform', { value: 'linux', configurable: true })
     h.spawnMock.mockClear()
+    h.writes.length = 0
     pm.markProfileInUse.mockClear()
     pm.unmarkProfileInUse.mockClear()
     pm.waitForBrowserProfileCleanup.mockClear()
@@ -201,6 +207,13 @@ describe('ChromeProvider launch flags (profile disk growth)', () => {
 
   it('disables the component updater', () => {
     expect(args).toContain('--disable-component-update')
+  })
+
+  it('turns off the password warnings whose dialogs silently block input to the page', () => {
+    const prefs = h.writes.map((w) => JSON.parse(w) as Record<string, any>).find((p) => p.download)
+    expect(prefs, 'Chrome Preferences should have been written').toBeTruthy()
+    expect(prefs!.profile.password_manager_leak_detection).toBe(false)
+    expect(prefs!.safebrowsing.password_protection_warning_trigger).toBe(0)
   })
 
   it('claims the profile before waiting on the cleanup sweep, which precedes the spawn', () => {
