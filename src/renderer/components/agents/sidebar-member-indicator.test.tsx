@@ -6,7 +6,10 @@ import { useAgentMembers } from '@renderer/hooks/use-agent-members'
 import { AgentSharePopover } from './agent-share-popover'
 import { SidebarMemberIndicator } from './sidebar-member-indicator'
 
-vi.mock('@renderer/hooks/use-agent-member-agents', () => ({ useAgentMemberAgents: () => [], useAgentShareRoster: () => ({ data: undefined }) }))
+const memberAgents: Array<{ slug: string; name: string; avatar: { color: 'tonal-blue'; shape: 'circle' }; role: 'viewer'; canMessage: boolean; readDecision: 'allow' }> = []
+vi.mock('@renderer/hooks/use-agent-member-agents', () => ({ useAgentMemberAgents: () => memberAgents, useAgentShareRoster: () => ({ data: undefined }) }))
+const allAgents = [{ slug: 'brain', teamBrain: { volumeId: 'v1' } }, { slug: 'helper' }]
+vi.mock('@renderer/hooks/use-agents', () => ({ useAgents: ({ select }: { select: (agents: unknown[]) => unknown }) => ({ data: select(allAgents), isSuccess: true }) }))
 vi.mock('./agent-share-rows', () => ({ AgentShareRows: () => null }))
 vi.mock('@renderer/hooks/use-agent-members', () => ({ useAgentMembers: vi.fn() }))
 vi.mock('@renderer/hooks/use-mobile', () => ({ useIsMobile: () => false }))
@@ -30,6 +33,7 @@ beforeEach(() => {
   user.isAdmin = false
   user.canAdminAgent.mockReturnValue(false)
   roster(members)
+  memberAgents.length = 0
 })
 afterEach(cleanup)
 
@@ -129,6 +133,22 @@ describe('SidebarMemberIndicator', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Retry members' }))
     expect(refetch).toHaveBeenCalledOnce()
     expect(screen.queryByRole('list')).toBeNull()
+  })
+
+  it("leaves Team Brain's face out of the stack and its count", () => {
+    const agent = (slug: string, name: string) => ({ slug, name, avatar: { color: 'tonal-blue' as const, shape: 'circle' as const }, role: 'viewer' as const, canMessage: true, readDecision: 'allow' as const })
+    memberAgents.push(agent('brain', 'Team Brain'), agent('helper', 'Helper'))
+    roster(members.slice(0, 2))
+    render(<SidebarMemberIndicator {...props} memberCount={2} />)
+    const trigger = screen.getByRole('button', { name: '3 members of Shared Agent' })
+    expect([...trigger.querySelectorAll('[data-agent-face]')].map(face => face.getAttribute('data-agent-face'))).toEqual(['helper'])
+  })
+
+  it('shows no stack when Team Brain is the only other member', () => {
+    memberAgents.push({ slug: 'brain', name: 'Team Brain', avatar: { color: 'tonal-blue', shape: 'circle' }, role: 'viewer', canMessage: true, readDecision: 'allow' })
+    roster(members.slice(0, 1))
+    render(<SidebarMemberIndicator {...props} memberCount={1} />)
+    expect(screen.queryByRole('button')).toBeNull()
   })
 
   it('does not pass trigger activation to the sortable row', () => {
