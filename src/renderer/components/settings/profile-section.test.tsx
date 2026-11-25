@@ -10,10 +10,11 @@ vi.mock('@renderer/hooks/use-public-auth-config', () => ({
   usePublicAuthConfig: () => publicAuthConfigMock(),
 }))
 
+// The signed-in session. A test renames the user by replacing `user` and
+// re-rendering, as a refreshed session does.
+const session = vi.hoisted(() => ({ user: { id: 'u1', email: 'a@example.com', name: 'Ada' } }))
 vi.mock('@renderer/context/user-context', () => ({
-  useUser: () => ({
-    user: { id: 'u1', email: 'a@example.com', name: 'Ada' },
-  }),
+  useUser: () => session,
 }))
 
 vi.mock('@renderer/lib/auth-client', () => ({
@@ -40,6 +41,7 @@ import { ProfileSection } from './profile-section'
 
 describe('ProfileSection', () => {
   beforeEach(() => {
+    session.user = { id: 'u1', email: 'a@example.com', name: 'Ada' }
     updateUserMock.mockReset()
     toastSuccessMock.mockReset()
     publicAuthConfigMock.mockReturnValue({
@@ -102,6 +104,53 @@ describe('ProfileSection', () => {
     await waitFor(() => expect(updateUserMock).toHaveBeenCalledWith({ name: 'Ada Lovelace' }))
     await waitFor(() => expect(toastSuccessMock).toHaveBeenCalledWith('Name updated'))
     await waitFor(() => expect(save).toBeDisabled())
+  })
+
+  it('keeps a draft typed before the session catches up with a save', async () => {
+    updateUserMock.mockResolvedValue({ error: null })
+    const { rerender } = render(<ProfileSection />)
+    const name = screen.getByLabelText('Name')
+    const save = screen.getByRole('button', { name: 'Save' })
+
+    fireEvent.change(name, { target: { value: 'Ada Lovelace' } })
+    await waitFor(() => expect(save).toBeEnabled())
+    fireEvent.click(save)
+    await waitFor(() => expect(toastSuccessMock).toHaveBeenCalledWith('Name updated'))
+    await waitFor(() => expect(save).toBeDisabled())
+
+    fireEvent.change(name, { target: { value: 'Unsaved edit' } })
+    await waitFor(() => expect(save).toBeEnabled())
+    // The session only now reads the saved name back.
+    session.user = { ...session.user, name: 'Ada Lovelace' }
+    rerender(<ProfileSection />)
+
+    expect(screen.getByLabelText('Name')).toHaveValue('Unsaved edit')
+    expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled()
+    // Typed back to the saved name, it is no longer an edit.
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Ada Lovelace' } })
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled())
+  })
+
+  it('takes a name changed elsewhere as the value and the baseline, unless a draft is being typed', async () => {
+    const { rerender } = render(<ProfileSection />)
+    const save = () => screen.getByRole('button', { name: 'Save' })
+
+    session.user = { ...session.user, name: 'Countess' }
+    rerender(<ProfileSection />)
+    await waitFor(() => expect(screen.getByLabelText('Name')).toHaveValue('Countess'))
+    expect(save()).toBeDisabled()
+
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Draft' } })
+    await waitFor(() => expect(save()).toBeEnabled())
+    session.user = { ...session.user, name: 'Countess of Lovelace' }
+    rerender(<ProfileSection />)
+    expect(screen.getByLabelText('Name')).toHaveValue('Draft')
+    expect(save()).toBeEnabled()
+    // The draft is compared with the new name, not the one it was typed over.
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Countess' } })
+    await waitFor(() => expect(save()).toBeEnabled())
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Countess of Lovelace' } })
+    await waitFor(() => expect(save()).toBeDisabled())
   })
 
   it('surfaces a failed name update inline', async () => {

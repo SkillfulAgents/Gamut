@@ -20,7 +20,7 @@ export function SearchProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+      if (isSearchShortcut(e)) {
         e.preventDefault()
         setOpen((current) => !current)
       }
@@ -39,6 +39,15 @@ export function SearchProvider({ children }: { children: ReactNode }) {
       </SearchOpenContext.Provider>
     </SearchActionsContext.Provider>
   )
+}
+
+/**
+ * Cmd/ctrl-K. The provider hears it on `window`, which a key pressed inside a
+ * dialog never reaches (`DialogContent` stops its keys), so the search dialog
+ * checks for it on its own content as well.
+ */
+export function isSearchShortcut(e: { key: string; metaKey: boolean; ctrlKey: boolean }): boolean {
+  return (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k'
 }
 
 /** Open or close search. The returned object is the same for the provider's whole life. */

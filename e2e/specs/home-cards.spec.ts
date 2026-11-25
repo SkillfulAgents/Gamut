@@ -52,6 +52,12 @@ function seedDashboard(agentSlug: string) {
 }
 
 test.describe('home card arrangement', () => {
+  // One at a time, still retried one by one. The board's layout is one
+  // user setting that every save replaces whole, and each of these tests saves
+  // a layout holding only its own cards: run side by side on other workers,
+  // one test's save wiped another's cards from the layout it was asserting.
+  test.describe.configure({ mode: 'default' })
+
   for (const widths of [[1], [2, 2]]) {
     test(`a sparse board of ${widths.join('+')} columns can drop at its right edge without shifting`, async ({ page, request }, testInfo) => {
       await page.setViewportSize({ width: 1440, height: 900 })

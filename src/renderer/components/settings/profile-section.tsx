@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
@@ -91,11 +91,33 @@ function NameRow({ currentName }: { currentName: string }) {
     register,
     handleSubmit,
     reset,
+    getValues,
+    setValue,
     formState: { errors, isSubmitting, isDirty },
   } = useForm<NameValues>({
     resolver: zodResolver(nameSchema),
     defaultValues: { name: currentName },
   })
+
+  // The name Save compares the field against. Every reset goes through here.
+  const baseline = useRef(currentName)
+  const rebaseline = useCallback((name: string) => {
+    baseline.current = name
+    reset({ name })
+  }, [reset])
+
+  // The session's name can change while the row is up: when the session
+  // catches up with a save made here, or when the user is renamed elsewhere.
+  // It becomes the baseline, and the field's value unless someone is typing:
+  // a draft stays, and stays a draft, so a session that lands mid-edit does
+  // not throw the edit away.
+  useEffect(() => {
+    if (currentName === baseline.current) return
+    const typed = getValues('name')
+    const typing = typed !== baseline.current
+    rebaseline(currentName)
+    if (typing && typed !== currentName) setValue('name', typed, { shouldDirty: true })
+  }, [currentName, getValues, rebaseline, setValue])
 
   async function onSubmit(data: NameValues) {
     setRequestError(null)
@@ -106,7 +128,7 @@ function NameRow({ currentName }: { currentName: string }) {
         return
       }
       // Re-baseline the form so Save disables again until the next edit.
-      reset({ name: data.name })
+      rebaseline(data.name)
       toast.success('Name updated')
     } catch {
       setRequestError('Failed to update name')
@@ -265,9 +287,9 @@ export function ProfileSection() {
           name="Email"
           right={<span className={VALUE_CLASS}>{user?.email ?? '—'}</span>}
         />
-        {/* Keyed on the session's name so a refreshed session re-baselines the
-            form instead of leaving a stale default in the field. */}
-        <NameRow key={user?.name ?? ''} currentName={user?.name ?? ''} />
+        {/* Keyed on the user, not the name: the row follows a renamed session
+            itself, keeping a draft, where a remount would discard it. */}
+        <NameRow key={user?.id ?? ''} currentName={user?.name ?? ''} />
         {showChangePassword ? <PasswordRow /> : null}
       </div>
     </div>
