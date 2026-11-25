@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect, type Locator, type Page } from '@playwright/test'
 import { AppPage } from '../pages/app.page'
 import { AgentPage } from '../pages/agent.page'
 import { SessionPage } from '../pages/session.page'
@@ -100,6 +100,17 @@ test.describe('Capability launch review', () => {
   })
 })
 
+/**
+ * Picks a decision from a row's policy dropdown and waits for its menu to leave the page. The menu fades out, so a
+ * second dropdown opened straight after would find two of each item.
+ */
+async function pickPolicy(page: Page, row: Locator, decision: 'allow' | 'review' | 'block') {
+  await row.locator('[data-testid="policy-dropdown-trigger"]').click()
+  const item = page.locator('[data-testid="policy-menu-' + decision + '"]')
+  await item.click()
+  await expect(item).toHaveCount(0)
+}
+
 test.describe('Capability policy settings', () => {
   test('three-way controls persist and blocking subagents warns first', async ({ page }) => {
     const appPage = new AppPage(page)
@@ -118,8 +129,7 @@ test.describe('Capability policy settings', () => {
     await expect(workflowsToggle.locator('[data-testid="policy-dropdown-trigger"]')).toHaveAttribute('data-decision', 'review')
 
     // Selecting block for subagents opens the warning instead of applying
-    await subagentsToggle.locator('[data-testid="policy-dropdown-trigger"]').click()
-    await page.locator('[data-testid="policy-menu-block"]').click()
+    await pickPolicy(page, subagentsToggle, 'block')
     await expect(page.locator('[data-testid="block-subagents-use-review"]')).toBeVisible()
 
     // Cancel applies nothing
@@ -128,16 +138,14 @@ test.describe('Capability policy settings', () => {
     await expect(subagentsToggle.locator('[data-testid="policy-dropdown-trigger"]')).toHaveAttribute('data-decision', 'allow')
 
     // Take the recommended path — review is applied, not block
-    await subagentsToggle.locator('[data-testid="policy-dropdown-trigger"]').click()
-    await page.locator('[data-testid="policy-menu-block"]').click()
+    await pickPolicy(page, subagentsToggle, 'block')
     await expect(page.locator('[data-testid="block-subagents-use-review"]')).toBeVisible()
     await page.locator('[data-testid="block-subagents-use-review"]').click()
     await expect(subagentsToggle.locator('[data-testid="policy-dropdown-trigger"]')).toHaveAttribute('data-decision', 'review', { timeout: 10000 })
     await expect(subagentsToggle.locator('[data-testid="policy-dropdown-trigger"]')).not.toHaveAttribute('data-decision', 'block')
 
     // Workflows -> allow persists across reload
-    await workflowsToggle.locator('[data-testid="policy-dropdown-trigger"]').click()
-    await page.locator('[data-testid="policy-menu-allow"]').click()
+    await pickPolicy(page, workflowsToggle, 'allow')
     await expect(workflowsToggle.locator('[data-testid="policy-dropdown-trigger"]')).toHaveAttribute('data-decision', 'allow', { timeout: 10000 })
 
     await page.reload()
@@ -145,12 +153,10 @@ test.describe('Capability policy settings', () => {
     await expect(page.locator('[data-testid="capability-policy-workflows"] [data-testid="policy-dropdown-trigger"]')).toHaveAttribute('data-decision', 'allow', { timeout: 10000 })
 
     // Restore defaults so other specs see the stock policy
-    await page.locator('[data-testid="capability-policy-workflows"] [data-testid="policy-dropdown-trigger"]').click()
-    await page.locator('[data-testid="policy-menu-review"]').click()
+    await pickPolicy(page, page.locator('[data-testid="capability-policy-workflows"]'), 'review')
     await expect(page.locator('[data-testid="capability-policy-workflows"] [data-testid="policy-dropdown-trigger"]')).toHaveAttribute('data-decision', 'review', { timeout: 10000 })
     const subagents = page.locator('[data-testid="capability-policy-subagents"]')
-    await subagents.locator('[data-testid="policy-dropdown-trigger"]').click()
-    await page.locator('[data-testid="policy-menu-allow"]').click()
+    await pickPolicy(page, subagents, 'allow')
     await expect(subagents.locator('[data-testid="policy-dropdown-trigger"]')).toHaveAttribute('data-decision', 'allow', { timeout: 10000 })
   })
 })
