@@ -194,8 +194,10 @@ const icons = {
   },
 } satisfies Record<string, { icon: LucideIcon; motion: IconMotion[] }>
 
+export type AnimatedNavIconName = keyof typeof icons
+
 interface AnimatedNavIconProps extends Omit<LucideProps, 'ref'> {
-  name: keyof typeof icons
+  name: AnimatedNavIconName
 }
 
 /**
