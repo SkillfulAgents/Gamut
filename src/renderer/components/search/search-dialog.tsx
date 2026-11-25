@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type KeyboardEvent, type RefObject } from 'react'
-import { useQueries, useQueryClient, type UseQueryResult } from '@tanstack/react-query'
+import { useEffect, useImperativeHandle, useMemo, useRef, useState, type KeyboardEvent, type RefObject } from 'react'
+import { QueryObserver, useQueries, useQueryClient } from '@tanstack/react-query'
 import { Bot, Search } from 'lucide-react'
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from '@renderer/components/ui/dialog'
 import { HighlightMatch } from '@renderer/components/ui/highlight-match'
@@ -31,9 +31,9 @@ const NO_SESSIONS: ApiSession[] = []
  * Open state comes from SearchContext, which lives above the router.
  *
  * This is only the frame. It stays mounted once search has been opened, so it
- * subscribes to nothing but the open state; everything that reads agents and
- * sessions is in `SearchPalette`, which Radix mounts with the dialog's content
- * and unmounts when its exit animation ends.
+ * reads nothing but the open state; everything that reads agents and sessions
+ * is in `SearchPalette`, which Radix mounts with the dialog's content and
+ * unmounts when its exit animation ends.
  */
 export function SearchDialog() {
   const open = useSearchOpen()
@@ -58,14 +58,51 @@ export function SearchDialog() {
         <DialogDescription className="sr-only">Find agents, sessions, and dashboards by name, and settings pages by what is on them</DialogDescription>
         <SearchPalette open={open} closeSearch={closeSearch} keyHandler={keyHandler} />
       </DialogContent>
+      {!open && <HeldSessionLists />}
     </Dialog>
   )
 }
 
 /**
+ * Keeps the session lists search has read in the query cache while search is
+ * closed, so the next open shows them at once and reads again behind them (the
+ * palette holds them itself while it is mounted). It only holds: an observer that is disabled and never notifies neither
+ * fetches nor renders anything. An agent that leaves the list is let go, and
+ * its sessions are collected as any unobserved query is.
+ */
+function HeldSessionLists() {
+  const queryClient = useQueryClient()
+  const { data: slugs } = useAgents({ select: slugsOf, poll: false })
+  useEffect(() => {
+    const release = (slugs ?? []).map((slug) =>
+      new QueryObserver(queryClient, { queryKey: ['sessions', slug], enabled: false, notifyOnChangeProps: [] })
+        .subscribe(() => {}),
+    )
+    return () => release.forEach((unsubscribe) => unsubscribe())
+  }, [queryClient, slugs])
+  return null
+}
+
+function slugsOf(agents: ApiAgent[]): string[] {
+  return agents.map((agent) => agent.slug)
+}
+
+/** `next`, or the value last returned if `next` has the same keys holding the same values. */
+function useSameWhileEqual<T>(next: Record<string, T>): Record<string, T> {
+  const held = useRef(next)
+  if (!sameEntries(held.current, next)) held.current = next
+  return held.current
+}
+
+function sameEntries<T>(a: Record<string, T>, b: Record<string, T>): boolean {
+  const keys = Object.keys(a)
+  return keys.length === Object.keys(b).length && keys.every((key) => key in b && a[key] === b[key])
+}
+
+/**
  * The field and the results. Mounted only while the dialog's content is: a
- * closed dialog holds no observers on the agents or session lists and sorts
- * nothing. `open` is false here only during the exit animation.
+ * closed dialog renders and sorts nothing. `open` is false here only during
+ * the exit animation.
  */
 function SearchPalette({
   open,
@@ -92,30 +129,22 @@ function SearchPalette({
   )
 
   const queryClient = useQueryClient()
-  // `useQueries` returns a new array on every render; `combine` hands back the
-  // same map until a list's rows change, so moving the selection (arrow keys,
-  // the pointer over a row) does not filter and sort every session again.
-  const combineSessions = useCallback(
-    (results: UseQueryResult<ApiSession[]>[]) => {
-      const map: Record<string, ApiSession[]> = {}
-      ;(agents ?? []).forEach((a, i) => {
-        map[a.slug] = results[i]?.data ?? NO_SESSIONS
-      })
-      return map
-    },
-    [agents],
-  )
-  const sessionsByAgent = useQueries({
+  const sessionQueries = useQueries({
     queries: (agents ?? []).map((a) => ({
       ...allSessionsQueryOptions(queryClient, a.slug),
       enabled: open,
       staleTime: 30_000,
-      // The lists outlive the palette, as they did while it stayed mounted
-      // when closed: the next open shows them at once and reads again behind.
-      gcTime: Infinity,
     })),
-    combine: combineSessions,
   })
+  // `useQueries` returns a new array on every render. The map built from it is
+  // the same object until a list's rows change, so moving the selection (arrow
+  // keys, the pointer over a row) does not filter and sort every session again.
+  // Not `combine`: that runs once per list that arrives, over every agent, so
+  // opening with N agents would cost N squared; here React batches the lists
+  // that arrive together into one render, and a render walks the agents once.
+  const sessionsByAgent = useSameWhileEqual(
+    Object.fromEntries((agents ?? []).map((a, i) => [a.slug, sessionQueries[i]?.data ?? NO_SESSIONS])),
+  )
 
   // Reset state on open
   useEffect(() => {

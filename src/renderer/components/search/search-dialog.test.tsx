@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { Profiler } from 'react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { QueryClient, QueryClientProvider, QueryObserver } from '@tanstack/react-query'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { SearchProvider } from '@renderer/context/search-context'
 import * as api from '@renderer/lib/api'
@@ -181,8 +182,16 @@ describe('work done by the dialog', () => {
     client.setQueryData(['sessions', 'one'], [makeSession('a', 'one', 3), makeSession('b', 'one', 1)])
     client.setQueryData(['sessions', 'two'], [makeSession('c', 'two', 2)])
     const fetch = vi.spyOn(api, 'apiFetch').mockResolvedValue(Response.json([]))
-    render(<QueryClientProvider client={client}><SearchProvider><SearchDialog /></SearchProvider></QueryClientProvider>)
-    return { client, fetch }
+    // Every commit of anything under the dialog, its closed frame included.
+    const commits = { count: 0 }
+    render(
+      <QueryClientProvider client={client}>
+        <SearchProvider>
+          <Profiler id="search" onRender={() => { commits.count++ }}><SearchDialog /></Profiler>
+        </SearchProvider>
+      </QueryClientProvider>,
+    )
+    return { client, fetch, commits }
   }
 
   const scrollIntoView = vi.fn()
@@ -195,18 +204,19 @@ describe('work done by the dialog', () => {
     vi.mocked(filter.getRecent).mockClear()
     vi.mocked(filter.searchAll).mockClear()
     navigate.mockClear()
+    openSettings.mockClear()
   })
 
-  it('sorts nothing and observes no list until it is opened', async () => {
-    const { client, fetch } = setup()
+  it('sorts and renders nothing until it is opened', async () => {
+    const { client, fetch, commits } = setup()
     expect(screen.queryByTestId('search-input')).toBeNull()
+    const mounted = commits.count
     await write(() => {
       client.setQueryData(['sessions', 'one'], [makeSession('z', 'one', 0)])
       client.setQueryData(['agents'], [{ ...one, hasActiveSessions: true }, two])
     })
     expect(sorts()).toBe(0)
-    expect(observers(client, ['sessions', 'one'])).toBe(0)
-    expect(observers(client, ['agents'])).toBe(0)
+    expect(commits.count).toBe(mounted)
     expect(fetch).not.toHaveBeenCalled()
   })
 
@@ -248,14 +258,15 @@ describe('work done by the dialog', () => {
     expect(sorts()).toBe(afterOpen + 1)
   })
 
-  it('once closed, sorts nothing and observes no list, whatever changes', async () => {
-    const { client, fetch } = setup()
+  it('once closed, sorts and renders nothing, whatever changes', async () => {
+    const { client, fetch, commits } = setup()
     pressShortcut()
     expect(observers(client, ['sessions', 'one'])).toBe(1)
     expect(observers(client, ['sessions', 'two'])).toBe(1)
     pressEscape()
     await waitFor(() => expect(screen.queryByTestId('search-input')).toBeNull())
     const afterClose = sorts()
+    const closed = commits.count
 
     for (let i = 0; i < 5; i++) {
       await write(() => {
@@ -266,18 +277,125 @@ describe('work done by the dialog', () => {
     await act(() => client.invalidateQueries({ queryKey: ['sessions'] }))
 
     expect(sorts()).toBe(afterClose)
-    expect(observers(client, ['sessions', 'one'])).toBe(0)
-    expect(observers(client, ['sessions', 'two'])).toBe(0)
-    expect(observers(client, ['agents'])).toBe(0)
+    expect(commits.count).toBe(closed)
+    // Each list is held in the cache by one observer that neither reads nor
+    // notifies: the invalidation above fetched nothing.
+    expect(observers(client, ['sessions', 'one'])).toBe(1)
+    expect(observers(client, ['sessions', 'two'])).toBe(1)
     expect(fetch).not.toHaveBeenCalled()
+  })
+
+  it('lets go of the sessions of an agent that has left, and keeps the others', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      const { client } = setup()
+      pressShortcut()
+      pressEscape()
+      await waitFor(() => expect(screen.queryByTestId('search-input')).toBeNull())
+
+      // Agent two is deleted while search is closed.
+      await write(() => client.setQueryData(['agents'], [one]))
+      expect(observers(client, ['sessions', 'two'])).toBe(0)
+      // Still there for as long as any unobserved query is (five minutes by default)...
+      await act(() => vi.advanceTimersByTimeAsync(4 * 60_000))
+      expect(client.getQueryData(['sessions', 'two'])).toHaveLength(1)
+      // ...and then collected, while the remaining agent's list stays.
+      await act(() => vi.advanceTimersByTimeAsync(6 * 60_000))
+      expect(client.getQueryCache().find({ queryKey: ['sessions', 'two'], exact: true })).toBeUndefined()
+      expect(client.getQueryData(['sessions', 'one'])).toHaveLength(2)
+
+      pressShortcut()
+      expect(screen.getAllByTestId('search-session-row').map((row) => row.getAttribute('data-session-id'))).toEqual(['b', 'a'])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('lets go of a deleted agent\'s sessions when the agent leaves while search is open', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      const { client } = setup()
+      pressShortcut()
+      await write(() => client.setQueryData(['agents'], [one]))
+      expect(screen.getAllByTestId('search-session-row')).toHaveLength(2)
+      pressEscape()
+      await waitFor(() => expect(screen.queryByTestId('search-input')).toBeNull())
+      await act(() => vi.advanceTimersByTimeAsync(10 * 60_000))
+      expect(client.getQueryCache().find({ queryKey: ['sessions', 'two'], exact: true })).toBeUndefined()
+      expect(client.getQueryData(['sessions', 'one'])).toHaveLength(2)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('does work in proportion to the number of agents when their lists arrive together', async () => {
+    // Each list that arrives must not walk every agent again: with N agents
+    // that is N squared (500 agents: 252,004 result proxies, where one walk
+    // per render is about 2,000).
+    async function proxiesFor(count: number) {
+      const agents = Array.from({ length: count }, (_, i) => makeAgent(`a${i}`, i))
+      const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: 60_000 } } })
+      client.setQueryData(['agents'], agents)
+      const fetch = vi.spyOn(api, 'apiFetch').mockImplementation((url) => {
+        const slug = String(url).split('/')[3]
+        return Promise.resolve(Response.json([makeSession(`s-${slug}`, slug, 1)]))
+      })
+      const proxies = vi.spyOn(QueryObserver.prototype, 'trackResult')
+      render(<QueryClientProvider client={client}><SearchProvider><SearchDialog /></SearchProvider></QueryClientProvider>)
+      pressShortcut()
+      await waitFor(() => {
+        expect(fetch).toHaveBeenCalledTimes(count)
+        expect(client.isFetching()).toBe(0)
+        expect(screen.getAllByTestId('search-session-row')).toHaveLength(10)
+      })
+      const made = proxies.mock.calls.length
+      const sorted = sorts()
+      cleanup()
+      client.clear()
+      vi.restoreAllMocks()
+      vi.mocked(filter.getRecent).mockClear()
+      return { made, sorted }
+    }
+
+    const small = await proxiesFor(50)
+    const large = await proxiesFor(200)
+    // Four times the agents: about four times the work, not sixteen.
+    expect(large.made).toBeLessThanOrEqual(small.made * 6)
+    expect(large.made).toBeLessThanOrEqual(200 * 10)
+    // And the lists that arrive together are sorted together, not one by one.
+    expect(large.sorted).toBeLessThanOrEqual(10)
+  })
+
+  it('shows the settings pages this viewer has while the agents list is still loading', async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    // The agents request never answers.
+    vi.spyOn(api, 'apiFetch').mockReturnValue(new Promise(() => {}))
+    render(<QueryClientProvider client={client}><SearchProvider><SearchDialog /></SearchProvider></QueryClientProvider>)
+    pressShortcut()
+    expect(screen.getByText('No recent agents')).toBeInTheDocument()
+
+    fireEvent.change(screen.getByTestId('search-input'), { target: { value: 'browser' } })
+    expect(settingsRows()).toEqual(['browser', 'logins'])
+    expect(screen.queryByTestId('search-agent-row')).toBeNull()
+    fireEvent.keyDown(screen.getByTestId('search-input'), { key: 'Enter' })
+    expect(openSettings).toHaveBeenCalledExactlyOnceWith('browser')
+
+    // A member in auth mode has no Browser Use page: it is not offered, loading or not.
+    viewer.isAuthMode = true
+    try {
+      pressShortcut()
+      fireEvent.change(screen.getByTestId('search-input'), { target: { value: 'browser use' } })
+      expect(settingsRows()).toEqual([])
+      expect(screen.getByText('No matches found')).toBeInTheDocument()
+    } finally {
+      viewer.isAuthMode = false
+    }
   })
 
   it('keeps the lists it read after closing, and shows them at once on the next open', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true })
     try {
       const { client } = setup()
-      // In the app the sidebar holds the agents list; here nothing else does.
-      client.setQueryDefaults(['agents'], { gcTime: Infinity })
       pressShortcut()
       pressEscape()
       await waitFor(() => expect(screen.queryByTestId('search-input')).toBeNull())
