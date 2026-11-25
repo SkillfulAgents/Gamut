@@ -20,6 +20,7 @@ import { useRenderTracker } from '@renderer/lib/perf'
 import { computeContextPercent } from '@shared/lib/utils/context-usage'
 import { useSessionSearch } from '@renderer/hooks/use-session-search'
 import { SessionSearchBar } from '@renderer/components/messages/session-search-bar'
+import { useStreamContextUsage } from '@renderer/context/pending-messages-context'
 
 interface SessionViewProps {
   agentSlug: string
@@ -54,8 +55,8 @@ export function SessionView({ agentSlug, sessionId, onSessionCreated: handleSess
     onMessageSent,
     onMessageUuidAssigned,
     onPendingMessageAppeared,
-    streamContextUsage,
   } = usePendingMessages()
+  const streamContextUsage = useStreamContextUsage()
   const { canUseAgent } = useUser()
   const isViewOnly = !canUseAgent(agentSlug)
   const search = useSessionSearch(!!sessionId, sessionId)

@@ -39,6 +39,7 @@ vi.mock('@renderer/hooks/use-message-stream', () => ({
 }))
 vi.mock('@renderer/context/pending-messages-context', () => ({
   usePendingMessages: () => ({ getPendingMessages: () => [] }),
+  useStreamContextUsage: () => null,
 }))
 vi.mock('@renderer/context/user-context', () => ({
   useUser: () => ({ canUseAgent: () => true }),

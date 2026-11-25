@@ -54,8 +54,8 @@ vi.mock('@renderer/context/pending-messages-context', () => ({
     onMessageSent: vi.fn(),
     onMessageUuidAssigned: vi.fn(),
     onPendingMessageAppeared: vi.fn(),
-    streamContextUsage: null,
   }),
+  useStreamContextUsage: () => null,
 }))
 
 vi.mock('@renderer/context/user-context', () => ({
