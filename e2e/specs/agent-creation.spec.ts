@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { test, expect, type Page } from '@playwright/test'
 import { AppPage } from '../pages/app.page'
 import { AgentPage } from '../pages/agent.page'
@@ -12,7 +13,7 @@ test.beforeEach(async ({ page }) => {
 test('refresh and Skip keep one named agent with no sessions', async ({ page, request }) => {
   const agentPage = new AgentPage(page)
   await agentPage.clickCreateAgent()
-  const name = `Research ${Date.now()}`
+  const name = `Research ${randomUUID()}`
   const created = page.waitForResponse(r => r.url().endsWith('/api/agents') && r.request().method() === 'POST' && r.status() === 201)
   await agentPage.nameNewAgent(name)
   const agent = await (await created).json()
@@ -37,7 +38,7 @@ test('refresh while the creation response is in flight resumes the same agent an
     // Let the server create the agent, but withhold the response from this document.
     await route.fetch()
   })
-  const name = `Planner ${Date.now()}`
+  const name = `Planner ${randomUUID()}`
   await agentPage.nameNewAgent(name)
   const prompt = page.getByTestId('create-agent-prompt')
   await prompt.fill('Write a weekly brief')
