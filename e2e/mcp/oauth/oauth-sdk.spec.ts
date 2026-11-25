@@ -115,7 +115,7 @@ test.describe('v1 SDK with Dynamic Client Registration, as the member', () => {
     expect(JSON.parse(row?.details ?? '{}')).toMatchObject({ client: 'Gamut E2E v1 (DCR)', credential: 'oauth' })
     await useSession(page.context(), cast.member)
     await page.goto(`${baseUrl()}/agents/${agents.shared.slug}/sessions/${ran.session_id}`)
-    await expect(page.getByTestId('mcp-session-banner')).toContainText('Session started through MCP from "Gamut E2E v1 (DCR)"', { timeout: 30_000 })
+    await expect(page.getByTestId('inbound-x-agent-breadcrumb')).toContainText('Gamut E2E v1 (DCR)', { timeout: 30_000 })
   })
 
   test('refreshes when the access token is refused, rotating the refresh token', async () => {

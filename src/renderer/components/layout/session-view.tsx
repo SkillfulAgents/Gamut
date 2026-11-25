@@ -2,18 +2,14 @@ import { SessionChatColumn } from './session-chat-column'
 import { pickRuntimeOptions } from '@shared/lib/container/runtime-options'
 import { FilePreviewProvider } from '@renderer/context/file-preview-context'
 import { WorkflowProvider } from '@renderer/context/workflow-context'
-import { Cable, CalendarClock, GitFork, Plug, Wrench, Zap } from 'lucide-react'
-import { SessionProvenanceBanner } from './session-provenance-banner'
 import { ContentCanvas } from './content-shell'
 import { useCallback, useEffect, useMemo } from 'react'
 import { useSession, useSetSessionMarkedUnread, useClearSessionUnread } from '@renderer/hooks/use-sessions'
 import { HttpError } from '@renderer/lib/api'
 import { SessionNotFound } from '@renderer/router/route-fallbacks'
-import { useNavigate, useRouter, useSearch } from '@tanstack/react-router'
+import { useNavigate, useSearch } from '@tanstack/react-router'
 import type { MessageTarget } from '@renderer/components/messages/locate-message'
 import { useMarkSessionNotificationsRead } from '@renderer/hooks/use-notifications'
-import { useAgentIntegration, useSessionAgentIntegrationId } from '@renderer/hooks/use-agent-integrations'
-import { formatProviderName } from '@shared/lib/agent-integrations/presentation'
 import { usePendingMessages, type PendingMessagesContextValue } from '@renderer/context/pending-messages-context'
 import { useUser } from '@renderer/context/user-context'
 import { useRenderTracker } from '@renderer/lib/perf'
@@ -30,8 +26,8 @@ interface SessionViewProps {
 
 /**
  * The session leaf, including `/sessions/new` with a null sessionId. Renders
- * the chat column, the per-session search bar, and the automated-session
- * indicator banners (which link back to the originating trigger/schedule).
+ * the chat column and the per-session search bar. Where an automated session
+ * came from (its schedule, trigger, caller) is a crumb in `AgentHeader`.
  *
  * `FilePreviewProvider` wraps this view. SessionRoute keeps it through first
  * send, and remounts it when navigating to a different session or fresh draft. The optimistic
@@ -42,10 +38,7 @@ interface SessionViewProps {
 export function SessionView({ agentSlug, sessionId, onSessionCreated: handleSessionCreated }: SessionViewProps) {
   useRenderTracker('SessionView')
   const navigate = useNavigate()
-  const { history } = useRouter()
   const { data: session, error: sessionError } = useSession(sessionId, agentSlug)
-  const { data: integrationId } = useSessionAgentIntegrationId(agentSlug, sessionId)
-  const { data: integration } = useAgentIntegration(integrationId ?? null)
   const markSessionNotificationsRead = useMarkSessionNotificationsRead()
   const setSessionMarkedUnread = useSetSessionMarkedUnread()
   const clearSessionUnread = useClearSessionUnread()
@@ -130,93 +123,6 @@ export function SessionView({ agentSlug, sessionId, onSessionCreated: handleSess
   return (
     <>
       <ContentCanvas />
-      {session?.scheduledTaskId && (
-        <SessionProvenanceBanner
-          icon={CalendarClock}
-          text={<>Session created by scheduled job{session.scheduledTaskName ? ` "${session.scheduledTaskName}"` : ''}</>}
-          back={{
-            label: 'View schedule',
-            onClick: () => {
-              const taskId = session.scheduledTaskId!
-              void navigate({ to: '/agents/$slug/tasks/$taskId', params: { slug: agentSlug, taskId } })
-            },
-          }}
-        />
-      )}
-      {session?.webhookTriggerId && (
-        <SessionProvenanceBanner
-          icon={Zap}
-          text={<>Session created by webhook trigger{session.webhookTriggerName ? ` "${session.webhookTriggerName}"` : ''}</>}
-          back={{
-            label: 'View trigger',
-            onClick: () => {
-              const webhookId = session.webhookTriggerId!
-              void navigate({ to: '/agents/$slug/webhooks/$webhookId', params: { slug: agentSlug, webhookId } })
-            },
-          }}
-        />
-      )}
-      {sessionId && integrationId && (
-        <SessionProvenanceBanner
-          icon={Plug}
-          text={<>Session from {integration ? `${formatProviderName(integration.provider)} integration${integration.name ? ` "${integration.name}"` : ''}` : 'agent integration'}</>}
-          back={{
-            label: 'View integration',
-            onClick: () => {
-              void navigate({
-                to: '/agents/$slug/chat/$integrationId',
-                params: { slug: agentSlug, integrationId },
-                search: { session: sessionId },
-              })
-            },
-            testId: 'integration-session-back-button',
-          }}
-          testId="integration-session-banner"
-        />
-      )}
-      {session?.isWidgetRepair && (
-        <SessionProvenanceBanner
-          icon={Wrench}
-          text={<>Invoked to fix widget{session.widgetRepairSlug ? `: ${session.widgetRepairSlug}` : ''}</>}
-          back={{
-            label: 'Back',
-            onClick: () => {
-              void navigate({ to: '/agents/$slug/called-from-agents', params: { slug: agentSlug } })
-            },
-            testId: 'widget-repair-session-back-button',
-          }}
-          testId="widget-repair-session-banner"
-        />
-      )}
-      {session?.mcpInvocation && (
-        <SessionProvenanceBanner
-          icon={Cable}
-          text={<>Session started through MCP{session.mcpInvocation.clientName ? <> from &quot;{session.mcpInvocation.clientName}&quot;</> : null}</>}
-          back={{
-            label: 'Back',
-            onClick: () => {
-              void navigate({ to: '/agents/$slug/called-from-agents', params: { slug: agentSlug } })
-            },
-            testId: 'mcp-session-back-button',
-          }}
-          testId="mcp-session-banner"
-        />
-      )}
-      {session?.invokedByAgentSlug && (
-        <SessionProvenanceBanner
-          icon={GitFork}
-          text={<>Session created by x-agent call from &quot;{session.invokedByAgentName ?? session.invokedByAgentSlug}&quot;</>}
-          back={{
-            label: 'Back',
-            onClick: () => {
-              if (history.canGoBack()) history.back()
-              else void navigate({ to: '/agents/$slug/called-from-agents', params: { slug: agentSlug }, replace: true })
-            },
-            testId: 'x-agent-session-back-button',
-          }}
-          testId="x-agent-session-banner"
-        />
-      )}
 
       <FilePreviewProvider rememberTabs sessionAgentSlug={agentSlug} commentsEnabled={!isViewOnly}>
         <WorkflowProvider>
