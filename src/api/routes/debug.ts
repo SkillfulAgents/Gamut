@@ -1,7 +1,7 @@
 import { Hono } from 'hono'
 import { Authenticated, IsAdmin } from '../middleware/auth'
 import { agentCatalog, agentRegistry, containerHost } from '@shared/lib/agent-actor'
-import { checkAllRunnersAvailability, type ContainerRunner } from '@shared/lib/container/client-factory'
+import { checkAllRunnersAvailability, getContainerClientClass, type ContainerRunner } from '@shared/lib/container/client-factory'
 import { getSettings } from '@shared/lib/config/settings'
 import { execWithPath } from '@shared/lib/container/base-container-client'
 import { getLimaHome, getLimactlPath, limactlCommand, LIMA_VM_NAME } from '@shared/lib/container/lima-container-client'
@@ -92,23 +92,12 @@ debug.get('/runtime', async (c) => {
   })
 })
 
-/** The runners that are a command on this machine. The others keep their containers elsewhere, so there are none to list here. */
-const COMMAND_LINE_RUNNERS: ReadonlySet<ContainerRunner> = new Set(['apple-container', 'docker', 'podman', 'lima', 'wsl2'])
-
 // GET /api/debug/containers — list all containers from the runtime
 debug.get('/containers', async (c) => {
   const settings = await getSettings()
   const runner = settings.container.containerRunner as ContainerRunner
-  if (!COMMAND_LINE_RUNNERS.has(runner)) return c.json({ containers: [] })
-
-  let runnerCmd: string
-  if (runner === 'lima') {
-    runnerCmd = limactlCommand(`shell ${LIMA_VM_NAME} -- sudo nerdctl`)
-  } else if (runner === 'wsl2') {
-    runnerCmd = `wsl -d superagent -- sudo nerdctl`
-  } else {
-    runnerCmd = runner === 'apple-container' ? 'container' : runner
-  }
+  const runnerCmd = getContainerClientClass(runner).debugCliCommand()
+  if (!runnerCmd) return c.json({ containers: [] })
 
   try {
     const { stdout } = await execWithPath(`${runnerCmd} ps -a --format '{{json .}}'`)
@@ -134,15 +123,8 @@ debug.get('/containers/:name/logs', async (c) => {
   const tail = parseInt(c.req.query('tail') || '100', 10)
   const settings = await getSettings()
   const runner = settings.container.containerRunner as ContainerRunner
-
-  let runnerCmd: string
-  if (runner === 'lima') {
-    runnerCmd = limactlCommand(`shell ${LIMA_VM_NAME} -- sudo nerdctl`)
-  } else if (runner === 'wsl2') {
-    runnerCmd = `wsl -d superagent -- sudo nerdctl`
-  } else {
-    runnerCmd = runner === 'apple-container' ? 'container' : runner
-  }
+  const runnerCmd = getContainerClientClass(runner).debugCliCommand()
+  if (!runnerCmd) return c.json({ error: 'This runner has no containers on this machine' }, 404)
 
   try {
     const { stdout, stderr } = await execWithPath(

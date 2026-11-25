@@ -706,6 +706,10 @@ export class LimaContainerClient extends BaseContainerClient {
     await forceStopLimaVm(10000)
   }
 
+  static debugCliCommand(): string {
+    return limactlCommand(`shell ${LIMA_VM_NAME} -- sudo nerdctl`)
+  }
+
   /**
    * Check if limactl is available (bundled or system-installed).
    */

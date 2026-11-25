@@ -13,7 +13,11 @@ vi.mock('@shared/lib/agent-actor', () => ({
   agentCatalog: { resolve: async (input: string) => (input === 'known-agent' || input === 'Known Agent' ? 'known-agent' : null) },
   agentRegistry: { get: (slug: string) => ({ sessions: { readMetadata: () => mockReadMetadata(slug) } }) },
 }))
-vi.mock('@shared/lib/container/client-factory', () => ({ checkAllRunnersAvailability: async () => [] }))
+const runnerClis = vi.hoisted((): Record<string, string | null> => ({ lima: 'LIMA-NERDCTL', 'lambda-microvm': null }))
+vi.mock('@shared/lib/container/client-factory', () => ({
+  checkAllRunnersAvailability: async () => [],
+  getContainerClientClass: (runner: string) => ({ debugCliCommand: () => runnerClis[runner] }),
+}))
 const settings = vi.hoisted(() => ({ containerRunner: 'lima' }))
 vi.mock('@shared/lib/config/settings', () => ({ getSettings: () => ({ container: { containerRunner: settings.containerRunner } }) }))
 vi.mock('@shared/lib/container/base-container-client', () => ({
@@ -57,18 +61,18 @@ describe('debug routes on the Lima runner', () => {
     ])
   })
 
-  it('container list and logs run nerdctl in our VM through the shared helper', async () => {
+  it('container list and logs run the CLI that the runner\'s client class gives', async () => {
     await createApp().request('http://localhost/api/debug/containers')
     await createApp().request('http://localhost/api/debug/containers/superagent-abc/logs?tail=5')
 
     expect(commands()).toEqual([
-      "LIMACTL shell vm-under-test -- sudo nerdctl ps -a --format '{{json .}}'",
-      'LIMACTL shell vm-under-test -- sudo nerdctl logs --tail 5 superagent-abc',
+      "LIMA-NERDCTL ps -a --format '{{json .}}'",
+      'LIMA-NERDCTL logs --tail 5 superagent-abc',
     ])
   })
 })
 
-describe('debug container list on a runner that is not a command on this machine', () => {
+describe('debug containers on a runner whose containers are not on this machine', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     settings.containerRunner = 'lambda-microvm'
@@ -82,6 +86,13 @@ describe('debug container list on a runner that is not a command on this machine
 
     expect(res.status).toBe(200)
     expect(await res.json()).toEqual({ containers: [] })
+    expect(commands()).toEqual([])
+  })
+
+  it('answers 404 for container logs and runs no command', async () => {
+    const res = await createApp().request('http://localhost/api/debug/containers/superagent-abc/logs')
+
+    expect(res.status).toBe(404)
     expect(commands()).toEqual([])
   })
 })
