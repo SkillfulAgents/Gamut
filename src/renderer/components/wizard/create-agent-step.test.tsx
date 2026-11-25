@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { act, render, screen } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { CreateAgentFormProps } from '@renderer/components/agents/create-agent-form'
 import type { SignupHandoff } from '@renderer/context/nav-transient-context'
@@ -80,6 +80,21 @@ describe('CreateAgentStep', () => {
     create.mockResolvedValueOnce({ name: 'Scout', slug: 'scout', displaySlug: 'scout-id', replayed: true })
     await toAddons()
     expect(track).not.toHaveBeenCalled()
+  })
+
+  it('reports a create that failed, and no creation', async () => {
+    create.mockRejectedValueOnce(new Error('offline'))
+    render(<Harness surface="home" />)
+    await userEvent.type(screen.getByTestId('agent-identity-name'), 'Scout{Enter}')
+    await waitFor(() => expect(track).toHaveBeenCalledWith('agent_creation_failed', { creation_method: 'new', reason_code: 'request_failed', surface: 'home' }))
+    expect(track).toHaveBeenCalledTimes(1)
+  })
+
+  it('reports a finished creation that skipped the first job', async () => {
+    render(<Harness surface="nav" />)
+    await userEvent.type(screen.getByTestId('agent-identity-name'), 'Scout{Enter}')
+    await userEvent.click(screen.getByTestId('create-agent-skip'))
+    await waitFor(() => expect(track).toHaveBeenCalledWith('agent_creation_finished', { skipped_first_job: true, dream_selected: false, surface: 'nav' }))
   })
 
   it('asks for a name first and only continues once one is typed', async () => {
