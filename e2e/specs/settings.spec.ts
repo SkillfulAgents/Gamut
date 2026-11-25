@@ -181,8 +181,8 @@ test.describe('Settings Page', () => {
     // Global defaults and the connection list are always available, including
     // before the first connection is configured.
     await expect(page.getByRole('button', { name: 'Add connection', exact: true })).toBeVisible()
-    await expect(page.getByText('App default', { exact: true })).toBeVisible()
-    await expect(page.getByText('Summarizer', { exact: true })).toBeVisible()
+    await expect(page.getByText('Default model for agents', { exact: true })).toBeVisible()
+    await expect(page.getByText('Model for session titles and summaries', { exact: true })).toBeVisible()
   })
 
   test('Runtime tab shows container config fields', async ({ page }) => {
