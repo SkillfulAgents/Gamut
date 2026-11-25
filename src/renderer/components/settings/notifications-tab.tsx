@@ -1,9 +1,9 @@
-import { useState, useEffect, type ReactNode } from 'react'
+import { useState, useEffect } from 'react'
 import { Switch } from '@renderer/components/ui/switch'
 import { Button } from '@renderer/components/ui/button'
 import { Alert, AlertDescription } from '@renderer/components/ui/alert'
 import { useUserSettings, useUpdateUserSettings } from '@renderer/hooks/use-user-settings'
-import { Info, TriangleAlert } from 'lucide-react'
+import { BellRing, Info, TriangleAlert } from 'lucide-react'
 import { isElectron } from '@renderer/lib/env'
 import {
   requestNotificationPermission,
@@ -20,46 +20,22 @@ import { isIos } from '@renderer/hooks/use-pwa-install'
 import { openExternalUrl } from '@renderer/lib/open-external'
 import { clientFacts } from '@renderer/lib/facts'
 import { macBundleId } from '@shared/lib/facts/bundle-id'
+import { SETTINGS_CARD_CLASS, SETTINGS_SECTION_HEADING, SettingRow } from './setting-row'
+import { cn } from '@shared/lib/utils/cn'
+import { SettingsHeaderActions } from './settings-page'
+import { SegmentedControl, type SegmentedOption } from '@renderer/components/ui/segmented-control'
+
+const ON_OFF_OPTIONS: readonly SegmentedOption<'on' | 'off'>[] = [
+  { value: 'on', label: 'On', ariaLabel: 'Notifications on' },
+  { value: 'off', label: 'Off', ariaLabel: 'Notifications off' },
+]
 
 /** This app's page in System Settings → Notifications, by the bundle id it runs under. */
 function macosNotificationSettingsUrl(): string {
   return `x-apple.systempreferences:com.apple.Notifications-Settings.extension?id=${macBundleId(clientFacts())}`
 }
 
-interface SettingRowProps {
-  name: string
-  subtitle: ReactNode
-  right: ReactNode
-  /** When set, the name renders as a <label> bound to the control's id. */
-  htmlFor?: string
-}
-
-/**
- * One row inside a notification settings card — name + supporting line on the
- * left, control on the right. Visually mirrors `IntegrationRow` from the
- * agent-level connections list, minus the leading service icon.
- */
-function SettingRow({ name, subtitle, right, htmlFor }: SettingRowProps) {
-  return (
-    <div className="py-3 px-4">
-      <div className="flex items-center gap-3">
-        <div className="min-w-0 flex-1">
-          {htmlFor ? (
-            <label htmlFor={htmlFor} className="block text-xs font-medium truncate">
-              {name}
-            </label>
-          ) : (
-            <div className="text-xs font-medium truncate">{name}</div>
-          )}
-          <div className="text-[11px] text-muted-foreground mt-0.5">{subtitle}</div>
-        </div>
-        <div className="flex items-center gap-2 shrink-0">{right}</div>
-      </div>
-    </div>
-  )
-}
-
-const CARD_CLASS = 'rounded-card border bg-background divide-y divide-border/50 overflow-hidden'
+const CARD_CLASS = SETTINGS_CARD_CLASS
 
 type DevicePushState = 'loading' | 'unsubscribed' | 'subscribed' | 'denied' | 'error'
 
@@ -111,24 +87,24 @@ function DevicePushSection() {
     }
   }
 
-  const subtitle =
-    state === 'subscribed'
-      ? 'This device gets push notifications when a session finishes or needs input, even while the app is closed.'
-      : state === 'denied'
-        ? 'Notification permission was denied. Re-enable it for this app in system notification settings.'
-        : state === 'error'
-          ? "Couldn't enable push notifications on this device. Try again."
-          : 'Get notified on this device when a session finishes or needs input, even while the app is closed.'
+  // Only what went wrong is worth a line: on and off are the button's to say.
+  const status =
+    state === 'denied'
+      ? 'Notification permission was denied. Re-enable it for this app in system notification settings.'
+      : state === 'error'
+        ? "Couldn't enable push notifications on this device. Try again."
+        : undefined
 
   return (
     <div className={CARD_CLASS}>
       <SettingRow
-        name="Push to this device"
-        subtitle={subtitle}
+        name="Push notifications on this device"
+        help="Notifies this device when a session finishes or needs input, even while the app is closed."
+        status={status}
         right={
           <Button
             size="sm"
-            variant="outline"
+            variant="soft"
             onClick={handleToggle}
             disabled={state === 'loading' || state === 'denied'}
           >
@@ -201,11 +177,6 @@ export function NotificationsTab() {
 
   return (
     <div className="space-y-6">
-      <p className="text-xs text-muted-foreground">
-        Only sessions you aren&apos;t viewing trigger notifications. Opening a session marks its
-        notifications as read.
-      </p>
-
       {osNotificationsBlocked && (
         <Alert variant="destructive">
           <TriangleAlert className="h-4 w-4" />
@@ -213,7 +184,7 @@ export function NotificationsTab() {
             <span>Notifications for Gamut are turned off in System Settings.</span>
             <Button
               size="sm"
-              variant="outline"
+              variant="soft"
               onClick={() => void openExternalUrl(macosNotificationSettingsUrl())}
             >
               Open System Settings
@@ -233,93 +204,102 @@ export function NotificationsTab() {
                 Permission denied. Enable in browser settings.
               </span>
             ) : (
-              <Button size="sm" variant="outline" onClick={handleRequestPermission}>
-                Request Permission
+              <Button size="sm" variant="soft" onClick={handleRequestPermission}>
+                Request permission
               </Button>
             )}
           </AlertDescription>
         </Alert>
       )}
 
-      <div className={CARD_CLASS}>
-        <SettingRow
-          htmlFor="notifications-enabled"
-          name="Enable Notifications"
-          subtitle="Receive notifications for agent activity"
-          right={
-            <Switch
-              id="notifications-enabled"
-              checked={notificationSettings.enabled}
-              onCheckedChange={(checked) => updateNotificationSetting('enabled', checked)}
-              disabled={isLoading}
-            />
-          }
+      {/* The master switch sits on the page title's row: it turns the page's subject on, and everything below is
+          what that covers. */}
+      <SettingsHeaderActions>
+        {/* On/Off as a segmented control: a bare switch has no label up here, and these two words are one. */}
+        <SegmentedControl
+          aria-label="Notifications"
+          value={notificationSettings.enabled ? 'on' : 'off'}
+          options={ON_OFF_OPTIONS}
+          onChange={(next) => updateNotificationSetting('enabled', next === 'on')}
+          disabled={isLoading}
         />
-        <SettingRow
-          htmlFor="notify-session-complete"
-          name="Session Complete"
-          subtitle="When an agent finishes running"
-          right={
-            <Switch
-              id="notify-session-complete"
-              checked={notificationSettings.sessionComplete}
-              onCheckedChange={(checked) => updateNotificationSetting('sessionComplete', checked)}
-              disabled={isLoading || !notificationSettings.enabled}
+      </SettingsHeaderActions>
+
+      {/* What the master switch governs: dimmed, not hidden, while it is off, so it still shows what it would turn on. */}
+      <div
+        className={cn('space-y-6 transition-opacity', !notificationSettings.enabled && 'opacity-50')}
+        data-testid="notification-choices"
+        data-disabled={!notificationSettings.enabled || undefined}
+      >
+        <div className="space-y-2">
+          <h3 className={SETTINGS_SECTION_HEADING}>Notify me when</h3>
+          <div className={CARD_CLASS}>
+            <SettingRow
+              htmlFor="notify-session-complete"
+              name="Agent finishes a session"
+              right={
+                <Switch
+                  id="notify-session-complete"
+                  checked={notificationSettings.sessionComplete}
+                  onCheckedChange={(checked) => updateNotificationSetting('sessionComplete', checked)}
+                  disabled={isLoading || !notificationSettings.enabled}
+                />
+              }
             />
-          }
-        />
-        <SettingRow
-          htmlFor="notify-session-waiting"
-          name="Action Required"
-          subtitle="When an agent needs input (secrets, account access)"
-          right={
-            <Switch
-              id="notify-session-waiting"
-              checked={notificationSettings.sessionWaiting}
-              onCheckedChange={(checked) => updateNotificationSetting('sessionWaiting', checked)}
-              disabled={isLoading || !notificationSettings.enabled}
+            <SettingRow
+              htmlFor="notify-session-waiting"
+              name="Agent needs your input"
+              right={
+                <Switch
+                  id="notify-session-waiting"
+                  checked={notificationSettings.sessionWaiting}
+                  onCheckedChange={(checked) => updateNotificationSetting('sessionWaiting', checked)}
+                  disabled={isLoading || !notificationSettings.enabled}
+                />
+              }
             />
-          }
-        />
-        <SettingRow
-          htmlFor="notify-session-scheduled"
-          name="Scheduled Task Started"
-          subtitle="When a scheduled task begins running"
-          right={
-            <Switch
-              id="notify-session-scheduled"
-              checked={notificationSettings.sessionScheduled}
-              onCheckedChange={(checked) => updateNotificationSetting('sessionScheduled', checked)}
-              disabled={isLoading || !notificationSettings.enabled}
+            <SettingRow
+              htmlFor="notify-session-scheduled"
+              name="Scheduled task starts"
+              right={
+                <Switch
+                  id="notify-session-scheduled"
+                  checked={notificationSettings.sessionScheduled}
+                  onCheckedChange={(checked) => updateNotificationSetting('sessionScheduled', checked)}
+                  disabled={isLoading || !notificationSettings.enabled}
+                />
+              }
             />
-          }
-        />
-        <SettingRow
-          htmlFor="notify-platform-notification"
-          name="Platform notifications"
-          subtitle="Product announcements and account updates from the platform"
-          right={
-            <Switch
-              id="notify-platform-notification"
-              checked={notificationSettings.platformNotification}
-              onCheckedChange={(checked) => updateNotificationSetting('platformNotification', checked)}
-              disabled={isLoading || !notificationSettings.enabled}
+            <SettingRow
+              htmlFor="notify-platform-notification"
+              name="Product announcements and account updates"
+              right={
+                <Switch
+                  id="notify-platform-notification"
+                  checked={notificationSettings.platformNotification}
+                  onCheckedChange={(checked) => updateNotificationSetting('platformNotification', checked)}
+                  disabled={isLoading || !notificationSettings.enabled}
+                />
+              }
             />
-          }
-        />
-        <SettingRow
-          htmlFor="notify-when-unfocused"
-          name="Notify when window isn't focused"
-          subtitle="Send notifications even while the session is open, as long as the Gamut window is behind another app. Useful for long-running sessions you've left in the background."
-          right={
-            <Switch
-              id="notify-when-unfocused"
-              checked={notificationSettings.notifyWhenUnfocused}
-              onCheckedChange={(checked) => updateNotificationSetting('notifyWhenUnfocused', checked)}
-              disabled={isLoading || !notificationSettings.enabled}
-            />
-          }
-        />
+          </div>
+        </div>
+
+        <div className={CARD_CLASS}>
+          <SettingRow
+            htmlFor="notify-when-unfocused"
+            name="Also notify for the open session when Gamut is in the background"
+            help="The session you have open normally stays quiet. With this on, it notifies you too whenever the Gamut window is behind another app: useful for a long run you have left in the background."
+            right={
+              <Switch
+                id="notify-when-unfocused"
+                checked={notificationSettings.notifyWhenUnfocused}
+                onCheckedChange={(checked) => updateNotificationSetting('notifyWhenUnfocused', checked)}
+                disabled={isLoading || !notificationSettings.enabled}
+              />
+            }
+          />
+        </div>
       </div>
 
       {supportsDeclarativeWebPush() && <DevicePushSection />}
@@ -333,26 +313,17 @@ export function NotificationsTab() {
         </Alert>
       )}
 
-      <div className={CARD_CLASS}>
-        <SettingRow
-          name="Test Notifications"
-          subtitle={
-            <>
-              Send a test notification to verify they&apos;re working.
-              {isElectron() && ' This will also request macOS permission if needed.'}
-            </>
-          }
-          right={
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => showOSNotification('Test Notification', 'Notifications are working!')}
-            >
-              Send Test
-            </Button>
-          }
-        />
-      </div>
+      {/* A check, not a setting: a quiet link under the cards, like Admin's debug tools, not a card of its own. */}
+      <button
+        type="button"
+        onClick={() => showOSNotification('Test Notification', 'Notifications are working!')}
+        title={isElectron() ? 'Also asks for macOS notification permission if it has not been granted.' : undefined}
+        className="flex items-center gap-1.5 rounded-sm px-1 text-xs text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+        data-testid="send-test-notification"
+      >
+        <BellRing className="h-3.5 w-3.5" aria-hidden="true" />
+        <span>Send a test notification</span>
+      </button>
     </div>
   )
 }
