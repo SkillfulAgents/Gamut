@@ -1,0 +1,23 @@
+{
+  "storyId": "browser-test",
+  "passed": true,
+  "reason": "Sent a page-title request to the QA-20261125-174737-wuvk agent and checked that the reply names \"Example Domain\".",
+  "steps": [
+    "Step 1: Navigated to http://localhost:47891. The Gamut app loaded with the sidebar listing QA-20261125-174737-wuvk and QA-20261125-174736-12cs. Pass.",
+    "Step 2: Clicked QA-20261125-174737-wuvk in the sidebar. The agent page opened at /agents/qa-20261125-174737-wuvk-cc3h864gne, showing the status as idle and an empty message box. Screenshot taken. Pass.",
+    "Step 3: Typed \"Open a browser and go to https://example.com. Tell me the page title.\" and clicked Send. The message appeared in the chat, the page switched to session /sessions/f32f923b-..., and the status changed to \"Working...\". Pass.",
+    "Step 4: Waited up to 3 minutes for \"Example Domain\" to appear. The wait finished with the text found, and the agent showed \"Worked for 4s · 3 tool calls · 164,051 tokens\" with a final reply. Pass.",
+    "Step 5: The reply reads \"The page title at https://example.com is \"Example Domain\". I've closed the browser.\" The text \"Example Domain\" is present, and the status returned to idle. Screenshot taken. Pass."
+  ],
+  "bugs": [],
+  "durationMs": 70947,
+  "sessionId": "7c1aab87-57b9-429d-b749-b79ce0e7beb1",
+  "cost": {
+    "inputTokens": 8173,
+    "outputTokens": 4969,
+    "cacheCreationTokens": 56794,
+    "cacheReadTokens": 592988,
+    "model": "claude-haiku-5-5",
+    "totalCostUsd": 0.163309
+  }
+}
