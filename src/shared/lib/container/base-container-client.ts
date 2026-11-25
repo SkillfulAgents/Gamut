@@ -376,6 +376,11 @@ export abstract class BaseContainerClient extends EventEmitter implements Contai
   /** Whether settings.container.agentImage is honored by this runtime. */
   static readonly supportsCustomAgentImage: boolean = true
 
+  /** The CLI the Debug tab lists containers and reads logs with, or null when this runner's containers are not on this machine. */
+  static debugCliCommand(): string | null {
+    return null
+  }
+
   /** Whether the CLI is installed. Subclasses must override. */
   static async isAvailable(): Promise<boolean> {
     throw new Error('Subclass must implement static isAvailable()')
