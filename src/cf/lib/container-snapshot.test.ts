@@ -11,7 +11,11 @@ function dockerfileEnv(): Record<string, string> {
     const from = /^FROM\s+(\S+)(?:\s+AS\s+(\S+))?/i.exec(line)
     if (from) stages.push({ name: from[2] ?? '', parent: from[1], env: {} })
     const env = /^ENV\s+([A-Z_][A-Z0-9_]*)=(.*)$/.exec(line)
-    if (env && stages.length > 0) stages[stages.length - 1].env[env[1]] = env[2].trim().replace(/^"(.*)"$/, '$1')
+    if (env && stages.length > 0) {
+      const known = Object.assign({}, ...stages.map((stage) => stage.env))
+      // Docker expands ${NAME} in an ENV value from the variables set before it.
+      stages[stages.length - 1].env[env[1]] = env[2].trim().replace(/^"(.*)"$/, '$1').replace(/\$\{([A-Z_][A-Z0-9_]*)\}/g, (_, name: string) => known[name] ?? '')
+    }
   }
   const chain: Record<string, string>[] = []
   for (let stage = stages[stages.length - 1]; stage; stage = stages.find((other) => other.name === stage.parent)!) chain.unshift(stage.env)
