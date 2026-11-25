@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest'
-import { runRule } from './sandbox'
+import { afterEach, describe, expect, it } from 'vitest'
+import { checkRuleSyntax, RULE_TIMEOUT_MS, runRule, setRuleRunner } from './sandbox'
 
 const run = (code: string, input: unknown = {}) => runRule(code, input)
 
@@ -74,5 +74,35 @@ describe('runRule', () => {
     expect((await run('() => typeof process === "undefined" && typeof require === "undefined"')).result).toBe('true')
     expect((await run('(req, h) => { try { h.toNumber.constructor("return process")(); return false } catch (e) { return true } }')).result).toBe('true')
     expect((await run('() => { try { eval("1"); return false } catch (e) { return true } }')).result).toBe('true')
+  })
+})
+
+describe('setRuleRunner', () => {
+  afterEach(() => setRuleRunner(null))
+
+  it('runs rules and syntax checks in the runner a deployment sets', async () => {
+    const calls: string[] = []
+    setRuleRunner({
+      async checkSyntax(code) {
+        calls.push(`check ${code}`)
+        return code === 'bad' ? 'does not compile' : null
+      },
+      async run(code, inputJson, options) {
+        calls.push(`run ${code} ${inputJson} ${options.pool} ${options.timeoutMs}`)
+        return { result: 'true' }
+      },
+    })
+    expect(await runRule('() => false', { a: 1 })).toEqual({ result: 'true' })
+    expect(await runRule('bad', {})).toEqual({ result: 'invalid_code', detail: 'does not compile' })
+    // One check per code: the answer is kept.
+    expect(await checkRuleSyntax('() => false')).toBeNull()
+    expect(calls).toEqual(['check () => false', `run () => false {"a":1} evaluate ${RULE_TIMEOUT_MS}`, 'check bad'])
+  })
+
+  it('goes back to the local runner, and forgets the other runner\'s syntax answers', async () => {
+    setRuleRunner({ checkSyntax: async () => 'never compiles', run: async () => ({ result: 'true' }) })
+    expect((await runRule('() => false', {})).result).toBe('invalid_code')
+    setRuleRunner(null)
+    expect((await runRule('() => false', {})).result).toBe('false')
   })
 })

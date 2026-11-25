@@ -1,5 +1,7 @@
 import type { ApiAgentDashboard, ApiSession } from '@shared/lib/types/api'
 import type { ApiAgent } from '@renderer/hooks/use-agents'
+import type { SettingsPageEntry } from '@renderer/components/settings/settings-catalog'
+import { searchSettings, type SettingsResult } from './settings-match'
 
 export interface DashboardResult {
   agent: ApiAgent
@@ -19,12 +21,15 @@ export interface SearchSections {
   agents: ApiAgent[]
   sessions: SessionResult[]
   dashboards: DashboardResult[]
+  /** Settings pages, which only a query lists. */
+  settings: SettingsResult[]
 }
 
 export type FlatItem =
   | { kind: 'agent'; agent: ApiAgent }
   | { kind: 'dashboard'; agent: ApiAgent; dashboard: ApiAgentDashboard }
   | { kind: 'session'; agent: ApiAgent; session: ApiSession }
+  | { kind: 'settings'; result: SettingsResult }
 
 /** How many rows "Recent agents" and "Recent sessions" show before a query is typed. */
 export const RECENT_AGENTS_LIMIT = 5
@@ -65,7 +70,7 @@ export function getRecent(
   const recentSessions = newestFirst(
     agents.flatMap((agent) => (sessionsByAgent[agent.slug] ?? []).map((session) => ({ agent, session })))
   ).slice(0, limits.sessions)
-  return { agents: recentAgents, sessions: recentSessions, dashboards: [] }
+  return { agents: recentAgents, sessions: recentSessions, dashboards: [], settings: [] }
 }
 
 /**
@@ -73,14 +78,17 @@ export function getRecent(
  *
  * Each kind is matched on its own name: an agent whose name does not match is
  * not listed because one of its sessions does. Sessions come newest first.
+ * Settings pages (only those in `settingsPages`, the ones this viewer has) are
+ * matched and ranked by `searchSettings`.
  */
 export function searchAll(
   agents: ApiAgent[],
   sessionsByAgent: Record<string, ApiSession[]>,
-  query: string
+  query: string,
+  settingsPages: readonly SettingsPageEntry[] = []
 ): SearchSections {
   const trimmed = query.trim().toLowerCase()
-  if (!trimmed) return { agents: [], sessions: [], dashboards: [] }
+  if (!trimmed) return { agents: [], sessions: [], dashboards: [], settings: [] }
   const matches = (text: string) => text.toLowerCase().includes(trimmed)
   return {
     agents: agents.filter((agent) => matches(agent.name)),
@@ -96,14 +104,20 @@ export function searchAll(
         .filter((d) => matches(d.name) || matches(d.slug))
         .map((dashboard) => ({ agent, dashboard }))
     ),
+    settings: searchSettings(settingsPages, query),
   }
 }
 
-/** The sections in the order they are drawn, as the linear list keyboard navigation walks. */
+/**
+ * The sections in the order they are drawn, as the linear list keyboard
+ * navigation walks. Settings come last: they never push the person's own
+ * agents, sessions and dashboards down, nor change which of them Enter opens.
+ */
 export function flattenSections(sections: SearchSections): FlatItem[] {
   return [
     ...sections.agents.map<FlatItem>((agent) => ({ kind: 'agent', agent })),
     ...sections.sessions.map<FlatItem>(({ agent, session }) => ({ kind: 'session', agent, session })),
     ...sections.dashboards.map<FlatItem>(({ agent, dashboard }) => ({ kind: 'dashboard', agent, dashboard })),
+    ...sections.settings.map<FlatItem>((result) => ({ kind: 'settings', result })),
   ]
 }

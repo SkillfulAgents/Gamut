@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { flattenSections, getRecent, searchAll, RECENT_AGENTS_LIMIT, RECENT_SESSIONS_LIMIT } from './filter'
 import type { ApiAgent, ApiAgentDashboard, ApiSession } from '@shared/lib/types/api'
+import { SETTINGS_PAGES } from '@renderer/components/settings/settings-catalog'
 
 function agent(
   slug: string,
@@ -49,11 +50,11 @@ describe('searchAll', () => {
   }
 
   it('empty query returns nothing in every section', () => {
-    expect(searchAll([alpha, beta], sessions, '')).toEqual({ agents: [], sessions: [], dashboards: [] })
+    expect(searchAll([alpha, beta], sessions, '', SETTINGS_PAGES)).toEqual({ agents: [], sessions: [], dashboards: [], settings: [] })
   })
 
   it('whitespace-only query is treated as empty', () => {
-    expect(searchAll([alpha, beta], sessions, '   ')).toEqual({ agents: [], sessions: [], dashboards: [] })
+    expect(searchAll([alpha, beta], sessions, '   ', SETTINGS_PAGES)).toEqual({ agents: [], sessions: [], dashboards: [], settings: [] })
   })
 
   it('matches agent name case-insensitively', () => {
@@ -108,7 +109,19 @@ describe('searchAll', () => {
   })
 
   it('returns nothing when no agent, session or dashboard matches', () => {
-    expect(searchAll([alpha, beta], sessions, 'zzz')).toEqual({ agents: [], sessions: [], dashboards: [] })
+    expect(searchAll([alpha, beta], sessions, 'zzz', SETTINGS_PAGES)).toEqual({ agents: [], sessions: [], dashboards: [], settings: [] })
+  })
+
+  it('lists the settings pages it was given that match, alongside the agents', () => {
+    const browserBot = agent('browser-bot', 'Browser Bot')
+    const result = searchAll([browserBot, beta], sessions, 'browser use', SETTINGS_PAGES)
+    expect(result.agents).toEqual([])
+    expect(result.settings.map((r) => r.page.id)).toEqual(['browser'])
+    expect(searchAll([browserBot], {}, 'browser', SETTINGS_PAGES).agents).toEqual([browserBot])
+  })
+
+  it('lists no settings pages unless it is given them', () => {
+    expect(searchAll([alpha, beta], sessions, 'browser use').settings).toEqual([])
   })
 })
 
@@ -172,9 +185,10 @@ describe('getRecent', () => {
     expect(result.sessions.map((r) => r.session.id)).toEqual(['s2'])
   })
 
-  it('never lists dashboards', () => {
+  it('never lists dashboards or settings', () => {
     const a = agent('a', 'Agent A', new Date('2025-01-01'), [{ slug: 'overview', name: 'Overview' }])
     expect(getRecent([a], {}).dashboards).toEqual([])
+    expect(getRecent([a], {}).settings).toEqual([])
   })
 })
 
@@ -185,11 +199,13 @@ describe('flattenSections', () => {
   const s1 = session('s1', 'alpha', 'one')
   const s2 = session('s2', 'beta', 'two')
 
-  it('walks agents, then sessions, then dashboards', () => {
+  it('walks agents, then sessions, then dashboards, then settings', () => {
+    const general = { page: SETTINGS_PAGES[0] }
     const flat = flattenSections({
       agents: [alpha, beta],
       sessions: [{ agent: alpha, session: s1 }, { agent: beta, session: s2 }],
       dashboards: [{ agent: alpha, dashboard: d1 }],
+      settings: [general],
     })
     expect(flat).toEqual([
       { kind: 'agent', agent: alpha },
@@ -197,11 +213,12 @@ describe('flattenSections', () => {
       { kind: 'session', agent: alpha, session: s1 },
       { kind: 'session', agent: beta, session: s2 },
       { kind: 'dashboard', agent: alpha, dashboard: d1 },
+      { kind: 'settings', result: general },
     ])
   })
 
   it('is empty when every section is', () => {
-    expect(flattenSections({ agents: [], sessions: [], dashboards: [] })).toEqual([])
+    expect(flattenSections({ agents: [], sessions: [], dashboards: [], settings: [] })).toEqual([])
   })
 })
 

@@ -553,7 +553,8 @@ const AgentMenuItemInner = React.forwardRef<
   const needsAllSessions = isOpen && (showAll || (recentIsCut && reportedTotal === undefined))
   const { data: allSessions } = useSessions(needsAllSessions ? agent.slug : null)
   const sessions = allSessions ?? recentSessions
-  const { data: artifacts } = useArtifacts(isOpen ? agent.slug : null)
+  // The row lists dashboards by name; their run state is the dashboard view's to follow.
+  const { data: artifacts } = useArtifacts(isOpen ? agent.slug : null, { namesOnly: true })
 
   const visibleSessions = showAll && allSessions ? allSessions : sessions?.slice(0, 5)
   const sessionTotal = allSessions?.length ?? (recentIsCut ? reportedTotal : undefined) ?? recentSessions?.length ?? 0

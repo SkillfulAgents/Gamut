@@ -13,6 +13,9 @@ const reporting = vi.hoisted(() => ({
 vi.mock('@renderer/lib/error-reporting', () => reporting)
 
 const stt = vi.hoisted(() => ({
+  micGranted: true,
+  isMicPermissionGranted: vi.fn(() => stt.micGranted),
+  watchMicPermission: vi.fn(),
   acquireMicStream: vi.fn(),
   createSttAdapter: vi.fn(),
   startAudioCapture: vi.fn(),
@@ -72,21 +75,35 @@ const stream = {
   getTracks: () => [{ stop: vi.fn() }],
 } as unknown as MediaStream
 
-function arrange(adapter: FakeAdapter) {
-  api.apiFetch.mockResolvedValue({ ok: true, json: async () => ({ provider: 'openai', protocol: 'openai-realtime', token: 'ephemeral' }) })
+const capture = () => ({
+  stream,
+  audioContext: { sampleRate: 24000 },
+  analyser: {},
+  captureKind: 'worklet',
+  setSink: vi.fn(),
+  cleanup: vi.fn(),
+})
+
+const TOKEN = { provider: 'openai', protocol: 'openai-realtime', token: 'ephemeral' }
+const json = (body: unknown, ok = true) => ({ ok, status: ok ? 200 : 500, json: async () => body })
+
+/**
+ * `status` is what the host's /configured answers. By default it names no
+ * dictation protocol, as a host from before it did: the microphone then waits
+ * for the token.
+ */
+function arrange(adapter: FakeAdapter, status: Record<string, unknown> = { configured: true, supportsTts: false, voices: [] }) {
+  api.apiFetch.mockImplementation(async (url: string) => json(url === '/api/voice/configured' ? status : TOKEN))
   stt.acquireMicStream.mockResolvedValue(stream)
   stt.createSttAdapter.mockReturnValue(adapter)
-  stt.startAudioCapture.mockResolvedValue({
-    stream,
-    audioContext: { sampleRate: 24000 },
-    analyser: {},
-    captureKind: 'worklet',
-    setSink: vi.fn(),
-    cleanup: vi.fn(),
-  })
+  // As the real one: it is handed the microphone while that is still opening.
+  stt.startAudioCapture.mockImplementation(async (_sink: unknown, mic: Promise<MediaStream>) => { await mic; return capture() })
   const onTranscriptUpdate = vi.fn()
   const onDictated = vi.fn()
-  const hook = renderHook(() => useVoiceInput({ onTranscriptUpdate, onDictated }))
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  const hook = renderHook(() => useVoiceInput({ onTranscriptUpdate, onDictated }), {
+    wrapper: ({ children }: { children: ReactNode }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>,
+  })
   return { hook, onTranscriptUpdate, onDictated }
 }
 
@@ -231,7 +248,7 @@ describe('useVoiceInput error reports', () => {
   it('reports a failure to obtain credentials before any session exists', async () => {
     const adapter = new FakeAdapter()
     const { hook } = arrange(adapter)
-    api.apiFetch.mockResolvedValue({ ok: false, json: async () => ({ error: 'No API key configured for OpenAI. Add one in Settings > Voice.' }) })
+    api.apiFetch.mockImplementation(async () => json({ error: 'No API key configured for OpenAI. Add one in Settings > Voice.' }, false))
     await start(hook)
 
     expect(hook.result.current.error).toContain('No API key configured')
@@ -275,6 +292,154 @@ describe('useVoiceInput onDictated', () => {
     await stop(hook)
 
     expect(onDictated).not.toHaveBeenCalled()
+  })
+})
+
+describe('useVoiceInput instant start', () => {
+  const KNOWN = { configured: true, supportsTts: false, voices: [], sttProvider: 'openai', sttProtocol: 'openai-realtime' }
+
+  /** A token round-trip the test finishes by hand. */
+  function holdToken() {
+    let release!: (response: unknown) => void
+    const held = new Promise((resolve) => { release = resolve })
+    api.apiFetch.mockImplementation((url: string) => (url === '/api/voice/configured' ? Promise.resolve(json(KNOWN)) : held))
+    return { arrive: (response: unknown = json(TOKEN)) => act(async () => { release(response) }) }
+  }
+
+  async function arrangeKnown(adapter: FakeAdapter) {
+    const arranged = arrange(adapter, KNOWN)
+    await waitFor(() => expect(api.apiFetch).toHaveBeenCalledWith('/api/voice/configured'))
+    await act(async () => {}) // the status lands in the hook
+    return arranged
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    stt.micGranted = true
+  })
+
+  it('is recording, with the microphone capturing, before the token has come back', async () => {
+    const adapter = new FakeAdapter()
+    const { hook } = await arrangeKnown(adapter)
+    const token = holdToken()
+
+    let pending!: Promise<void>
+    act(() => { pending = hook.result.current.startRecording('') })
+    // Synchronously, on the click: listening, nothing awaited.
+    expect(hook.result.current.isRecording).toBe(true)
+    expect(stt.createSttAdapter).toHaveBeenCalledWith('openai-realtime', 'openai')
+    expect(stt.startAudioCapture).toHaveBeenCalledTimes(1)
+    expect(stt.startAudioCapture.mock.calls[0][0]).toBe(adapter)
+    expect(adapter.connect).not.toHaveBeenCalled()
+
+    await token.arrive()
+    await act(async () => { await pending })
+    expect(adapter.connect).toHaveBeenCalledWith('ephemeral')
+    expect(hook.result.current.isRecording).toBe(true)
+  })
+
+  it('shows connecting, not recording, while a permission prompt may be up', async () => {
+    stt.micGranted = false
+    const { hook } = await arrangeKnown(new FakeAdapter())
+    holdToken()
+    let release!: (handle: unknown) => void
+    stt.startAudioCapture.mockReturnValue(new Promise((resolve) => { release = resolve }))
+
+    act(() => { void hook.result.current.startRecording('') })
+    expect(hook.result.current.isConnecting).toBe(true)
+    await act(async () => { release(capture()) })
+    expect(hook.result.current.isRecording).toBe(true)
+  })
+
+  it('keeps words spoken before the token arrived when stopped that early', async () => {
+    const adapter = new FakeAdapter()
+    const { hook, onTranscriptUpdate } = await arrangeKnown(adapter)
+    const token = holdToken()
+    act(() => { void hook.result.current.startRecording('') })
+    await act(async () => {})
+    adapter.heard(1, 9000)
+    adapter.finish.mockImplementation(async () => { adapter.transcriptCb?.({ type: 'final', text: 'quick note' }) })
+
+    let stopped!: Promise<string | undefined>
+    act(() => { stopped = hook.result.current.stopRecording() })
+    await act(async () => {})
+    // Waiting for a socket to flush through: finishing now would drop the audio.
+    expect(adapter.finish).not.toHaveBeenCalled()
+
+    await token.arrive()
+    await act(async () => { await stopped })
+    expect(adapter.connect).toHaveBeenCalledWith('ephemeral')
+    expect(adapter.connect.mock.invocationCallOrder[0]).toBeLessThan(adapter.finish.mock.invocationCallOrder[0])
+    expect(onTranscriptUpdate).toHaveBeenLastCalledWith('quick note')
+    expect(hook.result.current.state).toBe('idle')
+  })
+
+  it('opens no socket for a dictation stopped before it heard anything', async () => {
+    const adapter = new FakeAdapter()
+    const { hook } = await arrangeKnown(adapter)
+    const token = holdToken()
+    act(() => { void hook.result.current.startRecording('kept') })
+    await act(async () => {})
+    await act(async () => { await hook.result.current.stopRecording() })
+    expect(adapter.close).toHaveBeenCalled()
+    await token.arrive()
+
+    expect(adapter.connect).not.toHaveBeenCalled()
+    expect(hook.result.current.state).toBe('idle')
+  })
+
+  it('leaves the field alone when the token fails after the dictation was already stopped', async () => {
+    const { hook, onTranscriptUpdate } = await arrangeKnown(new FakeAdapter())
+    const token = holdToken()
+    act(() => { void hook.result.current.startRecording('kept') })
+    await act(async () => {})
+    await act(async () => { await hook.result.current.stopRecording() })
+    const updates = onTranscriptUpdate.mock.calls.length
+    await token.arrive(json({ error: 'Voice quota exceeded' }, false))
+
+    // Whatever has been typed since the stop is not replaced by the old text.
+    expect(onTranscriptUpdate).toHaveBeenCalledTimes(updates)
+    expect(hook.result.current.error).toBeNull()
+  })
+
+  it('starts over at the right rate when the token names another protocol than the status did', async () => {
+    const first = new FakeAdapter()
+    const { hook } = await arrangeKnown(first)
+    const token = holdToken()
+    const firstCapture = capture()
+    stt.startAudioCapture.mockResolvedValueOnce(firstCapture)
+    act(() => { void hook.result.current.startRecording('') })
+    await act(async () => {})
+
+    const second = new FakeAdapter()
+    stt.createSttAdapter.mockReturnValue(second)
+    await token.arrive(json({ provider: 'deepgram', protocol: 'deepgram', token: 'dg' }))
+
+    expect(first.close).toHaveBeenCalled()
+    expect(first.connect).not.toHaveBeenCalled()
+    expect(firstCapture.cleanup).toHaveBeenCalled()
+    expect(stt.createSttAdapter).toHaveBeenLastCalledWith('deepgram', 'deepgram')
+    expect(stt.startAudioCapture.mock.calls[1][0]).toBe(second)
+    expect(second.connect).toHaveBeenCalledWith('dg')
+    expect(hook.result.current.isRecording).toBe(true)
+  })
+
+  it('ends with the text it started from when the token is refused mid-capture', async () => {
+    const adapter = new FakeAdapter()
+    const { hook, onTranscriptUpdate } = await arrangeKnown(adapter)
+    const token = holdToken()
+    const running = capture()
+    stt.startAudioCapture.mockResolvedValueOnce(running)
+    act(() => { void hook.result.current.startRecording('draft') })
+    await act(async () => {})
+    await token.arrive(json({ error: 'Voice quota exceeded' }, false))
+
+    expect(hook.result.current.error).toBe('Voice quota exceeded')
+    expect(hook.result.current.state).toBe('idle')
+    expect(running.cleanup).toHaveBeenCalled()
+    expect(adapter.close).toHaveBeenCalled()
+    expect(onTranscriptUpdate).toHaveBeenLastCalledWith('draft')
+    expect(reporting.captureRendererException.mock.calls[0][1].tags).toMatchObject({ stage: 'credentials', provider: 'openai' })
   })
 })
 

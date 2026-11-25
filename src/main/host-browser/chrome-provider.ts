@@ -353,6 +353,23 @@ export class ChromeProvider implements HostBrowserProvider {
         default_directory: downloadDir,
         prompt_for_download: false,
       }
+      // Chrome checks every password signed in with against known breaches
+      // and, on a hit, opens a tab-modal "Change your password" dialog that
+      // makes the tab ignore input. The dialog is browser UI: the screencast
+      // never shows it, and CDP input reports success while nothing reaches
+      // the page, so the page looks frozen to the agent and the viewer until
+      // someone dismisses it in the Chrome window.
+      prefs.profile = {
+        ...(prefs.profile as Record<string, unknown> | undefined),
+        password_manager_leak_detection: false,
+      }
+      // Safe Browsing's password-reuse warning (a password typed on a site it
+      // rates phishing) is the same kind of dialog, modal to the whole window.
+      // 0 is PASSWORD_PROTECTION_OFF; the rest of Safe Browsing stays on.
+      prefs.safebrowsing = {
+        ...(prefs.safebrowsing as Record<string, unknown> | undefined),
+        password_protection_warning_trigger: 0,
+      }
       // Atomic write so an interrupted write can't truncate Chrome's Preferences.
       writeFileAtomicSync(prefsPath, JSON.stringify(prefs, null, 2))
     }

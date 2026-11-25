@@ -31,6 +31,7 @@ const AUTHORIZED_AGENT_ROLE_CONTEXT_KEY = 'authorizedAgentRole'
 const REQUEST_SESSION_CONTEXT_KEY = 'requestSession'
 const MEETING_PARTICIPANT_CONTEXT_KEY = 'meetingParticipant'
 const RESOLVED_AGENT_ROLE_CONTEXT_KEY = 'resolvedAgentRole'
+const NOTIFICATION_ACCESS_CONTEXT_KEY = 'notificationAccess'
 
 /**
  * The meeting bot's page acting for the person who started the meeting (see
@@ -544,22 +545,39 @@ export function HasNotificationAccess(): MiddlewareHandler {
     const user = getUser(c)
 
     const notificationId = c.req.param('id')!
+    // The row and the viewer's role on its agent in one statement: `agent_acl`
+    // holds at most one row per (user, agent), so the join adds none.
     const row = await db
-      .select({ agentSlug: notifications.agentSlug, recipientUserId: notifications.recipientUserId })
+      .select({ agentSlug: notifications.agentSlug, recipientUserId: notifications.recipientUserId, role: agentAcl.role })
       .from(notifications)
+      .leftJoin(agentAcl, and(eq(agentAcl.agentSlug, notifications.agentSlug), eq(agentAcl.userId, user.id)))
       .where(eq(notifications.id, notificationId))
       .limit(1)
 
     if (!row[0] || (row[0].recipientUserId && row[0].recipientUserId !== user.id)) {
       return c.json({ error: 'Not found' }, 404)
     }
-    if (isAdmin(user)) return next()
+    if (!isAdmin(user) && !row[0].role) return c.json({ error: 'Forbidden' }, 403)
 
-    const role = await getUserAgentRole(user.id, row[0].agentSlug)
-    if (!role) return c.json({ error: 'Forbidden' }, 403)
-
+    const access: NotificationAccess = { viewerHasAgent: !!row[0].role }
+    c.set(NOTIFICATION_ACCESS_CONTEXT_KEY as never, access as never)
     return next()
   }
+}
+
+/** What {@link HasNotificationAccess} read about the notification it let through. */
+export interface NotificationAccess {
+  /** False for an admin let in without an `agent_acl` row on the agent. */
+  viewerHasAgent: boolean
+}
+
+/**
+ * What {@link HasNotificationAccess} learned in its one statement, so the
+ * handler does not read the row again. Undefined outside auth mode, where the
+ * middleware reads nothing.
+ */
+export function getNotificationAccess(c: Context): NotificationAccess | undefined {
+  return c.get(NOTIFICATION_ACCESS_CONTEXT_KEY as never) as NotificationAccess | undefined
 }
 
 // ---------------------------------------------------------------------------
