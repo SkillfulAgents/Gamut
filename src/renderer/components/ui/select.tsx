@@ -1,23 +1,17 @@
 import * as React from "react"
 import * as SelectPrimitive from "@radix-ui/react-select"
-import { Check, ChevronDown, ChevronRight, ChevronUp } from "lucide-react"
+import { Check, ChevronDown, ChevronUp } from "lucide-react"
 
 import { cn } from "@shared/lib/utils"
-import { ROW_TRIGGER_CHEVRON_CLASS, ROW_TRIGGER_CLASS } from "./row-trigger"
+import { PickerTrigger, type PickerVariant } from "./picker-trigger"
 
-/**
- * 'outline' (the default): a framed field, for stacked forms and toolbar filters.
- * 'row': the value + soft right chevron of a settings row's right-hand picker
- * (see row-trigger.ts); its list opens aligned to the trigger's right edge.
- */
-type SelectVariant = "outline" | "row"
-
-const SelectVariantContext = React.createContext<SelectVariant>("outline")
+/** Row pickers align their list to the trigger's right edge. */
+const SelectVariantContext = React.createContext<PickerVariant>("outline")
 
 function Select({
   variant = "outline",
   ...props
-}: React.ComponentProps<typeof SelectPrimitive.Root> & { variant?: SelectVariant }) {
+}: React.ComponentProps<typeof SelectPrimitive.Root> & { variant?: PickerVariant }) {
   return (
     <SelectVariantContext.Provider value={variant}>
       <SelectPrimitive.Root {...props} />
@@ -35,23 +29,24 @@ const SelectTrigger = React.forwardRef<
 >(({ className, children, ...props }, ref) => {
   const variant = React.useContext(SelectVariantContext)
   return (
-    <SelectPrimitive.Trigger
-      ref={ref}
+    <PickerTrigger
+      asChild
+      variant={variant}
       className={cn(
+        "flex items-center whitespace-nowrap rounded-control ring-offset-background focus:outline-none disabled:cursor-not-allowed disabled:opacity-50 [&>span]:line-clamp-1",
         variant === "row"
-          ? cn("flex shrink-0 items-center whitespace-nowrap rounded-control ring-offset-background focus:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 [&>span]:line-clamp-1", ROW_TRIGGER_CLASS)
-          : "flex h-9 w-full items-center justify-between whitespace-nowrap rounded-control border border-input bg-transparent px-3 py-2 text-xs shadow-sm ring-offset-background data-[placeholder]:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50 [&>span]:line-clamp-1",
+          ? "shrink-0 focus-visible:ring-1 focus-visible:ring-ring"
+          : "h-9 w-full justify-between border border-input bg-transparent px-3 py-2 text-xs shadow-sm data-[placeholder]:text-muted-foreground focus:ring-1 focus:ring-ring",
         className
       )}
-      {...props}
+      outlineIcon={
+        <SelectPrimitive.Icon asChild>
+          <ChevronDown className="h-4 w-4 opacity-50" />
+        </SelectPrimitive.Icon>
+      }
     >
-      {children}
-      <SelectPrimitive.Icon asChild>
-        {variant === "row"
-          ? <ChevronRight className={ROW_TRIGGER_CHEVRON_CLASS} />
-          : <ChevronDown className="h-4 w-4 opacity-50" />}
-      </SelectPrimitive.Icon>
-    </SelectPrimitive.Trigger>
+      <SelectPrimitive.Trigger ref={ref} {...props}>{children}</SelectPrimitive.Trigger>
+    </PickerTrigger>
   )
 })
 SelectTrigger.displayName = SelectPrimitive.Trigger.displayName

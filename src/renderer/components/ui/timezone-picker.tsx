@@ -1,8 +1,7 @@
 import * as React from 'react'
-import { Check, ChevronRight, ChevronsUpDown, Search } from 'lucide-react'
-import { Button } from '@renderer/components/ui/button'
+import { Check, ChevronsUpDown, Search } from 'lucide-react'
+import { PickerTrigger, type PickerVariant } from '@renderer/components/ui/picker-trigger'
 import { Popover, PopoverContent, PopoverTrigger } from '@renderer/components/ui/popover'
-import { ROW_TRIGGER_CHEVRON_CLASS, ROW_TRIGGER_CLASS } from '@renderer/components/ui/row-trigger'
 import { cn } from '@shared/lib/utils'
 
 function getUtcOffset(tz: string): string {
@@ -42,8 +41,7 @@ interface TimezonePickerProps {
   onValueChange: (value: string) => void
   disabled?: boolean
   className?: string
-  /** 'outline' (default) for a stacked form field; 'row' for the right of a settings row (row-trigger.ts). */
-  variant?: 'outline' | 'row'
+  variant?: PickerVariant
 }
 
 export function TimezonePicker({ value, onValueChange, disabled, className, variant = 'outline' }: TimezonePickerProps) {
@@ -68,24 +66,22 @@ export function TimezonePicker({ value, onValueChange, disabled, className, vari
   return (
     <Popover open={open} onOpenChange={(o) => { setOpen(o); if (!o) setSearch('') }} modal>
       <PopoverTrigger asChild>
-        <Button
-          variant={row ? 'ghost' : 'outline'}
-          size={row ? 'sm' : 'default'}
+        <PickerTrigger
+          variant={variant}
+          outlineSize="default"
+          outlineIcon={<ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />}
           role="combobox"
           aria-label="Select timezone"
           aria-expanded={open}
           disabled={disabled}
-          className={cn(row ? ROW_TRIGGER_CLASS : 'w-full justify-between font-normal', className)}
+          className={cn(!row && 'w-full justify-between font-normal', className)}
         >
           <span className="truncate">
             {selectedEntry
               ? `${selectedEntry.label} (${selectedEntry.offset})`
               : 'Select timezone...'}
           </span>
-          {row
-            ? <ChevronRight className={ROW_TRIGGER_CHEVRON_CLASS} />
-            : <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />}
-        </Button>
+        </PickerTrigger>
       </PopoverTrigger>
       <PopoverContent
         // The row trigger hugs its value, so the list takes a width of its own and opens from the trigger's right edge.

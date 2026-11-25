@@ -1,12 +1,11 @@
 import { ProviderSelect } from './provider-select'
 import { resolveSelection, type ConnectionInfo, type ModelSelection } from '@shared/lib/llm-provider/connection-schema'
 import { memo, useContext, useMemo, type ReactNode } from 'react'
-import { Check, ChevronDown, ChevronRight, Lock, RotateCcw, Settings } from 'lucide-react'
+import { Check, Lock, RotateCcw, Settings } from 'lucide-react'
 import { cn } from '@shared/lib/utils'
-import { Button } from '@renderer/components/ui/button'
+import { PickerTrigger, type PickerVariant } from '@renderer/components/ui/picker-trigger'
 import { Popover, PopoverContent, PopoverTrigger } from '@renderer/components/ui/popover'
 import { Separator } from '@renderer/components/ui/separator'
-import { ROW_TRIGGER_CHEVRON_CLASS, ROW_TRIGGER_CLASS } from '@renderer/components/ui/row-trigger'
 import { useModelSettings } from '@renderer/hooks/use-settings'
 import { DialogContext } from '@renderer/context/dialog-context'
 import { useUser } from '@renderer/context/user-context'
@@ -64,7 +63,7 @@ interface ModelPickerPopoverProps {
    * The trigger's look: an outlined button ('outline', the default), or 'row', the lighter value and soft right chevron of
    * Agent Home's side-panel rows, with no button frame or hover fill.
    */
-  variant?: 'outline' | 'row'
+  variant?: PickerVariant
   /**
    * Render a footer inside the picker (per-agent default surfaces) with a
    * "Reset to Global Default" action — disabled while the host already follows
@@ -192,14 +191,10 @@ export function ModelPickerPopover({
     <Popover>
       <ModelTooltip line={resolved && triggerLabel ? `${triggerLabel}${isLatestSelected ? ` (${resolved.label})` : ''}${detail}${lockedReason ? ` · ${lockedReason}` : ''}` : undefined} connection={connection}>
         <PopoverTrigger asChild>
-          <Button
+          <PickerTrigger
             type="button"
-            variant={variant === 'row' ? 'ghost' : 'outline'}
-            size="sm"
+            variant={variant}
             disabled={disabled}
-            className={variant === 'row'
-              ? ROW_TRIGGER_CLASS
-              : 'h-[34px] gap-1.5 px-2 text-xs font-medium'}
             aria-label={`Model: ${triggerLabel ?? 'select'}.${lockedReason ? ` ${lockedReason}` : ''} Click to change.`}
             data-testid="settings-model-trigger"
             data-locked={lockedSelection || undefined}
@@ -213,10 +208,7 @@ export function ModelPickerPopover({
                 </span>
               )}
             </span>
-            {variant === 'row'
-              ? <ChevronRight className={ROW_TRIGGER_CHEVRON_CLASS} />
-              : <ChevronDown className="h-3.5 w-3.5" />}
-          </Button>
+          </PickerTrigger>
         </PopoverTrigger>
       </ModelTooltip>
       <PopoverContent

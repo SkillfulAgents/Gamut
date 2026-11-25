@@ -1,8 +1,7 @@
-import { Check, ChevronDown, ChevronRight, RotateCcw } from 'lucide-react'
-import { Button } from '@renderer/components/ui/button'
+import { Check, RotateCcw } from 'lucide-react'
+import { PickerTrigger } from '@renderer/components/ui/picker-trigger'
 import { Popover, PopoverContent, PopoverTrigger } from '@renderer/components/ui/popover'
 import { Separator } from '@renderer/components/ui/separator'
-import { ROW_TRIGGER_CHEVRON_CLASS, ROW_TRIGGER_CLASS } from '@renderer/components/ui/row-trigger'
 import { cn } from '@shared/lib/utils/cn'
 import { useHomeCardLook } from './home-collapsible'
 import { useSettings } from '@renderer/hooks/use-settings'
@@ -125,21 +124,16 @@ function RetentionRow({
       <span className={look.label}>{label}</span>
       <Popover>
         <PopoverTrigger asChild>
-          <Button
+          <PickerTrigger
             type="button"
-            variant={look.grouped ? 'ghost' : 'outline'}
-            size="sm"
+            variant={look.grouped ? 'row' : 'outline'}
             disabled={disabled}
-            // The side panel's row style, shared with every settings-row picker (row-trigger.ts).
-            className={look.grouped
-              ? ROW_TRIGGER_CLASS
-              : 'h-[34px] w-20 justify-between gap-1.5 px-2 text-xs font-medium'}
+            className={look.grouped ? undefined : 'w-20 justify-between'}
             aria-label={`${label}: ${triggerLabel}. Click to change.`}
             data-testid={`${testId}-trigger`}
           >
             <span className="truncate">{triggerLabel}</span>
-            {look.grouped ? <ChevronRight className={ROW_TRIGGER_CHEVRON_CLASS} /> : <ChevronDown className="h-3.5 w-3.5" />}
-          </Button>
+          </PickerTrigger>
         </PopoverTrigger>
         <PopoverContent
           className="flex w-56 flex-col px-1 py-2"
