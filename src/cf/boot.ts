@@ -15,6 +15,7 @@ import { runDataMigrations } from '@shared/lib/db/data-migrations'
 import { initializeAppState, isAppStateInitialized } from '@shared/lib/app-state'
 import { setBlobStore } from '@shared/lib/blob-store/blob-store'
 import { setImageService } from '@shared/lib/images/image-service'
+import { setRuleRunner } from '@shared/lib/proxy/rules/sandbox'
 import { setUploadByteStore } from '@shared/lib/utils/chunked-upload-bytes'
 import { ensureKeyManager } from '@shared/lib/keys/key-manager'
 import { appKeyProbes } from '@shared/lib/keys/app-key-probes'
@@ -34,6 +35,7 @@ import type { ExecutionContext } from 'cloudflare:workers'
 import { CloudflareAppState } from './objects/cloudflare-app-state'
 import { CloudflareBlobStore, CloudflareUploadByteStore } from './cloudflare-host-files'
 import { CloudflareImageService } from './cloudflare-image-service'
+import { createCloudflareRuleRunner } from './lib/cloudflare-rule-runner'
 import { withoutDefaultCache } from './lib/request-cache'
 import { createCloudflareErrorReporter } from './lib/cloudflare-error-reporting'
 import { CloudflareKeyManager } from './cloudflare-key-manager'
@@ -170,6 +172,8 @@ async function start(env: Env): Promise<void> {
   setBlobStore(new CloudflareBlobStore(env.HOST_FILES))
   setUploadByteStore(new CloudflareUploadByteStore(env.HOST_FILES))
   setImageService(new CloudflareImageService(env.IMAGES))
+  // A Worker starts no child processes: proxy rules run as Dynamic Workers.
+  setRuleRunner(createCloudflareRuleRunner(env.RULE_LOADER))
   // The deploy step migrated the database (prepareDeploy); a boot neither migrates nor checks it.
   await openDatabase({ driver: d1(env.DB), migrate: false })
   // A boot retried after a later step failed finds AppState installed.

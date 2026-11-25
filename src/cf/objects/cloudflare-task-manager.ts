@@ -110,6 +110,9 @@ const LIVE_CONNECTION_ROUTES = [
   // A platform sign-in or sign-out: it tells the relay, the notifications and the triggers that
   // the account changed, and only the copies in this object are running.
   /^\/api\/platform-auth\/(complete|revoke)$/,
+  // An agent's proxy rule request waits in memory for its review card, so the calls that make it,
+  // wait for it and cancel it must reach one copy.
+  /^\/api\/x-agent\/rules(\/|$)/,
 ]
 
 export function needsLiveConnections(pathname: string): boolean {

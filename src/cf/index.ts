@@ -14,6 +14,7 @@ import { DeployStepNotReady, needsLiveConnections, prepareDeploy, serveInTaskMan
 import { logErrorsAsText } from './lib/cloudflare-error-reporting'
 import { nearStorage } from './lib/object-location'
 import type { VersionMetadata } from './lib/object-version'
+import type { RuleWorkerLoader } from './lib/cloudflare-rule-runner'
 
 export { AppStateDurableObject } from './objects/cloudflare-app-state'
 export { TaskManagerDurableObject } from './objects/cloudflare-task-manager'
@@ -41,6 +42,8 @@ export interface Env {
   HOST_FILES: R2Bucket
   /** Cloudflare Images: HEIC photos to JPEG and profile photos (cloudflare-image-service.ts). */
   IMAGES: ImagesBinding
+  /** The Worker Loader: each proxy rule runs as a Dynamic Worker (cloudflare-rule-runner.ts). */
+  RULE_LOADER: RuleWorkerLoader
   /** One per agent: its container and, while it sleeps, its saved workspace (cloudflare-agent.ts). */
   AGENT: DurableObjectNamespace<AgentDurableObject>
   /** Agent workspace files, one object per content hash. */

@@ -50,6 +50,8 @@
   "r2_buckets": [{ "binding": "HOST_FILES" }, { "binding": "WORKSPACES" }],
   // HEIC photos to JPEG and profile photos (cloudflare-image-service.ts).
   "images": { "binding": "IMAGES" },
+  // Each proxy rule runs as a Dynamic Worker (lib/cloudflare-rule-runner.ts).
+  "worker_loaders": [{ "binding": "RULE_LOADER" }],
   "durable_objects": {
     "bindings": [
       { "name": "APP_STATE", "class_name": "AppStateDurableObject" },
