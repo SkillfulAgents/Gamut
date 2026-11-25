@@ -1,0 +1,47 @@
+name: Install dependencies
+description: >-
+  Node 22, the pinned npm, and the root node_modules. node_modules comes from
+  the cache when package-lock.json is unchanged; npm ci runs only on a miss.
+
+# npm ci took ~30 s (46 s at p90) in each of the Tests jobs. Restoring the
+# installed tree skips the resolve, extract and link work. The cache is saved
+# straight after npm ci, before any job adds to node_modules (the Electron
+# binary, vite caches), so every job restores the same tree. There are no
+# restore-keys: npm ci deletes node_modules first, so a partial match is no use.
+runs:
+  using: composite
+  steps:
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '22'
+        cache: 'npm'
+
+    # 11.14.1 = newest npm with min-release-age support (needs >=11.10) where
+    # `npm ls --json --long` still works (broken in 11.15+, breaks electron-builder)
+    - name: Upgrade npm (pinned)
+      shell: bash
+      run: npm install -g npm@11.14.1
+
+    # node22 is the ABI the native modules (better-sqlite3, koffi) were built
+    # for: change it together with node-version above.
+    - name: Restore node_modules
+      id: node-modules
+      uses: actions/cache/restore@v4
+      with:
+        path: node_modules
+        key: node-modules-${{ runner.os }}-${{ runner.arch }}-node22-${{ hashFiles('package-lock.json') }}
+
+    - name: npm ci
+      if: steps.node-modules.outputs.cache-hit != 'true'
+      shell: bash
+      run: npm ci
+
+    # Parallel jobs that all missed each try to save; the first wins and the
+    # others log a warning.
+    - name: Save node_modules
+      if: steps.node-modules.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v4
+      with:
+        path: node_modules
+        key: ${{ steps.node-modules.outputs.cache-primary-key }}
