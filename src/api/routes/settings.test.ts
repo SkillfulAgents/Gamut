@@ -1160,6 +1160,16 @@ describe('settings route', () => {
       })
     })
 
+    it('clears an agent limit sent as null and keeps the others', async () => {
+      const res = await putSettings({
+        agentLimits: { maxTurns: null, maxBudgetUsd: 50 },
+      })
+
+      expect(res.status).toBe(200)
+      const saved = mockUpdateSettings.mock.calls[0][0]
+      expect(saved.agentLimits).toEqual({ maxBudgetUsd: 50 })
+    })
+
     it('merges partial agentLimits with existing', async () => {
       const res = await putSettings({
         agentLimits: { maxBudgetUsd: 50 },

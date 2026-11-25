@@ -36,6 +36,17 @@ import { DEFAULT_LIMA_VM_MEMORY, VALID_LIMA_VM_MEMORY_OPTIONS } from '@shared/li
 import { assessVmMemory } from '@shared/lib/container/vm-memory'
 import { findReservedEnvVarKeys } from '@shared/lib/container/reserved-env-vars'
 import { getDefaultAgentImage } from '@shared/lib/config/version'
+import { SETTINGS_CARD_CLASS, SETTINGS_SECTION_HEADING, SettingRow } from './setting-row'
+import { SettingsHeaderActions } from './settings-page'
+import { PresetNumberSelect } from './preset-number-select'
+import { AgentImageSelect } from './agent-image-select'
+
+function formatMinutes(minutes: number): string {
+  if (minutes % 60 !== 0) return `${minutes} minutes`
+  const hours = minutes / 60
+  return hours === 1 ? '1 hour' : `${hours} hours`
+}
+const formatUsd = (usd: number) => '$' + usd
 
 const CPU_LIMIT_OPTIONS = [1, 2, 4, 6, 8]
 const MEMORY_LIMIT_OPTIONS: { value: string; label: string }[] = [
@@ -103,11 +114,7 @@ export function RuntimeTab() {
   const [agentImage, setAgentImage] = useState('')
   const [cpuLimit, setCpuLimit] = useState('')
   const [memoryLimit, setMemoryLimit] = useState('')
-  const [autoSleepMinutes, setAutoSleepMinutes] = useState<string | null>(null)
-  const [maxOutputTokens, setMaxOutputTokens] = useState<string | null>(null)
-  const [maxThinkingTokens, setMaxThinkingTokens] = useState<string | null>(null)
-  const [maxTurns, setMaxTurns] = useState<string | null>(null)
-  const [maxBudgetUsd, setMaxBudgetUsd] = useState<string | null>(null)
+  const idleMinutes = settings?.app?.autoSleepTimeoutMinutes ?? 30
   const [customEnvVarsDraft, setCustomEnvVarsDraft] = useState<Record<string, string>>({})
   const [isAddEnvDialogOpen, setIsAddEnvDialogOpen] = useState(false)
   const [newEnvName, setNewEnvName] = useState('')
@@ -209,7 +216,6 @@ export function RuntimeTab() {
     setAgentImage(settings.container.agentImage)
     setCpuLimit(settings.container.resourceLimits.cpu.toString())
     setMemoryLimit(settings.container.resourceLimits.memory)
-    setAutoSleepMinutes(null)
   }, [
     settings?.container.agentImage,
     settings?.container.resourceLimits.cpu,
@@ -249,7 +255,6 @@ export function RuntimeTab() {
   const latestAgentImage = getDefaultAgentImage()
   const trimmedAgentImage = agentImage.trim()
   const agentImageMissing = !agentImageLocked && trimmedAgentImage.length === 0
-  const isLatestAgentImage = trimmedAgentImage === latestAgentImage
 
   const handleStartRunner = async (runner: string) => {
     startRunner.reset()
@@ -387,6 +392,27 @@ export function RuntimeTab() {
 
   return (
     <div className="space-y-6">
+      {/* Save/Reset — main settings only. On the page title's row, so they are in reach wherever the change was made. */}
+      {hasChanges && (
+        <SettingsHeaderActions>
+          {updateSettings.error && (
+            <p className="max-w-[240px] truncate text-xs text-destructive" title={updateSettings.error.error}>
+              {updateSettings.error.error}
+            </p>
+          )}
+          <Button variant="soft" size="sm" onClick={handleReset} disabled={updateSettings.isPending}>
+            Reset
+          </Button>
+          <Button
+            size="sm"
+            onClick={handleSave}
+            disabled={updateSettings.isPending || saveBlocked || agentImageMissing}
+          >
+            {updateSettings.isPending ? 'Applying...' : 'Apply'}
+          </Button>
+        </SettingsHeaderActions>
+      )}
+
       {/* No runners available warning */}
       {noRunnersAvailable && (
         <Alert variant="destructive">
@@ -402,7 +428,7 @@ export function RuntimeTab() {
                     <Button
                       key={r.runner}
                       size="sm"
-                      variant="outline"
+                      variant="soft"
                       onClick={() => handleStartRunner(r.runner)}
                       disabled={startRunner.isPending}
                     >
@@ -466,508 +492,458 @@ export function RuntimeTab() {
       )}
 
       <div className="space-y-2">
-        <Label htmlFor="container-runner">Container Runtime</Label>
-        <div className="flex gap-2">
-          <Select
-            value={containerRunner}
-            onValueChange={setContainerRunner}
-            disabled={isLoading || hasRunningAgents}
-          >
-            <SelectTrigger id="container-runner" className={`flex-1 ${hasRunningAgents ? 'bg-muted' : ''}`}>
-              <SelectValue placeholder="Select a container runtime" />
-            </SelectTrigger>
-            <SelectContent>
-              {containerRunners.map((runner) => {
-                const status = runnerAvailabilityMap.get(runner.value)
-                const isAvailable = status?.available ?? true
-                const isInstalled = status?.installed ?? true
-                const canStart = status?.canStart ?? false
-                const isSelectable = isAvailable || canStart
-
-                let statusText = ''
-                if (!isInstalled) {
-                  statusText = ' (not installed)'
-                } else if (!isAvailable && !canStart) {
-                  statusText = ' (not running)'
-                }
-
-                return (
-                  <SelectItem
-                    key={runner.value}
-                    value={runner.value}
-                    disabled={!isSelectable}
-                    className={!isSelectable ? 'opacity-50' : ''}
-                  >
-                    {runner.label}
-                    {statusText}
-                  </SelectItem>
-                )
-              })}
-            </SelectContent>
-          </Select>
-          {/* Show start/install when selected runner canStart (incl. apple first-install) */}
-          {!runnerAvailabilityMap.get(containerRunner)?.running &&
-            runnerAvailabilityMap.get(containerRunner)?.canStart && (
-            <Button
-              variant="outline"
-              size="icon"
-              onClick={() => handleStartRunner(containerRunner)}
-              disabled={startRunner.isPending}
-              title={
-                runnerAvailabilityMap.get(containerRunner)?.installed
-                  ? `Start ${containerRunner}`
-                  : `Install ${containerRunner}`
-              }
-            >
-              {startRunner.isPending ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : runnerAvailabilityMap.get(containerRunner)?.installed ? (
-                <Play className="h-4 w-4" />
-              ) : (
-                <Download className="h-4 w-4" />
-              )}
-            </Button>
-          )}
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => refreshAvailability.mutate()}
-            disabled={refreshAvailability.isPending}
-            title="Refresh runtime availability"
-          >
-            <RefreshCw className={`h-4 w-4 ${refreshAvailability.isPending ? 'animate-spin' : ''}`} />
-          </Button>
-        </div>
-        <p className="text-xs text-muted-foreground">
-          The container runtime to use for running agents.
-          {containerRunners.some(r => r.value === 'wsl2') &&
-            !runnerAvailabilityMap.get('wsl2')?.installed && (
-            <span className="text-yellow-600 dark:text-yellow-400 block mt-1">
-              WSL2 is not installed. Run <code className="bg-muted px-1 rounded">wsl --install</code> in PowerShell as Administrator, then restart your computer.
-            </span>
-          )}
-          {restartRunner.isPending && (
-            <span className="text-yellow-600 dark:text-yellow-400 block mt-1 flex items-center gap-1">
-              <Loader2 className="h-3 w-3 animate-spin inline" />
-              Restarting {RUNNER_LABELS[containerRunner] || containerRunner}...
-            </span>
-          )}
-          {startRunner.displayError && getRunnerSetupPayload(startRunner.displayError) ? (
-            <div className="mt-2">
-              <RunnerSetupErrorPanel error={startRunner.displayError} />
-            </div>
-          ) : startRunner.displayError ? (
-            <span className="text-destructive block mt-1">
-              {startRunner.displayError.message}
-            </span>
-          ) : null}
-          {startRunner.isSuccess && startRunner.data?.message && !startRunner.displayError && (
-            <span className="text-green-600 dark:text-green-400 block mt-1">
-              {startRunner.data.message}
-            </span>
-          )}
-        </p>
-      </div>
-
-      {/* Runtime-specific settings */}
-      {currentRunnerFields.length > 0 && (
-        <div className="space-y-4 p-4 border rounded-card">
-          <div className="space-y-0.5">
-            <Label className="text-base">{RUNNER_LABELS[containerRunner] || containerRunner} Settings</Label>
-            <p className="text-xs text-muted-foreground">
-              Changing these settings will restart the runtime.
-            </p>
-          </div>
-
-          {currentRunnerFields.map((field) => (
-            <div key={field.key} className="space-y-2">
-              <Label htmlFor={`runtime-${field.key}`}>{field.label}</Label>
-              {field.type === 'select' && field.options ? (
+        <h3 className={SETTINGS_SECTION_HEADING}>Runtime</h3>
+        <div className={SETTINGS_CARD_CLASS}>
+          <SettingRow
+            name="Container runtime"
+            htmlFor="container-runner"
+            right={
+              <>
                 <Select
-                  value={runtimeSettingsForm[field.key] || field.defaultValue}
-                  onValueChange={(value) =>
-                    setRuntimeSettingsForm((prev) => ({ ...prev, [field.key]: value }))
-                  }
-                  disabled={isLoading || runtimeSaveBlocked || isRestarting}
+                  variant="row"
+                  value={containerRunner}
+                  onValueChange={setContainerRunner}
+                  disabled={isLoading || hasRunningAgents}
                 >
-                  <SelectTrigger id={`runtime-${field.key}`} className={runtimeSaveBlocked ? 'bg-muted' : ''}>
-                    <SelectValue />
+                  <SelectTrigger id="container-runner">
+                    <SelectValue placeholder="Select a container runtime" />
                   </SelectTrigger>
                   <SelectContent>
-                    {field.options.map((opt) => {
-                      const oversized =
-                        field.key === 'vmMemory' && assessVmMemoryOption(opt.value).level === 'refuse'
+                    {containerRunners.map((runner) => {
+                      const status = runnerAvailabilityMap.get(runner.value)
+                      const isAvailable = status?.available ?? true
+                      const isInstalled = status?.installed ?? true
+                      const canStart = status?.canStart ?? false
+                      const isSelectable = isAvailable || canStart
+
+                      let statusText = ''
+                      if (!isInstalled) {
+                        statusText = ' (not installed)'
+                      } else if (!isAvailable && !canStart) {
+                        statusText = ' (not running)'
+                      }
+
                       return (
-                        <SelectItem key={opt.value} value={opt.value} disabled={oversized}>
-                          {opt.label}
-                          {oversized ? ' (exceeds system memory)' : ''}
+                        <SelectItem
+                          key={runner.value}
+                          value={runner.value}
+                          disabled={!isSelectable}
+                          className={!isSelectable ? 'opacity-50' : ''}
+                        >
+                          {runner.label}
+                          {statusText}
                         </SelectItem>
                       )
                     })}
                   </SelectContent>
                 </Select>
-              ) : (
-                <Input
-                  id={`runtime-${field.key}`}
-                  value={runtimeSettingsForm[field.key] || ''}
-                  onChange={(e) =>
-                    setRuntimeSettingsForm((prev) => ({ ...prev, [field.key]: e.target.value }))
-                  }
-                  disabled={isLoading || runtimeSaveBlocked || isRestarting}
-                  className={runtimeSaveBlocked ? 'bg-muted' : ''}
-                />
-              )}
-              <p className="text-xs text-muted-foreground">{field.description}</p>
-              {field.key === 'vmMemory' && vmMemoryAssessment.level === 'warn' && (
-                <p className="text-xs text-yellow-600 dark:text-yellow-400">
-                  {vmMemoryAssessment.message}
-                </p>
-              )}
-              {field.key === 'vmMemory' && vmMemoryAssessment.level === 'refuse' && (
-                <p className="text-xs text-destructive">{vmMemoryAssessment.message}</p>
-              )}
-            </div>
-          ))}
-
-          {runtimeSettingsChanged && (
-            <div className="flex items-center justify-end gap-2 pt-2 border-t">
-              {restartRunner.error && getRunnerSetupPayload(restartRunner.error) ? (
-                <div className="mr-auto w-full">
-                  <RunnerSetupErrorPanel error={restartRunner.error} />
-                </div>
-              ) : restartRunner.error ? (
-                <p className="text-sm text-destructive mr-auto">
-                  {restartRunner.error.message}
-                </p>
-              ) : null}
-              {restartRunner.isSuccess && restartRunner.data?.message && (
-                <p className="text-sm text-green-600 dark:text-green-400 mr-auto">
-                  {restartRunner.data.message}
-                </p>
-              )}
-              <Button
-                variant="outline"
-                onClick={handleResetRuntimeSettings}
-                disabled={isRestarting}
-              >
-                Reset
-              </Button>
-              <Button
-                onClick={handleSaveRuntimeSettings}
-                disabled={isRestarting || runtimeSaveBlocked || vmMemoryAssessment.level === 'refuse'}
-              >
-                {isRestarting ? (
-                  <>
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    Restarting...
-                  </>
-                ) : (
-                  'Save & Restart'
+                {/* Show start/install when selected runner canStart (incl. apple first-install) */}
+                {!runnerAvailabilityMap.get(containerRunner)?.running &&
+                  runnerAvailabilityMap.get(containerRunner)?.canStart && (
+                  <Button
+                    variant="soft"
+                    size="icon"
+                    className="h-8 w-8"
+                    onClick={() => handleStartRunner(containerRunner)}
+                    disabled={startRunner.isPending}
+                    title={
+                      runnerAvailabilityMap.get(containerRunner)?.installed
+                        ? `Start ${containerRunner}`
+                        : `Install ${containerRunner}`
+                    }
+                  >
+                    {startRunner.isPending ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : runnerAvailabilityMap.get(containerRunner)?.installed ? (
+                      <Play className="h-4 w-4" />
+                    ) : (
+                      <Download className="h-4 w-4" />
+                    )}
+                  </Button>
                 )}
-              </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8"
+                  onClick={() => refreshAvailability.mutate()}
+                  disabled={refreshAvailability.isPending}
+                  title="Refresh runtime availability"
+                >
+                  <RefreshCw className={`h-4 w-4 ${refreshAvailability.isPending ? 'animate-spin' : ''}`} />
+                </Button>
+              </>
+            }
+          >
+            {/* What the runtime is doing or needs right now. */}
+            <div className="text-[11px] text-muted-foreground empty:hidden">
+              {containerRunners.some(r => r.value === 'wsl2') &&
+                !runnerAvailabilityMap.get('wsl2')?.installed && (
+                <span className="text-yellow-600 dark:text-yellow-400 block mt-2">
+                  WSL2 is not installed. Run <code className="bg-muted px-1 rounded">wsl --install</code> in PowerShell as Administrator, then restart your computer.
+                </span>
+              )}
+              {restartRunner.isPending && (
+                <span className="text-yellow-600 dark:text-yellow-400 mt-2 flex items-center gap-1">
+                  <Loader2 className="h-3 w-3 animate-spin inline" />
+                  Restarting {RUNNER_LABELS[containerRunner] || containerRunner}...
+                </span>
+              )}
+              {startRunner.displayError && getRunnerSetupPayload(startRunner.displayError) ? (
+                <div className="mt-2">
+                  <RunnerSetupErrorPanel error={startRunner.displayError} />
+                </div>
+              ) : startRunner.displayError ? (
+                <span className="text-destructive block mt-2">
+                  {startRunner.displayError.message}
+                </span>
+              ) : null}
+              {startRunner.isSuccess && startRunner.data?.message && !startRunner.displayError && (
+                <span className="text-green-600 dark:text-green-400 block mt-2">
+                  {startRunner.data.message}
+                </span>
+              )}
             </div>
+          </SettingRow>
+
+          <SettingRow
+            name="Agent image"
+            // Only when the deployment decides it: otherwise the dropdown speaks for itself.
+            status={agentImageLocked ? 'Agent image is managed by the deployment for this runner and cannot be changed here.' : undefined}
+            htmlFor="agent-image"
+            stack
+            right={
+              <AgentImageSelect
+                id="agent-image"
+                value={agentImage}
+                defaultImage={latestAgentImage}
+                onChange={setAgentImage}
+                disabled={isLoading || agentImageLocked}
+              />
+            }
+          >
+            {agentImageMissing && (
+              <p className="mt-2 text-[11px] text-destructive">Agent image is required.</p>
+            )}
+          </SettingRow>
+
+          <SettingRow
+            name="CPU limit per agent"
+            htmlFor="cpu-limit"
+            right={
+              <Select
+                variant="row"
+                value={cpuLimit}
+                onValueChange={setCpuLimit}
+                disabled={isLoading || hasRunningAgents}
+              >
+                <SelectTrigger id="cpu-limit">
+                  <SelectValue placeholder="Select CPU cores" />
+                </SelectTrigger>
+                <SelectContent>
+                  {(CPU_LIMIT_OPTIONS.map(String).includes(cpuLimit)
+                    ? CPU_LIMIT_OPTIONS.map(String)
+                    : cpuLimit
+                      ? [cpuLimit, ...CPU_LIMIT_OPTIONS.map(String)]
+                      : CPU_LIMIT_OPTIONS.map(String)
+                  ).map((v) => (
+                    <SelectItem key={v} value={v}>
+                      {v} {v === '1' ? 'core' : 'cores'}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            }
+          />
+
+          <SettingRow
+            name="Memory limit per agent"
+            htmlFor="memory-limit"
+            right={
+              <Select
+                variant="row"
+                value={memoryLimit}
+                onValueChange={setMemoryLimit}
+                disabled={isLoading || hasRunningAgents}
+              >
+                <SelectTrigger id="memory-limit">
+                  <SelectValue placeholder="Select memory limit" />
+                </SelectTrigger>
+                <SelectContent>
+                  {(MEMORY_LIMIT_OPTIONS.some((o) => o.value === memoryLimit) || !memoryLimit
+                    ? MEMORY_LIMIT_OPTIONS
+                    : [{ value: memoryLimit, label: memoryLimit }, ...MEMORY_LIMIT_OPTIONS]
+                  ).map((opt) => (
+                    <SelectItem key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            }
+          />
+
+          {/* Auto-Sleep Idle Containers: stored in minutes, 0 meaning never. */}
+          <SettingRow
+            name="Stop idle agents after"
+            htmlFor="auto-sleep-timeout"
+            right={
+              <PresetNumberSelect
+                id="auto-sleep-timeout"
+                label="minutes before an idle agent stops"
+                value={idleMinutes === 0 ? undefined : idleMinutes}
+                unsetLabel="Never"
+                presets={[5, 15, 30, 60, 120]}
+                format={formatMinutes}
+                min={1}
+                step={1}
+                placeholder="Minutes"
+                onChange={(minutes) => updateSettings.mutate({ app: { autoSleepTimeoutMinutes: minutes ?? 0 } })}
+                disabled={isLoading}
+              />
+            }
+          />
+
+          {/* Warm-start on typing */}
+          <SettingRow
+            name="Warm start on typing"
+            help="Starts the agent's container in the background when you begin typing a first message, so it is ready on send."
+            htmlFor="warm-start-on-type"
+            right={
+              <Switch
+                id="warm-start-on-type"
+                checked={isWarmStartOnTypeEnabled(settings)}
+                onCheckedChange={(checked: boolean) => {
+                  updateSettings.mutate({ app: { warmStartOnType: checked } })
+                }}
+                disabled={isLoading}
+              />
+            }
+          />
+
+          {containerRunner === 'lambda-microvm' && (
+            <SettingRow
+              name="Auto-resume mid-turn sessions"
+              help="If the MicroVM dies while a session is still working, continues the turn instead of showing a connection-lost error."
+              htmlFor="auto-resume-on-unexpected-death"
+              right={
+                <Switch
+                  id="auto-resume-on-unexpected-death"
+                  checked={isAutoResumeOnUnexpectedDeathEnabled(settings)}
+                  onCheckedChange={(checked: boolean) => {
+                    updateSettings.mutate({ app: { autoResumeOnUnexpectedDeath: checked } })
+                  }}
+                  disabled={isLoading}
+                />
+              }
+            />
           )}
         </div>
-      )}
-
-      <div className="space-y-2">
-        <Label htmlFor="agent-image">Agent Image</Label>
-        <Input
-          id="agent-image"
-          value={agentImage}
-          onChange={(e) => setAgentImage(e.target.value)}
-          placeholder="ghcr.io/skillfulagents/superagent-agent-container-base:latest"
-          disabled={isLoading || agentImageLocked}
-          className={agentImageLocked ? 'bg-muted' : ''}
-        />
-        <p className="text-xs text-muted-foreground">
-          {agentImageLocked
-            ? 'Agent image is managed by the deployment for this runner and cannot be changed here.'
-            : 'Docker image to use for agent containers.'}
-        </p>
-        {!agentImageLocked && (
-          <Button
-            type="button"
-            variant="link"
-            size="sm"
-            className="h-auto px-0 text-xs"
-            onClick={() => setAgentImage(latestAgentImage)}
-            disabled={isLoading || isLatestAgentImage}
-          >
-            Use default
-          </Button>
-        )}
-        {agentImageMissing && (
-          <p className="text-xs text-destructive">Agent image is required.</p>
-        )}
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
+      {/* Runtime-specific settings */}
+      {currentRunnerFields.length > 0 && (
         <div className="space-y-2">
-          <Label htmlFor="cpu-limit">CPU Limit</Label>
-          <Select
-            value={cpuLimit}
-            onValueChange={setCpuLimit}
-            disabled={isLoading || hasRunningAgents}
-          >
-            <SelectTrigger
-              id="cpu-limit"
-              className={hasRunningAgents ? 'bg-muted' : ''}
-            >
-              <SelectValue placeholder="Select CPU cores" />
-            </SelectTrigger>
-            <SelectContent>
-              {(CPU_LIMIT_OPTIONS.map(String).includes(cpuLimit)
-                ? CPU_LIMIT_OPTIONS.map(String)
-                : cpuLimit
-                  ? [cpuLimit, ...CPU_LIMIT_OPTIONS.map(String)]
-                  : CPU_LIMIT_OPTIONS.map(String)
-              ).map((v) => (
-                <SelectItem key={v} value={v}>
-                  {v} {v === '1' ? 'core' : 'cores'}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <p className="text-xs text-muted-foreground">
-            Number of CPU cores.
-          </p>
-        </div>
+          <h3 className={SETTINGS_SECTION_HEADING}>{RUNNER_LABELS[containerRunner] || containerRunner} settings</h3>
+          <div className={SETTINGS_CARD_CLASS}>
+            {currentRunnerFields.map((field) => (
+              <SettingRow
+                key={field.key}
+                name={field.label}
+                help={field.description}
+                htmlFor={`runtime-${field.key}`}
+                stack={field.type !== 'select'}
+                right={field.type === 'select' && field.options ? (
+                  <Select
+                    variant="row"
+                    value={runtimeSettingsForm[field.key] || field.defaultValue}
+                    onValueChange={(value) =>
+                      setRuntimeSettingsForm((prev) => ({ ...prev, [field.key]: value }))
+                    }
+                    disabled={isLoading || runtimeSaveBlocked || isRestarting}
+                  >
+                    <SelectTrigger id={`runtime-${field.key}`}>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {field.options.map((opt) => {
+                        const oversized =
+                          field.key === 'vmMemory' && assessVmMemoryOption(opt.value).level === 'refuse'
+                        return (
+                          <SelectItem key={opt.value} value={opt.value} disabled={oversized}>
+                            {opt.label}
+                            {oversized ? ' (exceeds system memory)' : ''}
+                          </SelectItem>
+                        )
+                      })}
+                    </SelectContent>
+                  </Select>
+                ) : (
+                  <Input
+                    id={`runtime-${field.key}`}
+                    value={runtimeSettingsForm[field.key] || ''}
+                    onChange={(e) =>
+                      setRuntimeSettingsForm((prev) => ({ ...prev, [field.key]: e.target.value }))
+                    }
+                    disabled={isLoading || runtimeSaveBlocked || isRestarting}
+                    className="h-8 w-full md:w-[220px] text-xs"
+                  />
+                )}
+              >
+                {field.key === 'vmMemory' && vmMemoryAssessment.level === 'warn' && (
+                  <p className="mt-2 text-[11px] text-yellow-600 dark:text-yellow-400">
+                    {vmMemoryAssessment.message}
+                  </p>
+                )}
+                {field.key === 'vmMemory' && vmMemoryAssessment.level === 'refuse' && (
+                  <p className="mt-2 text-[11px] text-destructive">{vmMemoryAssessment.message}</p>
+                )}
+              </SettingRow>
+            ))}
 
-        <div className="space-y-2">
-          <Label htmlFor="memory-limit">Memory Limit</Label>
-          <Select
-            value={memoryLimit}
-            onValueChange={setMemoryLimit}
-            disabled={isLoading || hasRunningAgents}
-          >
-            <SelectTrigger
-              id="memory-limit"
-              className={hasRunningAgents ? 'bg-muted' : ''}
-            >
-              <SelectValue placeholder="Select memory limit" />
-            </SelectTrigger>
-            <SelectContent>
-              {(MEMORY_LIMIT_OPTIONS.some((o) => o.value === memoryLimit) || !memoryLimit
-                ? MEMORY_LIMIT_OPTIONS
-                : [{ value: memoryLimit, label: memoryLimit }, ...MEMORY_LIMIT_OPTIONS]
-              ).map((opt) => (
-                <SelectItem key={opt.value} value={opt.value}>
-                  {opt.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <p className="text-xs text-muted-foreground">
-            Maximum memory available to each agent container.
-          </p>
-        </div>
-      </div>
-
-      {/* Auto-Sleep Idle Containers */}
-      <div className="space-y-2">
-        <div className="space-y-0.5">
-          <Label htmlFor="auto-sleep-timeout">Idle Timeout</Label>
-          <p className="text-xs text-muted-foreground">
-            Automatically stop containers after being idle for this duration. Set to 0 to disable.
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Input
-            id="auto-sleep-timeout"
-            type="number"
-            min={0}
-            step={1}
-            value={autoSleepMinutes ?? (settings?.app?.autoSleepTimeoutMinutes ?? 30).toString()}
-            onChange={(e) => setAutoSleepMinutes(e.target.value)}
-            onBlur={() => {
-              const value = Math.max(0, parseInt(autoSleepMinutes ?? '30', 10) || 0)
-              setAutoSleepMinutes(null)
-              updateSettings.mutate({ app: { autoSleepTimeoutMinutes: value } })
-            }}
-            className="w-24"
-            disabled={isLoading}
-          />
-          <span className="text-sm text-muted-foreground">minutes</span>
-        </div>
-      </div>
-
-      {/* Warm-start on typing */}
-      <div className="flex items-start justify-between gap-4">
-        <div className="space-y-0.5 min-w-0">
-          <Label htmlFor="warm-start-on-type">Warm start on typing</Label>
-          <p className="text-xs text-muted-foreground">
-            Start the agent container in the background when you begin typing a first message, so it is ready on send.
-          </p>
-        </div>
-        <Switch
-          id="warm-start-on-type"
-          checked={isWarmStartOnTypeEnabled(settings)}
-          onCheckedChange={(checked: boolean) => {
-            updateSettings.mutate({ app: { warmStartOnType: checked } })
-          }}
-          disabled={isLoading}
-        />
-      </div>
-
-      {containerRunner === 'lambda-microvm' && (
-        <div className="flex items-start justify-between gap-4">
-          <div className="space-y-0.5 min-w-0">
-            <Label htmlFor="auto-resume-on-unexpected-death">Auto-resume mid-turn sessions</Label>
-            <p className="text-xs text-muted-foreground">
-              If the MicroVM dies while a session is still working, continue the turn instead of showing a connection-lost error.
-            </p>
+            {runtimeSettingsChanged && (
+              <div className="flex items-center justify-end gap-2 py-3 px-4">
+                {restartRunner.error && getRunnerSetupPayload(restartRunner.error) ? (
+                  <div className="mr-auto w-full">
+                    <RunnerSetupErrorPanel error={restartRunner.error} />
+                  </div>
+                ) : restartRunner.error ? (
+                  <p className="text-xs text-destructive mr-auto">
+                    {restartRunner.error.message}
+                  </p>
+                ) : null}
+                {restartRunner.isSuccess && restartRunner.data?.message && (
+                  <p className="text-xs text-green-600 dark:text-green-400 mr-auto">
+                    {restartRunner.data.message}
+                  </p>
+                )}
+                <Button
+                  variant="soft"
+                  size="sm"
+                  onClick={handleResetRuntimeSettings}
+                  disabled={isRestarting}
+                >
+                  Reset
+                </Button>
+                <Button
+                  size="sm"
+                  onClick={handleSaveRuntimeSettings}
+                  disabled={isRestarting || runtimeSaveBlocked || vmMemoryAssessment.level === 'refuse'}
+                >
+                  {isRestarting ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Restarting...
+                    </>
+                  ) : (
+                    'Save & restart'
+                  )}
+                </Button>
+              </div>
+            )}
           </div>
-          <Switch
-            id="auto-resume-on-unexpected-death"
-            checked={isAutoResumeOnUnexpectedDeathEnabled(settings)}
-            onCheckedChange={(checked: boolean) => {
-              updateSettings.mutate({ app: { autoResumeOnUnexpectedDeath: checked } })
-            }}
-            disabled={isLoading}
-          />
         </div>
       )}
 
-      {/* Agent Limits */}
-      <div className="space-y-4 pt-2">
-        <div className="space-y-0.5">
-          <Label className="text-base">Agent Limits</Label>
-          <p className="text-xs text-muted-foreground">
-            Configure limits for agent sessions. Leave empty to use defaults.
-          </p>
-        </div>
-
-        <div className="grid grid-cols-2 gap-4">
-          <div className="space-y-2">
-            <Label htmlFor="max-output-tokens">Max Output Tokens</Label>
-            <Input
-              id="max-output-tokens"
-              type="number"
-              min={1024}
-              step={1024}
-              value={maxOutputTokens ?? (settings?.agentLimits?.maxOutputTokens?.toString() || '')}
-              onChange={(e) => setMaxOutputTokens(e.target.value)}
-              onBlur={() => {
-                const raw = maxOutputTokens
-                setMaxOutputTokens(null)
-                if (raw === null) return
-                const parsed = parseInt(raw, 10)
-                const value = raw === '' ? undefined : (isNaN(parsed) ? undefined : Math.max(1024, parsed))
-                updateSettings.mutate({ agentLimits: { maxOutputTokens: value } })
-              }}
-              placeholder="32000"
-              disabled={isLoading}
-            />
-            <p className="text-xs text-muted-foreground">
-              Max tokens per model response. Default: 32,000.
-            </p>
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="max-thinking-tokens">Max Thinking Tokens</Label>
-            <Input
-              id="max-thinking-tokens"
-              type="number"
-              min={1024}
-              step={1024}
-              value={maxThinkingTokens ?? (settings?.agentLimits?.maxThinkingTokens?.toString() || '')}
-              onChange={(e) => setMaxThinkingTokens(e.target.value)}
-              onBlur={() => {
-                const raw = maxThinkingTokens
-                setMaxThinkingTokens(null)
-                if (raw === null) return
-                const parsed = parseInt(raw, 10)
-                const value = raw === '' ? undefined : (isNaN(parsed) ? undefined : Math.max(1024, parsed))
-                updateSettings.mutate({ agentLimits: { maxThinkingTokens: value } })
-              }}
-              placeholder="Unlimited"
-              disabled={isLoading}
-            />
-            <p className="text-xs text-muted-foreground">
-              Max tokens for extended thinking/reasoning.
-            </p>
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="max-turns">Max Turns</Label>
-            <Input
-              id="max-turns"
-              type="number"
-              min={1}
-              step={1}
-              value={maxTurns ?? (settings?.agentLimits?.maxTurns?.toString() || '')}
-              onChange={(e) => setMaxTurns(e.target.value)}
-              onBlur={() => {
-                const raw = maxTurns
-                setMaxTurns(null)
-                if (raw === null) return
-                const parsed = parseInt(raw, 10)
-                const value = raw === '' ? undefined : (isNaN(parsed) ? undefined : Math.max(1, parsed))
-                updateSettings.mutate({ agentLimits: { maxTurns: value } })
-              }}
-              placeholder="Unlimited"
-              disabled={isLoading}
-            />
-            <p className="text-xs text-muted-foreground">
-              Max conversation turns per session.
-            </p>
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="max-budget-usd">Max Budget (USD)</Label>
-            <Input
-              id="max-budget-usd"
-              type="number"
-              min={0.01}
-              step={0.01}
-              value={maxBudgetUsd ?? (settings?.agentLimits?.maxBudgetUsd?.toString() || '')}
-              onChange={(e) => setMaxBudgetUsd(e.target.value)}
-              onBlur={() => {
-                const raw = maxBudgetUsd
-                setMaxBudgetUsd(null)
-                if (raw === null) return
-                const parsed = parseFloat(raw)
-                const value = raw === '' ? undefined : (isNaN(parsed) ? undefined : Math.max(0.01, parsed))
-                updateSettings.mutate({ agentLimits: { maxBudgetUsd: value } })
-              }}
-              placeholder="Unlimited"
-              disabled={isLoading}
-            />
-            <p className="text-xs text-muted-foreground">
-              Maximum cost per session in USD.
-            </p>
-          </div>
+      {/* Agent Limits: suggested values, with Custom… for anything else. Unset follows the default. */}
+      <div className="space-y-2">
+        <h3 className={SETTINGS_SECTION_HEADING}>Agent limits</h3>
+        <div className={SETTINGS_CARD_CLASS}>
+          <SettingRow
+            name="Max output tokens per response"
+            htmlFor="max-output-tokens"
+            right={
+              <PresetNumberSelect
+                id="max-output-tokens"
+                label="max output tokens per response"
+                value={settings?.agentLimits?.maxOutputTokens}
+                unsetLabel="Default (32,000)"
+                presets={[16000, 64000, 128000]}
+                min={1024}
+                step={1024}
+                onChange={(value) => updateSettings.mutate({ agentLimits: { maxOutputTokens: value ?? null } })}
+                disabled={isLoading}
+              />
+            }
+          />
+          <SettingRow
+            name="Max thinking tokens"
+            htmlFor="max-thinking-tokens"
+            right={
+              <PresetNumberSelect
+                id="max-thinking-tokens"
+                label="max thinking tokens"
+                value={settings?.agentLimits?.maxThinkingTokens}
+                unsetLabel="Unlimited"
+                presets={[4000, 16000, 32000, 64000]}
+                min={1024}
+                step={1024}
+                onChange={(value) => updateSettings.mutate({ agentLimits: { maxThinkingTokens: value ?? null } })}
+                disabled={isLoading}
+              />
+            }
+          />
+          <SettingRow
+            name="Max turns per session"
+            htmlFor="max-turns"
+            right={
+              <PresetNumberSelect
+                id="max-turns"
+                label="max turns per session"
+                value={settings?.agentLimits?.maxTurns}
+                unsetLabel="Unlimited"
+                presets={[25, 50, 100, 250]}
+                min={1}
+                step={1}
+                onChange={(value) => updateSettings.mutate({ agentLimits: { maxTurns: value ?? null } })}
+                disabled={isLoading}
+              />
+            }
+          />
+          <SettingRow
+            name="Max cost per session"
+            htmlFor="max-budget-usd"
+            right={
+              <PresetNumberSelect
+                id="max-budget-usd"
+                label="max cost per session in US dollars"
+                value={settings?.agentLimits?.maxBudgetUsd}
+                unsetLabel="Unlimited"
+                presets={[1, 5, 10, 25, 50]}
+                format={formatUsd}
+                min={0.01}
+                step={0.01}
+                fractional
+                onChange={(value) => updateSettings.mutate({ agentLimits: { maxBudgetUsd: value ?? null } })}
+                disabled={isLoading}
+              />
+            }
+          />
         </div>
       </div>
 
       {/* Custom Environment Variables */}
-      <div className="space-y-4 pt-2" data-testid="runtime-custom-env">
-        <div className="space-y-0.5">
-          <Label className="text-base">Custom Environment Variables</Label>
-          <p className="text-xs text-muted-foreground">
-            Set shared environment variables for agent tools and the agent runtime. Changes apply to new sessions. Configure LLM credentials and endpoints on each connection in Settings → LLM → Edit connection → Custom environment variables.
-          </p>
-        </div>
-
-        <div className="space-y-2">
+      <div className="space-y-2" data-testid="runtime-custom-env">
+        <h3 className={SETTINGS_SECTION_HEADING}>Custom environment variables</h3>
+        <div className={SETTINGS_CARD_CLASS}>
           {Object.entries(customEnvVarsDraft).map(([key, value]) => (
             <div
               key={key}
-              className="flex items-center gap-2"
+              className="flex items-center gap-2 py-2 pl-4 pr-2"
               data-testid="custom-env-var-row"
               data-env-var-key={key}
             >
               <Input
                 value={key}
-                className="font-mono text-sm flex-[2]"
+                className="h-8 font-mono text-xs flex-[2]"
                 disabled
+                aria-label="Variable name"
                 data-testid="custom-env-var-key"
               />
               <Input
                 value={value}
-                className="font-mono text-sm flex-[3]"
+                className="h-8 font-mono text-xs flex-[3]"
                 maxLength={4096}
+                aria-label={`Value of ${key}`}
                 onChange={(e) => {
                   setCustomEnvVarsDraft((prev) => ({ ...prev, [key]: e.target.value }))
                 }}
@@ -985,7 +961,8 @@ export function RuntimeTab() {
               <Button
                 variant="ghost"
                 size="icon"
-                className="shrink-0"
+                className="h-8 w-8 shrink-0"
+                aria-label={`Remove ${key}`}
                 data-testid="custom-env-var-delete"
                 onClick={async () => {
                   const updated = { ...customEnvVarsDraft }
@@ -999,19 +976,25 @@ export function RuntimeTab() {
             </div>
           ))}
 
-          {customEnvError && (
-            <p className="text-xs text-destructive">{customEnvError}</p>
-          )}
-
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setIsAddEnvDialogOpen(true)}
-            disabled={isLoading || updateSettings.isPending}
+          <SettingRow
+            name="Variables for agent tools and the agent runtime"
+            help="Shared by every agent and applied to new sessions. LLM credentials and endpoints belong on the connection instead: Settings → Model Providers → edit a connection."
+            right={
+              <Button
+                variant="soft"
+                size="sm"
+                onClick={() => setIsAddEnvDialogOpen(true)}
+                disabled={isLoading || updateSettings.isPending}
+              >
+                <Plus className="h-4 w-4 mr-2" />
+                Add variable
+              </Button>
+            }
           >
-            <Plus className="h-4 w-4 mr-2" />
-            Add Variable
-          </Button>
+            {customEnvError && (
+              <p className="mt-2 text-[11px] text-destructive">{customEnvError}</p>
+            )}
+          </SettingRow>
         </div>
       </div>
 
@@ -1078,7 +1061,7 @@ export function RuntimeTab() {
                 type="submit"
                 disabled={isLoading || updateSettings.isPending}
               >
-                Add Variable
+                Add variable
               </Button>
             </DialogFooter>
           </form>
@@ -1087,37 +1070,25 @@ export function RuntimeTab() {
 
       {/* Data Location - Read Only */}
       <div className="space-y-2">
-        <Label htmlFor="data-location">Data Location</Label>
-        <Input
-          id="data-location"
-          value={isLoading ? 'Loading...' : settings?.dataDir ?? ''}
-          readOnly
-          className="bg-muted"
-        />
-        <p className="text-xs text-muted-foreground">
-          Configure via <code className="bg-muted px-1 rounded">SUPERAGENT_DATA_DIR</code> environment variable.
-        </p>
+        <h3 className={SETTINGS_SECTION_HEADING}>Data</h3>
+        <div className={SETTINGS_CARD_CLASS}>
+          <SettingRow
+            name="Data location"
+            help={<>Set with the <code className="font-mono">SUPERAGENT_DATA_DIR</code> environment variable.</>}
+            htmlFor="data-location"
+            stack
+            right={
+              <Input
+                id="data-location"
+                value={isLoading ? 'Loading...' : settings?.dataDir ?? ''}
+                readOnly
+                className="h-8 w-full md:w-[320px] bg-muted font-mono text-xs"
+              />
+            }
+          />
+        </div>
       </div>
 
-      {/* Save/Reset buttons — main settings only */}
-      {hasChanges && (
-        <div className="flex items-center justify-end gap-2 pt-4 border-t">
-          {updateSettings.error && (
-            <p className="text-sm text-destructive mr-auto">
-              {updateSettings.error.error}
-            </p>
-          )}
-          <Button variant="outline" onClick={handleReset} disabled={updateSettings.isPending}>
-            Reset
-          </Button>
-          <Button
-            onClick={handleSave}
-            disabled={updateSettings.isPending || saveBlocked || agentImageMissing}
-          >
-            {updateSettings.isPending ? 'Saving...' : 'Save'}
-          </Button>
-        </div>
-      )}
     </div>
   )
 }

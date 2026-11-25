@@ -85,13 +85,13 @@ export function RunnerSetupErrorPanel({ error, className }: RunnerSetupErrorPane
 
           <div className="flex flex-wrap gap-2 pt-1">
             {payload.steps.some(s => s.command) && (
-              <Button size="sm" variant="outline" className="h-7 text-xs" onClick={copyCommands}>
+              <Button size="sm" variant="soft" className="h-7 text-xs" onClick={copyCommands}>
                 <Copy className="h-3 w-3 mr-1" />
                 Copy commands
               </Button>
             )}
             {payload.docsUrl && (
-              <Button size="sm" variant="outline" className="h-7 text-xs" onClick={openDocs}>
+              <Button size="sm" variant="soft" className="h-7 text-xs" onClick={openDocs}>
                 <ExternalLink className="h-3 w-3 mr-1" />
                 View docs
               </Button>

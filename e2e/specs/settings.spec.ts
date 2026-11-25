@@ -384,18 +384,16 @@ test.describe('Settings persistence', () => {
       await openSettings(page)
       await goToTab(page, 'runtime')
 
-      const input = page.locator('#auto-sleep-timeout')
-      await expect(input).toHaveValue('30')
+      await expect(page.locator('#auto-sleep-timeout')).toContainText('30 minutes')
 
-      await input.fill('15')
       const savePromise = waitForSettingsSave(page)
-      await input.blur()
+      await pickSelectOption(page, 'auto-sleep-timeout', '15 minutes')
       await savePromise
 
       await closeSettings(page)
       await openSettings(page)
       await goToTab(page, 'runtime')
-      await expect(page.locator('#auto-sleep-timeout')).toHaveValue('15')
+      await expect(page.locator('#auto-sleep-timeout')).toContainText('15 minutes')
 
       const persisted = await settings(request)
       expect(persisted.app.autoSleepTimeoutMinutes).toBe(15)
@@ -504,13 +502,13 @@ test.describe('Custom environment variables', () => {
       await openSettings(page)
       await goToTab(page, 'runtime')
 
-      await page.getByRole('button', { name: 'Add Variable' }).click()
+      await page.getByRole('button', { name: 'Add variable' }).click()
       const dialog = page.getByRole('dialog').filter({ hasText: 'Add Custom Environment Variable' })
       await expect(dialog).toBeVisible()
       await dialog.getByLabel('Variable Name').fill(envKey)
 
       const addPromise = waitForSettingsSave(page)
-      await dialog.getByRole('button', { name: 'Add Variable' }).click()
+      await dialog.getByRole('button', { name: 'Add variable' }).click()
       await addPromise
 
       const row = page.locator(`[data-testid="custom-env-var-row"][data-env-var-key="${envKey}"]`)
@@ -587,14 +585,14 @@ test.describe('Settings validation errors', () => {
     await goToTab(page, 'runtime')
 
     // Clear the agent image
-    const imageInput = page.locator('#agent-image')
-    await imageInput.fill('')
+    await pickSelectOption(page, 'agent-image', 'Custom…')
+    await page.getByLabel('Custom agent image').fill('')
 
     // Error message should appear
     await expect(page.getByText('Agent image is required.')).toBeVisible()
 
     // Save button should be disabled
-    const saveBtn = page.getByRole('button', { name: 'Save' })
+    const saveBtn = page.getByRole('button', { name: 'Apply' })
     await expect(saveBtn).toBeVisible()
     await expect(saveBtn).toBeDisabled()
   })
@@ -609,7 +607,7 @@ test.describe('Settings validation errors', () => {
     test.skip(isDisabled, 'CPU dropdown is disabled because agents are running')
 
     // Initially no save button (no changes)
-    await expect(page.getByRole('button', { name: 'Save' })).not.toBeVisible()
+    await expect(page.getByRole('button', { name: 'Apply' })).not.toBeVisible()
 
     // Capture the current selection text ("1 core", "2 cores", etc.) and pick
     // a different option from the dropdown.
@@ -620,13 +618,13 @@ test.describe('Settings validation errors', () => {
     await page.getByRole('option', { name: targetOption }).click()
 
     // Save and Reset buttons should now appear
-    await expect(page.getByRole('button', { name: 'Save' })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Apply' })).toBeVisible()
     await expect(page.getByRole('button', { name: 'Reset' })).toBeVisible()
 
     // Click Reset — buttons should disappear, value restored
     await page.getByRole('button', { name: 'Reset' }).click()
     await expect(cpuTrigger).toHaveText(originalText)
-    await expect(page.getByRole('button', { name: 'Save' })).not.toBeVisible()
+    await expect(page.getByRole('button', { name: 'Apply' })).not.toBeVisible()
   })
 
   test('handles API save failure gracefully', async ({ page }) => {
@@ -642,7 +640,7 @@ test.describe('Settings validation errors', () => {
     const targetOption = originalText.startsWith('4') ? '2 cores' : '4 cores'
     await cpuTrigger.click()
     await page.getByRole('option', { name: targetOption }).click()
-    await expect(page.getByRole('button', { name: 'Save' })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Apply' })).toBeVisible()
 
     // Intercept the next PUT request to simulate server error
     await page.route('**/api/settings', async (route) => {
@@ -658,7 +656,7 @@ test.describe('Settings validation errors', () => {
     })
 
     // Click Save
-    await page.getByRole('button', { name: 'Save' }).click()
+    await page.getByRole('button', { name: 'Apply' }).click()
 
     // Error message should appear in the form
     await expect(page.getByText('Simulated server error')).toBeVisible()
