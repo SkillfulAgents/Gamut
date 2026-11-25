@@ -107,29 +107,6 @@ jobs:
       - name: Run the unit tests through the actor transport
         run: npm run test:actor-transport
 
-  # Builds both shipped targets and verifies every bare import in the emitted
-  # bundles is reachable from the production dependency closure, and that no
-  # direct production dependency goes unused. The packaging workflows
-  # (build-mac/build-win) run the electron half again via dist:mac/dist:win;
-  # this job is what gates PRs, since none of the packaging workflows run there.
-  runtime-dependency-closure:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Install dependencies
-        uses: ./.github/actions/install-deps
-
-      - name: Build server bundle
-        run: npm run build:api
-
-      - name: Build desktop bundles
-        run: npm run build:electron
-
-      - name: Check runtime dependency closure
-        run: npm run check:runtime-deps
-
   container-tests:
     runs-on: ubuntu-latest
     steps:
@@ -558,10 +535,11 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-  # The auth suite boots eleven dev servers (API + Vite each) up front. On a
-  # 4-core, 16 GB GitHub runner that got the runner shut down or lost mid-boot in
-  # about four jobs in ten, and a lost runner hung the job for ~50 min before it
-  # failed. Same box as e2e-tests; the timeout bounds a hang.
+  # The auth suite boots eleven dev servers (API + Vite each) up front, side by
+  # side (e2e/auth/serve-all.mjs). On a 4-core, 16 GB GitHub runner that got the
+  # runner shut down or lost mid-boot in about four jobs in ten, and a lost
+  # runner hung the job for ~50 min before it failed. Same box as e2e-tests;
+  # the timeout bounds a hang.
   e2e-auth-tests:
     runs-on: blacksmith-16vcpu-ubuntu-2404
     timeout-minutes: 25
@@ -576,10 +554,15 @@ jobs:
         id: auth_browser_setup
         run: npx playwright install --with-deps chromium
 
+      # Six workers: each project has a server of its own (auth-collaboration,
+      # nine files on one server, stays at two), so the floor is the longest
+      # file, auth-flow.spec.ts (~1 min of tests that run in order). On two
+      # workers the tests took ~2.7 min.
       - name: Run Auth E2E tests
         env:
           PORT: '3001'
           SUPERAGENT_DATA_DIR: .e2e-data/auth
+          PLAYWRIGHT_WORKERS: '6'
           PLAYWRIGHT_OUTPUT_DIR: test-results/auth
           PLAYWRIGHT_HTML_REPORT: playwright-report/auth
         run: npm run test:e2e:auth
@@ -609,12 +592,26 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-  # Drives the real Electron app over CDP against a real auth-mode deployment,
-  # with only the platform's discovery + grant minting stubbed. This is the only
-  # job in which a renderer ever resolves a cloud target, so it is the only one
-  # that can fail on cloud mode being broken — see e2e/live/cloud-electron/.
-  e2e-cloud-workspace:
-    runs-on: ubuntu-latest
+  # The built desktop app, driven by its live harnesses (e2e/live/*/run.ts) in
+  # three groups side by side. Each job builds the app itself; every harness
+  # keeps its own scratch app state and only reads dist/. Back to back after
+  # one build on a 4-core GitHub runner they made this the last job to finish
+  # (~5.5 min). A failed harness must not skip the others in its group; a
+  # failed build or cancelled job skips all of them.
+  #
+  # The cloud group drives the real Electron app over CDP against a real
+  # auth-mode deployment, with only the platform's discovery + grant minting
+  # stubbed. It is the only job in which a renderer ever resolves a cloud
+  # target, so it is the only one that can fail on cloud mode being broken —
+  # see e2e/live/cloud-electron/. It also checks the runtime dependency
+  # closure, which needs both builds it already makes.
+  e2e-electron:
+    name: e2e-electron (${{ matrix.group }})
+    runs-on: blacksmith-8vcpu-ubuntu-2404
+    strategy:
+      fail-fast: false
+      matrix:
+        group: [navigation, interactions, cloud]
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -622,8 +619,9 @@ jobs:
       - name: Install dependencies
         uses: ./.github/actions/install-deps
 
-      # Only for the shared libraries Electron needs on a bare runner; this job
-      # drives Electron over CDP and never launches a Playwright browser.
+      # Only for the shared libraries Electron needs on a bare runner, and
+      # xvfb; this job drives Electron over CDP and never launches a Playwright
+      # browser.
       - name: Install Electron's system dependencies
         run: npx playwright install-deps chromium
 
@@ -643,45 +641,36 @@ jobs:
           sudo chown root:root node_modules/electron/dist/chrome-sandbox
           sudo chmod 4755 node_modules/electron/dist/chrome-sandbox
 
-      # NOT `build:web` — that is `vite build`, whose outDir is dist/renderer,
-      # the same directory the desktop renderer lives in. The deployment is used
+      # The deployment the cloud and forms harnesses run against. NOT
+      # `build:web` — that is `vite build`, whose outDir is dist/renderer, the
+      # same directory the desktop renderer lives in. The deployment is used
       # purely as an API here, so only the server bundle is needed.
       - name: Build the deployment server bundle
+        if: matrix.group == 'cloud'
         run: npm run build:api
 
       - name: Build the desktop app
         id: desktop_build
-        run: npx electron-vite build
+        run: npm run build:electron
 
-      # These harnesses use isolated app state. A failed harness must not skip
-      # the others; a failed build or cancelled job must skip all of them.
-      - name: Validate packaged PDF rendering and local worker
-        if: ${{ !cancelled() && steps.desktop_build.outcome == 'success' }}
-        run: |
-          set -o pipefail
-          mkdir -p test-results
-          xvfb-run --auto-servernum npx tsx e2e/live/pdf-preview/run.ts 2>&1 | tee test-results/electron-pdf.log
-
-      - name: Upload Electron PDF artifacts
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: e2e-electron-pdf-artifacts
-          path: |
-            test-results/electron-pdf/
-            test-results/electron-pdf.log
-          if-no-files-found: ignore
-          retention-days: 7
+      # Every bare import in the emitted bundles is reachable from the
+      # production dependency closure, and no direct production dependency goes
+      # unused. The packaging workflows (build-mac/build-win) run the electron
+      # half again via dist:mac/dist:win; this is what gates PRs, since none of
+      # the packaging workflows run there.
+      - name: Check runtime dependency closure
+        if: matrix.group == 'cloud'
+        run: npm run check:runtime-deps
 
       - name: Validate built Electron navigation and unsaved drafts
-        if: ${{ !cancelled() && steps.desktop_build.outcome == 'success' }}
+        if: ${{ matrix.group == 'navigation' && !cancelled() && steps.desktop_build.outcome == 'success' }}
         run: |
           set -o pipefail
           mkdir -p test-results
           E2E_MOCK=true xvfb-run --auto-servernum npx tsx e2e/live/router/run.ts 2>&1 | tee test-results/electron-router.log
 
       - name: Upload Electron navigation artifacts
-        if: always()
+        if: ${{ always() && matrix.group == 'navigation' }}
         uses: actions/upload-artifact@v4
         with:
           name: e2e-electron-router-artifacts
@@ -692,25 +681,32 @@ jobs:
           retention-days: 7
 
       - name: Validate built Electron Radix interactions
-        if: ${{ !cancelled() && steps.desktop_build.outcome == 'success' }}
+        if: ${{ matrix.group == 'interactions' && !cancelled() && steps.desktop_build.outcome == 'success' }}
         run: |
           set -o pipefail
           mkdir -p test-results
           E2E_MOCK=true xvfb-run --auto-servernum npx tsx e2e/live/radix/run.ts 2>&1 | tee test-results/electron-radix.log
 
-      - name: Run the cloud-workspace app suite
-        if: ${{ !cancelled() && steps.desktop_build.outcome == 'success' }}
-        run: xvfb-run --auto-servernum node e2e/live/cloud-electron/ci.mjs
+      - name: Upload Electron interaction artifacts
+        if: ${{ always() && matrix.group == 'interactions' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-electron-radix-artifacts
+          path: |
+            test-results/electron-radix/
+            test-results/electron-radix.log
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Validate built Electron graph interactions
-        if: ${{ !cancelled() && steps.desktop_build.outcome == 'success' }}
+        if: ${{ matrix.group == 'interactions' && !cancelled() && steps.desktop_build.outcome == 'success' }}
         run: |
           set -o pipefail
           mkdir -p test-results
           E2E_MOCK=true xvfb-run --auto-servernum npx tsx e2e/live/graph/run.ts 2>&1 | tee test-results/electron-graph.log
 
       - name: Upload Electron graph artifacts
-        if: always()
+        if: ${{ always() && matrix.group == 'interactions' }}
         uses: actions/upload-artifact@v4
         with:
           name: e2e-electron-graph-artifacts
@@ -720,32 +716,43 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+      - name: Validate packaged PDF rendering and local worker
+        if: ${{ matrix.group == 'cloud' && !cancelled() && steps.desktop_build.outcome == 'success' }}
+        run: |
+          set -o pipefail
+          mkdir -p test-results
+          xvfb-run --auto-servernum npx tsx e2e/live/pdf-preview/run.ts 2>&1 | tee test-results/electron-pdf.log
+
+      - name: Upload Electron PDF artifacts
+        if: ${{ always() && matrix.group == 'cloud' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-electron-pdf-artifacts
+          path: |
+            test-results/electron-pdf/
+            test-results/electron-pdf.log
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Run the cloud-workspace app suite
+        if: ${{ matrix.group == 'cloud' && !cancelled() && steps.desktop_build.outcome == 'success' }}
+        run: xvfb-run --auto-servernum node e2e/live/cloud-electron/ci.mjs
+
       - name: Validate built Electron cloud profile forms
-        if: ${{ !cancelled() && steps.desktop_build.outcome == 'success' }}
+        if: ${{ matrix.group == 'cloud' && !cancelled() && steps.desktop_build.outcome == 'success' }}
         run: |
           set -o pipefail
           mkdir -p test-results
           E2E_MOCK=true xvfb-run --auto-servernum npx tsx e2e/live/forms/run.ts 2>&1 | tee test-results/electron-forms.log
 
       - name: Upload Electron form artifacts
-        if: always()
+        if: ${{ always() && matrix.group == 'cloud' }}
         uses: actions/upload-artifact@v4
         with:
           name: e2e-electron-forms-artifacts
           path: |
             test-results/electron-forms/
             test-results/electron-forms.log
-          if-no-files-found: ignore
-          retention-days: 7
-
-      - name: Upload Electron interaction artifacts
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: e2e-electron-radix-artifacts
-          path: |
-            test-results/electron-radix/
-            test-results/electron-radix.log
           if-no-files-found: ignore
           retention-days: 7
 
