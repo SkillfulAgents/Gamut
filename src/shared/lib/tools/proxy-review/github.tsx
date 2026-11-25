@@ -11,7 +11,7 @@ const TREE_PATH = new RegExp(`${REPO}/git/trees$`)
 export const isRecord = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
 
 /** Characters that reorder how text displays, so a card could show something other than what the request sends. */
-const DIRECTION_CONTROLS = /[\u202a-\u202e\u2066-\u2069]/
+export const DIRECTION_CONTROLS = /[\u202a-\u202e\u2066-\u2069]/
 
 /** The request body as an object. Undefined when the card's copy is cut short, is not an object, or holds text that could display as something else. */
 export function bodyOf(requestBody: string): Record<string, unknown> | undefined {

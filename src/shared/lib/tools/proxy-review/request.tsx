@@ -174,7 +174,7 @@ function ScopeReviewRequestItem({
   const [error, setError] = useState<string | null>(null)
   const completeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const requestLabel = `${method} /${targetPath}`
-  const customPreview = useCustomPreview(toolkit, method, targetPath, requestBody)
+  const customPreview = useCustomPreview(toolkit, method, targetPath, requestBody, endpointDescription)
   const named = !!endpointDescription
 
   // The minimal (lowest-risk) label among the matched scopes. Allowing this whole

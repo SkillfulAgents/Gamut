@@ -94,7 +94,7 @@ export function EmailHtml({ html, inline }: { html: string; inline?: boolean }) 
 const BODY_PREVIEW_HEIGHT = 220
 
 /** A long body shows its start with a fade, like Gmail trims long messages, and expands in place. */
-export function ClampedBody({ children }: { children: ReactNode }) {
+export function ClampedBody({ children, more = 'Show full email' }: { children: ReactNode; more?: string }) {
   const ref = useRef<HTMLDivElement>(null)
   const [overflows, setOverflows] = useState(false)
   const [expanded, setExpanded] = useState(false)
@@ -117,7 +117,7 @@ export function ClampedBody({ children }: { children: ReactNode }) {
       </div>
       {clamped && (
         <button type="button" onClick={() => setExpanded(true)} className="mt-1 text-[13px] text-[#1a73e8] hover:underline dark:text-[#8ab4f8]">
-          Show full email
+          {more}
         </button>
       )}
     </div>
@@ -150,11 +150,11 @@ export function webAddresses(html: string): string[] {
 }
 
 /** Named as text, so none of them opens or loads here. */
-export function WebAddresses({ addresses }: { addresses: string[] }) {
+export function WebAddresses({ addresses, heading = 'Web addresses in this email' }: { addresses: string[]; heading?: string }) {
   if (addresses.length === 0) return null
   return (
     <section className="mt-4 border-t border-dotted border-[#dadce0] pt-3 dark:border-[#5f6368]" data-testid="email-web-addresses">
-      <h4 className="text-sm font-medium">Web addresses in this email</h4>
+      <h4 className="text-sm font-medium">{heading}</h4>
       <ul className="mt-2 break-all text-xs leading-5 text-[#5f6368] dark:text-[#9aa0a6]">
         {addresses.map((address) => <li key={address}>{address}</li>)}
       </ul>
