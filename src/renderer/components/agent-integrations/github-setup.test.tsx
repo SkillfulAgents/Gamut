@@ -15,7 +15,7 @@ let client: QueryClient
 let connected: boolean
 let failAuthorization: boolean
 const onClose = vi.fn()
-const integration = () => ({ ...makeChatIntegration(), id: 'github-1', agentSlug: 'a', provider: 'github', settings: {}, hasCredentials: connected, authorizationPendingUntil: connected ? undefined : Date.now() + 900000 })
+const integration = () => ({ ...makeChatIntegration(), id: 'github-1', agentSlug: 'a', provider: 'github', settings: connected ? { botLogin: 'triage-helper-42[bot]' } : {}, hasCredentials: connected, authorizationPendingUntil: connected ? undefined : Date.now() + 900000 })
 const creates = () => mocks.request.mock.calls.filter(([url, options]) => url === '/api/agent-integrations/agents/a' && options?.method === 'POST')
 function renderForm() { return render(<QueryClientProvider client={client}><Dialog open><DialogContent><GitHubSetupForm agentSlug="a" onClose={onClose} /></DialogContent></Dialog></QueryClientProvider>) }
 beforeEach(() => {
@@ -41,7 +41,15 @@ it('uses the shared modal and creates nothing until the user continues', async (
   expect(screen.getByRole('textbox', { name: 'App name' })).toHaveValue('Release Assistant')
   expect(creates()).toHaveLength(0)
 })
-it('launches the manifest flow and moves on to mentioning it only when the callback has completed installation', async () => {
+it('previews how to use GitHub before installation without marking setup complete', () => {
+  renderForm()
+  fireEvent.click(screen.getByRole('button', { name: 'Using GitHub' }))
+  expect(screen.getByText('Installing the app completes setup.')).toBeVisible()
+  expect(screen.getByRole('blockquote')).toHaveTextContent('@your-app-handle could you add a test for this case?')
+  expect(screen.getByRole('button', { name: 'Done' })).toBeDisabled()
+  expect(creates()).toHaveLength(0)
+})
+it('finishes setup on installation and shows a sample comment with the installed app’s handle', async () => {
   renderForm()
   fireEvent.click(screen.getByRole('radio', { name: 'An organization' }))
   // An organization needs its name before the setup can move on.
@@ -57,8 +65,12 @@ it('launches the manifest flow and moves on to mentioning it only when the callb
   connected = true
   await client.invalidateQueries({ queryKey: agentIntegrationKeys.detail('github-1') })
   await waitFor(() => expect(screen.getByTestId('integration-setup-step')).toHaveAttribute('data-step', '3'))
+  expect(screen.getByText('GitHub is connected.')).toBeVisible()
+  expect(screen.getByText(/ask your agent in Gamut to read code or open a pull request/)).toBeVisible()
+  expect(screen.getByRole('blockquote')).toHaveTextContent('@triage-helper-42 could you add a test for this case?')
   expect(fakeLoginWindow.close).toHaveBeenCalled()
   expect(onClose).not.toHaveBeenCalled()
+  expect(screen.getByRole('button', { name: 'Done' })).toBeEnabled()
   fireEvent.click(screen.getByRole('button', { name: 'Done' }))
   expect(onClose).toHaveBeenCalledOnce()
 })

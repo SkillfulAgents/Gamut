@@ -64,7 +64,7 @@ export function GitHubSetupForm({ agentSlug, onClose, initial }: IntegrationSetu
   const failure = error ?? setup.error?.message ?? refreshError?.message ?? integration?.healthMessage
   const waiting = login.waiting && !integration?.reconnectRequired
   return <IntegrationSetupWizard provider="github" label="GitHub"
-    description="Mention this agent in issues and pull requests."
+    description="Give this agent access to your selected GitHub repositories."
     step={step} onStepChange={setStep} complete={connected}
     steps={[
       {
@@ -88,8 +88,15 @@ export function GitHubSetupForm({ agentSlug, onClose, initial }: IntegrationSetu
         action: connected ? undefined : { label: id ? 'Continue setup' : 'Connect GitHub', busy, disabled: !displayName || !setup.data, onClick: () => void connect(), external: true },
       },
       {
-        label: 'Mention it to start',
-        subtitle: <>Mention {handle ? <strong>@{handle}</strong> : 'the app’s name'} in an issue or pull request comment. Anyone with write access to the repository can follow up in the same conversation.</>,
+        label: 'Using GitHub',
+        subtitle: <><strong>{connected ? 'GitHub is connected.' : 'Installing the app completes setup.'}</strong>{' '}
+          {connected ? 'You can now' : 'You can then'} ask your agent in Gamut to read code or open a pull request in your selected repositories.</>,
+        content: <figure className="space-y-2">
+          <figcaption className="text-sm text-muted-foreground">You can also mention your agent by typing its handle in an issue or pull request comment. Anyone with write access can start or continue the conversation.</figcaption>
+          <blockquote className="break-words rounded-item bg-muted/70 px-3.5 py-2.5 text-sm leading-relaxed dark:bg-muted/40">
+            <strong className="font-medium">@{handle || 'your-app-handle'}</strong> could you add a test for this case?
+          </blockquote>
+        </figure>,
         action: { label: 'Done', disabled: !connected, onClick: onClose },
       },
     ]}
