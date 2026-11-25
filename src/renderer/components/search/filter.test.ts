@@ -204,3 +204,58 @@ describe('flattenSections', () => {
     expect(flattenSections({ agents: [], sessions: [], dashboards: [] })).toEqual([])
   })
 })
+
+describe('session order', () => {
+  const one = agent('one', 'One', new Date('2025-01-02'))
+  const two = agent('two', 'Two', new Date('2025-01-01'))
+  // As the API delivers them: ISO strings, not Dates.
+  const iso = (id: string, agentSlug: string, at: string | null) =>
+    ({ ...session(id, agentSlug, `Report ${id}`), lastActivityAt: at }) as unknown as ApiSession
+  const ids = (sections: { sessions: Array<{ session: ApiSession }> }) => sections.sessions.map((s) => s.session.id)
+
+  it('sorts string dates newest first, in recents and in search alike', () => {
+    const sessions = {
+      one: [iso('a', 'one', '2025-03-01T10:00:00.000Z'), iso('b', 'one', '2025-03-03T10:00:00.000Z')],
+      two: [iso('c', 'two', '2025-03-02T10:00:00.000Z')],
+    }
+    expect(ids(getRecent([one, two], sessions))).toEqual(['b', 'c', 'a'])
+    expect(ids(searchAll([one, two], sessions, 'report'))).toEqual(['b', 'c', 'a'])
+  })
+
+  it('keeps sessions of the same instant in the order given: agents, then each list', () => {
+    const at = '2025-03-01T10:00:00.000Z'
+    const sessions = {
+      one: [iso('a', 'one', at), iso('b', 'one', at)],
+      two: [iso('c', 'two', at), iso('d', 'two', '2025-03-02T10:00:00.000Z')],
+    }
+    expect(ids(getRecent([one, two], sessions))).toEqual(['d', 'a', 'b', 'c'])
+    expect(ids(getRecent([two, one], sessions))).toEqual(['d', 'c', 'a', 'b'])
+    expect(ids(searchAll([one, two], sessions, 'report'))).toEqual(['d', 'a', 'b', 'c'])
+  })
+
+  it('puts a session with no activity time last', () => {
+    const sessions = { one: [iso('never', 'one', null), iso('a', 'one', '2025-03-01T10:00:00.000Z')] }
+    expect(ids(getRecent([one], sessions))).toEqual(['a', 'never'])
+    expect(ids(searchAll([one], sessions, 'report'))).toEqual(['a', 'never'])
+  })
+
+  it('does not reorder the lists it was given', () => {
+    const list = [iso('a', 'one', '2025-03-01T10:00:00.000Z'), iso('b', 'one', '2025-03-03T10:00:00.000Z')]
+    const before = [...list]
+    getRecent([one], { one: list })
+    searchAll([one], { one: list }, 'report')
+    expect(list).toEqual(before)
+    expect(list[0]).toBe(before[0])
+  })
+
+  it('caps recents after sorting, so the newest of a long list are the ones kept', () => {
+    const many = Array.from({ length: 40 }, (_, i) => iso(`s${i}`, 'one', new Date(Date.UTC(2025, 0, 1 + ((i * 7) % 40))).toISOString()))
+    const kept = ids(getRecent([one], { one: many }))
+    expect(kept).toHaveLength(RECENT_SESSIONS_LIMIT)
+    const newest = [...many]
+      .sort((a, b) => String(b.lastActivityAt).localeCompare(String(a.lastActivityAt)))
+      .slice(0, RECENT_SESSIONS_LIMIT)
+      .map((s) => s.id)
+    expect(kept).toEqual(newest)
+  })
+})

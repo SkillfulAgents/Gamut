@@ -38,8 +38,15 @@ function time(date: Date | string | null | undefined): number {
   return date ? new Date(date).getTime() : 0
 }
 
-function byRecentSession(a: SessionResult, b: SessionResult): number {
-  return time(b.session.lastActivityAt) - time(a.session.lastActivityAt)
+/**
+ * Newest first, in a new array. Each row's time is read once, not on every
+ * comparison: the sort runs over every session of every agent.
+ */
+function newestFirst(results: SessionResult[]): SessionResult[] {
+  return results
+    .map((result) => ({ result, at: time(result.session.lastActivityAt) }))
+    .sort((a, b) => b.at - a.at)
+    .map(({ result }) => result)
 }
 
 /**
@@ -55,10 +62,9 @@ export function getRecent(
     .filter((a) => a.lastActivityAt)
     .sort((a, b) => time(b.lastActivityAt) - time(a.lastActivityAt))
     .slice(0, limits.agents)
-  const recentSessions = agents
-    .flatMap((agent) => (sessionsByAgent[agent.slug] ?? []).map((session) => ({ agent, session })))
-    .sort(byRecentSession)
-    .slice(0, limits.sessions)
+  const recentSessions = newestFirst(
+    agents.flatMap((agent) => (sessionsByAgent[agent.slug] ?? []).map((session) => ({ agent, session })))
+  ).slice(0, limits.sessions)
   return { agents: recentAgents, sessions: recentSessions, dashboards: [] }
 }
 
@@ -78,13 +84,13 @@ export function searchAll(
   const matches = (text: string) => text.toLowerCase().includes(trimmed)
   return {
     agents: agents.filter((agent) => matches(agent.name)),
-    sessions: agents
-      .flatMap((agent) =>
+    sessions: newestFirst(
+      agents.flatMap((agent) =>
         (sessionsByAgent[agent.slug] ?? [])
           .filter((s) => matches(s.name))
           .map((session) => ({ agent, session }))
       )
-      .sort(byRecentSession),
+    ),
     dashboards: agents.flatMap((agent) =>
       getAgentDashboards(agent)
         .filter((d) => matches(d.name) || matches(d.slug))
