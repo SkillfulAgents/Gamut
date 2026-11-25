@@ -3056,6 +3056,188 @@ describe('path traversal security — GET /:id/files/*', () => {
     expect(res.headers.get('cache-control')).toBe('private, no-store, max-age=0')
   })
 
+  // An inline media element may keep the bytes if it asks before each use;
+  // everything else stays no-store. Chromium reuses a no-cache copy without
+  // asking for a navigation (on Back) and for an <img> (within its document),
+  // so neither may ever be handed one.
+  describe('revalidated copies for <video> and <audio>', () => {
+    const FILE = '/api/agents/test-agent/files/out/render.mp4'
+    const stat = (mtimeMs: number, size = 100, birthtimeMs?: number) => ({ ...fileStat(size), mtimeMs, birthtimeMs })
+    const get = (url: string, headers: Record<string, string>, method = 'GET') =>
+      app.request(`http://localhost${url}`, { method, headers })
+
+    it.each(['video', 'audio'])('lets an inline %s request keep a copy it must revalidate', async (dest) => {
+      mockFsStat.mockResolvedValue(stat(1_000))
+      mockCreateReadStream.mockReturnValueOnce(Readable.from([Buffer.alloc(100)]))
+
+      const res = await get(`${FILE}?inline=true`, { 'Sec-Fetch-Dest': dest })
+
+      expect(res.status).toBe(200)
+      expect(res.headers.get('cache-control')).toBe('private, no-cache, max-age=0')
+      expect(res.headers.get('vary')).toBe('Sec-Fetch-Dest')
+      expect(res.headers.get('etag')).toBe('"1000-100"')
+    })
+
+    it.each([
+      ['a navigation to the file', { 'Sec-Fetch-Dest': 'document' }, '?inline=true'],
+      ['an <img>', { 'Sec-Fetch-Dest': 'image' }, '?inline=true'],
+      ['a frame', { 'Sec-Fetch-Dest': 'iframe' }, '?inline=true'],
+      ['a script fetch', { 'Sec-Fetch-Dest': 'empty' }, '?inline=true'],
+      ['a client that sends no Sec-Fetch-Dest', {}, '?inline=true'],
+      ['a download, whatever asks for it', { 'Sec-Fetch-Dest': 'video' }, ''],
+    ])('keeps %s on no-store, and answers its If-None-Match with the file', async (_name, headers, query) => {
+      mockFsStat.mockResolvedValue(stat(1_000))
+      mockCreateReadStream.mockReturnValueOnce(Readable.from([Buffer.alloc(100)]))
+
+      const res = await get(`${FILE}${query}`, { ...headers, 'If-None-Match': '"1000-100"' })
+
+      expect(res.status).toBe(200)
+      expect(res.headers.get('cache-control')).toBe('private, no-store, max-age=0')
+      // So a copy stored for an element never answers one of these for the same URL.
+      expect(res.headers.get('vary')).toBe('Sec-Fetch-Dest')
+      expect((await res.arrayBuffer()).byteLength).toBe(100)
+    })
+
+    it('answers a remount of an unchanged file with 304: no bytes, nothing opened', async () => {
+      mockFsStat.mockResolvedValue(stat(1_000))
+      mockCreateReadStream.mockReturnValueOnce(Readable.from([Buffer.alloc(100)]))
+      const first = await get(`${FILE}?inline=true`, { 'Sec-Fetch-Dest': 'video' })
+      expect((await first.arrayBuffer()).byteLength).toBe(100)
+      mockCreateReadStream.mockClear()
+
+      let bytes = 0
+      for (let remount = 0; remount < 5; remount++) {
+        const res = await get(`${FILE}?inline=true`, { 'Sec-Fetch-Dest': 'video', 'If-None-Match': first.headers.get('etag') as string })
+        expect(res.status).toBe(304)
+        // What the browser needs to keep using, and keep revalidating, its copy.
+        expect(res.headers.get('etag')).toBe(first.headers.get('etag'))
+        expect(res.headers.get('cache-control')).toBe('private, no-cache, max-age=0')
+        expect(res.headers.get('vary')).toBe('Sec-Fetch-Dest')
+        expect(res.headers.get('content-length')).toBeNull()
+        bytes += (await res.arrayBuffer()).byteLength
+      }
+      expect(bytes).toBe(0)
+      expect(mockCreateReadStream).not.toHaveBeenCalled()
+    })
+
+    it('accepts the weak form of its tag, which a compressing layer hands the browser', async () => {
+      mockFsStat.mockResolvedValue(stat(1_000))
+      const res = await get(`${FILE}?inline=true`, { 'Sec-Fetch-Dest': 'audio', 'If-None-Match': 'W/"1000-100"' })
+      expect(res.status).toBe(304)
+    })
+
+    it.each([
+      ['rewritten later', stat(2_000)],
+      ['of another size', stat(1_000, 101)],
+      ['replaced by a file moved into place with the same size and mtime', stat(1_000, 100, 777)],
+    ])('sends the file again once it is %s', async (_name, changed) => {
+      mockFsStat.mockResolvedValue(changed)
+      mockCreateReadStream.mockReturnValueOnce(Readable.from([Buffer.alloc(changed.size)]))
+
+      const res = await get(`${FILE}?inline=true`, { 'Sec-Fetch-Dest': 'audio', 'If-None-Match': '"1000-100"' })
+
+      expect(res.status).toBe(200)
+      expect(res.headers.get('etag')).not.toBe('"1000-100"')
+      expect((await res.arrayBuffer()).byteLength).toBe(changed.size)
+    })
+
+    it('still 404s a deleted file that a copy is held for', async () => {
+      fileMissing()
+      const res = await get(`${FILE}?inline=true`, { 'Sec-Fetch-Dest': 'audio', 'If-None-Match': '"1000-100"' })
+      expect(res.status).toBe(404)
+      expect(res.headers.get('etag')).toBeNull()
+    })
+
+    it('answers a ranged request for bytes the browser already holds with 304', async () => {
+      mockFsStat.mockResolvedValue(stat(1_000))
+      const res = await get(`${FILE}?inline=true`, { 'Sec-Fetch-Dest': 'video', Range: 'bytes=10-19', 'If-None-Match': '"1000-100"' })
+      expect(res.status).toBe(304)
+      expect(res.headers.get('content-range')).toBeNull()
+      expect(mockCreateReadStream).not.toHaveBeenCalled()
+    })
+
+    it('serves the range a seek asks for while If-Range names this file', async () => {
+      mockFsStat.mockResolvedValue(stat(1_000))
+      mockCreateReadStream.mockReturnValueOnce(Readable.from([Buffer.alloc(10)]))
+
+      const res = await get(`${FILE}?inline=true`, { 'Sec-Fetch-Dest': 'video', Range: 'bytes=10-19', 'If-Range': '"1000-100"' })
+
+      expect(res.status).toBe(206)
+      expect(res.headers.get('content-range')).toBe('bytes 10-19/100')
+      expect(mockCreateReadStream).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ start: 10, end: 19 }))
+    })
+
+    it.each([
+      ['another version of the file', '"900-100"'],
+      ['a weak tag', 'W/"1000-100"'],
+      ['a date', 'Wed, 21 Oct 2015 07:28:00 GMT'],
+    ])('sends the whole file, not a range to splice onto old bytes, when If-Range is %s', async (_name, ifRange) => {
+      mockFsStat.mockResolvedValue(stat(1_000))
+      mockCreateReadStream.mockReturnValueOnce(Readable.from([Buffer.alloc(100)]))
+
+      // No Sec-Fetch-Dest: If-Range is about the bytes, whoever asks.
+      const res = await get(FILE, { Range: 'bytes=10-19', 'If-Range': ifRange })
+
+      expect(res.status).toBe(200)
+      expect(res.headers.get('content-range')).toBeNull()
+      expect(res.headers.get('content-length')).toBe('100')
+      expect((await res.arrayBuffer()).byteLength).toBe(100)
+    })
+
+    // An error kept under the file's tag would be handed back as the file on the next 304.
+    it.each([
+      ['the file went away between the stat and the read', () => mockFsStat.mockResolvedValueOnce(stat(1_000)).mockRejectedValueOnce(enoent()), {}, 404],
+      ['the read failed', () => { mockFsStat.mockResolvedValue(stat(1_000)); mockCreateReadStream.mockImplementationOnce(() => { throw new Error('EIO') }) }, {}, 500],
+      ['the range cannot be served', () => mockFsStat.mockResolvedValue(stat(1_000)), { Range: 'bytes=200-300' }, 416],
+    ])('keeps an error on no-store when %s', async (_name, arrange, headers, status) => {
+      arrange()
+
+      const res = await get(`${FILE}?inline=true`, { 'Sec-Fetch-Dest': 'video', ...headers })
+
+      expect(res.status).toBe(status)
+      expect(res.headers.get('cache-control')).toBe('private, no-store, max-age=0')
+    })
+
+    // CORS with trusted origins starts the response before the route runs, and
+    // Hono then lets the headers already on it win over a body's own.
+    it('keeps its headers behind a middleware that has already started the response', async () => {
+      const behind = new Hono()
+      behind.use('*', async (c, next) => {
+        c.header('Vary', 'Origin', { append: true })
+        c.res.headers.set('X-Started', 'yes')
+        await next()
+      })
+      behind.route('/', app)
+      const ask = (headers: Record<string, string>) =>
+        behind.request(`http://localhost${FILE}?inline=true`, { headers: { 'Sec-Fetch-Dest': 'video', ...headers } })
+
+      mockFsStat.mockResolvedValue(stat(1_000))
+      mockCreateReadStream.mockReturnValueOnce(Readable.from([Buffer.alloc(100)]))
+      const full = await ask({})
+      expect(full.status).toBe(200)
+      expect(full.headers.get('cache-control')).toBe('private, no-cache, max-age=0')
+      expect(full.headers.get('vary')).toBe('Origin, Sec-Fetch-Dest')
+
+      const unchanged = await ask({ 'If-None-Match': '"1000-100"' })
+      expect(unchanged.status).toBe(304)
+      expect(unchanged.headers.get('cache-control')).toBe('private, no-cache, max-age=0')
+      expect(unchanged.headers.get('vary')).toBe('Origin, Sec-Fetch-Dest')
+
+      mockFsStat.mockReset()
+      mockFsStat.mockResolvedValueOnce(stat(1_000)).mockRejectedValueOnce(enoent())
+      const gone = await ask({})
+      expect(gone.status).toBe(404)
+      expect(gone.headers.get('cache-control')).toBe('private, no-store, max-age=0')
+    })
+
+    it('answers a HEAD the same way, opening nothing', async () => {
+      mockFsStat.mockResolvedValue(stat(1_000))
+      const res = await get(`${FILE}?inline=true`, { 'Sec-Fetch-Dest': 'audio', 'If-None-Match': '"1000-100"' }, 'HEAD')
+      expect(res.status).toBe(304)
+      expect(mockCreateReadStream).not.toHaveBeenCalled()
+    })
+  })
+
   it('rejects a workspace symlink whose real path escapes the workspace', async () => {
     mockFsRealpath
       .mockResolvedValueOnce('/mock/workspace')
@@ -3129,14 +3311,14 @@ describe('path traversal security — GET /:id/files/*', () => {
     })
 
     // An open preview polls this to learn the file changed without reading it.
-    it('names the file\'s state in a weak ETag that moves when it is rewritten', async () => {
+    it('names the file\'s state in an ETag that moves when it is rewritten', async () => {
       mockFsStat.mockResolvedValue({ ...fileStat(100), mtimeMs: 1_000 })
       const first = await headReq(app, '/api/agents/test-agent/files/out/report.md?inline=true')
-      expect(first.headers.get('etag')).toBe('W/"1000-100"')
-      expect((await headReq(app, '/api/agents/test-agent/files/out/report.md?inline=true')).headers.get('etag')).toBe('W/"1000-100"')
+      expect(first.headers.get('etag')).toBe('"1000-100"')
+      expect((await headReq(app, '/api/agents/test-agent/files/out/report.md?inline=true')).headers.get('etag')).toBe('"1000-100"')
 
       mockFsStat.mockResolvedValue({ ...fileStat(100), mtimeMs: 2_000 })
-      expect((await headReq(app, '/api/agents/test-agent/files/out/report.md?inline=true')).headers.get('etag')).toBe('W/"2000-100"')
+      expect((await headReq(app, '/api/agents/test-agent/files/out/report.md?inline=true')).headers.get('etag')).toBe('"2000-100"')
       expect(mockCreateReadStream).not.toHaveBeenCalled()
     })
 
