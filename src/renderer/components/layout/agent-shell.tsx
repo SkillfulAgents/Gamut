@@ -1,5 +1,5 @@
 import { Outlet, useParams, useNavigate } from '@tanstack/react-router'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useUser } from '@renderer/context/user-context'
 import { getUserImage } from '@shared/lib/user-profile-schema'
 import { useMessageStream } from '@renderer/hooks/use-message-stream'
@@ -9,7 +9,11 @@ import { useSidebar } from '@renderer/components/ui/sidebar'
 import { useFullScreen } from '@renderer/hooks/use-fullscreen'
 import { isElectron, getPlatform } from '@renderer/lib/env'
 import { ErrorBoundary } from '@renderer/components/ui/error-boundary'
-import { PendingMessagesProvider, type PendingMessagesContextValue } from '@renderer/context/pending-messages-context'
+import {
+  PendingMessagesProvider,
+  StreamContextUsageProvider,
+  type PendingMessagesContextValue,
+} from '@renderer/context/pending-messages-context'
 import { clearPendingSessionSeed, peekPendingSessionSeed } from '@renderer/context/pending-session-seed'
 import { DashboardHeaderProvider } from '@renderer/context/dashboard-header-context'
 import type { PendingMessage } from '@renderer/components/messages/pending-message'
@@ -53,16 +57,21 @@ export function AgentShell() {
     isElectron() && getPlatform() === 'darwin' && sidebarState === 'collapsed' && !isFullScreen
   const pendingMessagesRef = useRef(new Map<string, PendingMessage[]>())
   const copiedSeedSessionIdsRef = useRef(new Set<string>())
-  const [, forceUpdate] = useState(0)
+  const committedRef = useRef(false)
+  const [pendingVersion, forceUpdate] = useState(0)
 
   const getPendingMessages = useCallback(
     (sessionId: string | null) => {
       if (!sessionId) return EMPTY_PENDING_MESSAGES
       const existing = pendingMessagesRef.current.get(sessionId)
       if (existing) return existing
-      // Read without consuming during render. StrictMode and concurrent React
-      // may discard this render, so the module-level seed is only cleared after
-      // the render that copied it into this shell's ref has committed.
+      // Read without consuming while this shell is still mounting. StrictMode
+      // and concurrent React may discard that render and its ref with it, so
+      // the module-level seed is cleared by the mount effect below. Once the
+      // shell has committed its ref is kept, so a copy made later (a session
+      // route that loads after the shell) takes the seed there and then: no
+      // render of the shell is due to clear it, and a seed left behind would
+      // be copied again after the transcript has replaced the row.
       const seeded = peekPendingSessionSeed(sessionId)
       if (seeded) {
         const arr = [
@@ -72,7 +81,8 @@ export function AgentShell() {
           },
         ]
         pendingMessagesRef.current.set(sessionId, arr)
-        copiedSeedSessionIdsRef.current.add(sessionId)
+        if (committedRef.current) clearPendingSessionSeed(sessionId)
+        else copiedSeedSessionIdsRef.current.add(sessionId)
         return arr
       }
       return EMPTY_PENDING_MESSAGES
@@ -81,11 +91,12 @@ export function AgentShell() {
   )
 
   useEffect(() => {
+    committedRef.current = true
     for (const sessionId of copiedSeedSessionIdsRef.current) {
       clearPendingSessionSeed(sessionId)
     }
     copiedSeedSessionIdsRef.current.clear()
-  })
+  }, [])
 
   const onMessageSent = useCallback(
     (content: string, localId: string, queued: boolean) => {
@@ -179,38 +190,64 @@ export function AgentShell() {
     if (pendingMessagesRef.current.delete(sessionId)) forceUpdate((n) => n + 1)
   }, [])
 
-  // Holder #1 of the two-holder EventSource pattern: keeps the stream ref-counted
-  // open across leaf changes (SessionChatColumn is holder #2).
-  const { contextUsage: streamContextUsage } = useMessageStream(activeSessionId, slug, ['contextUsage'])
-
-  const value: PendingMessagesContextValue = {
-    getPendingMessages,
-    onMessageSent,
-    onMessageUuidAssigned,
-    onPendingMessageAppeared,
-    onSessionCreated,
-    clearPendingMessagesForSession,
-    streamContextUsage,
-  }
+  // One object until a callback or the store's content changes. This shell
+  // also renders for reasons no consumer cares about (the start/stop mutations,
+  // the sidebar, full screen), and a new object each time re-rendered the whole
+  // session view with it. `pendingVersion` is what tells consumers to read
+  // `getPendingMessages` again: the store is a ref, so nothing else would.
+  const value = useMemo<PendingMessagesContextValue>(
+    () => ({
+      getPendingMessages,
+      onMessageSent,
+      onMessageUuidAssigned,
+      onPendingMessageAppeared,
+      onSessionCreated,
+      clearPendingMessagesForSession,
+    }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- pendingVersion stands for the ref's content
+    [getPendingMessages, onMessageSent, onMessageUuidAssigned, onPendingMessageAppeared, onSessionCreated, clearPendingMessagesForSession, pendingVersion],
+  )
 
   return (
     <PendingMessagesProvider value={value}>
-      <DashboardHeaderProvider>
-        <ContentShell
-          needsTrafficLightPadding={needsTrafficLightPadding}
-          floatingHeader={!!activeSessionId}
-          headerContent={
-            slug ? (
-              <AgentHeader slug={slug} isViewOnly={isViewOnly} startAgent={startAgent} stopAgent={stopAgent} />
-            ) : null
-          }
-        >
-          {slug && <AgentBanners slug={slug} startAgent={startAgent} />}
-          <ErrorBoundary>
-            <Outlet />
-          </ErrorBoundary>
-        </ContentShell>
-      </DashboardHeaderProvider>
+      <StreamContextUsageHolder sessionId={activeSessionId} agentSlug={slug}>
+        <DashboardHeaderProvider>
+          <ContentShell
+            needsTrafficLightPadding={needsTrafficLightPadding}
+            floatingHeader={!!activeSessionId}
+            headerContent={
+              slug ? (
+                <AgentHeader slug={slug} isViewOnly={isViewOnly} startAgent={startAgent} stopAgent={stopAgent} />
+              ) : null
+            }
+          >
+            {slug && <AgentBanners slug={slug} startAgent={startAgent} />}
+            <ErrorBoundary>
+              <Outlet />
+            </ErrorBoundary>
+          </ContentShell>
+        </DashboardHeaderProvider>
+      </StreamContextUsageHolder>
     </PendingMessagesProvider>
   )
+}
+
+/**
+ * Holder #1 of the two-holder EventSource pattern: keeps the stream ref-counted
+ * open across leaf changes (SessionChatColumn is holder #2), and provides its
+ * context usage. A component of its own so a `context_usage` event re-renders
+ * it and the readers of `useStreamContextUsage`, not the shell: its children
+ * are the shell's elements, which are unchanged when only this state moves.
+ */
+function StreamContextUsageHolder({
+  sessionId,
+  agentSlug,
+  children,
+}: {
+  sessionId: string | null
+  agentSlug: string | null
+  children: ReactNode
+}) {
+  const { contextUsage } = useMessageStream(sessionId, agentSlug, ['contextUsage'])
+  return <StreamContextUsageProvider value={contextUsage}>{children}</StreamContextUsageProvider>
 }
