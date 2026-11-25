@@ -16,9 +16,10 @@ concurrency:
 
 jobs:
   # Typecheck, lint and the unit tests are separate jobs so they run side by
-  # side: back to back in one job they took ~7.5 min. tsc and ESLint 8 are
-  # single-threaded, so more cores would not speed them up; vitest is the one
-  # that scales with cores, so it gets the big runner.
+  # side: back to back in one job they took ~7.5 min. ESLint 8 is
+  # single-threaded, so more cores would not speed it up, and the typecheck
+  # (TypeScript 7, native) takes seconds; vitest is the one that scales with
+  # cores, so it gets the big runner.
   typecheck:
     runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
@@ -28,11 +29,7 @@ jobs:
       - name: Install dependencies
         uses: ./.github/actions/install-deps
 
-      # A full check needs just over Node's default 4 GB heap (it ran out on
-      # the MCP branches, at ~1.6M types); the runner has the memory.
       - name: Run typecheck
-        env:
-          NODE_OPTIONS: --max-old-space-size=8192
         run: npm run typecheck
 
   lint:

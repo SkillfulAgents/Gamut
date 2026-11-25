@@ -72,7 +72,7 @@ When adding new Better Auth features (social logins, new plugins, etc.), follow 
 7. **Verify**:
 
    ```bash
-   npx tsc --noEmit    # typecheck
+   npm run typecheck   # typecheck
    npx vitest run       # unit tests
    ```
 

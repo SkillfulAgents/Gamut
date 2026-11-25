@@ -100,7 +100,7 @@ head -1 src/renderer/public/service-icons/<slug>.svg
 ## Verify
 
 ```bash
-npx tsc --noEmit
+npm run typecheck
 cd agent-container && npx tsc --noEmit && cd ..
 npx eslint 'src/shared/lib/composio/**/*.ts' 'src/shared/lib/proxy/**/*.ts' 'scripts/download-service-icons.ts'
 npx vitest run src/shared/lib/proxy/

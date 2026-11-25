@@ -239,7 +239,7 @@ test.describe('...', () => {
 - [ ] `src/api/<name>-polyfill.test.ts` — unit tests (jsdom environment)
 - [ ] `src/api/routes/artifact-polyfill-injection.test.ts` — update if injection logic changes
 - [ ] `e2e/specs/<name>-polyfill.spec.ts` — E2E validation
-- [ ] `npx tsc --noEmit` passes
+- [ ] `npm run typecheck` passes
 - [ ] `npx vitest run src/api/<name>-polyfill.test.ts` passes
 - [ ] `E2E_MOCK=true npx playwright test e2e/specs/<name>-polyfill.spec.ts` passes
 
