@@ -1,7 +1,7 @@
-import { useState, type ReactNode } from 'react'
+import { useState } from 'react'
 import { AlertTriangle } from 'lucide-react'
 import { useSettings, useUpdateSettings } from '@renderer/hooks/use-settings'
-import { PolicyDecisionToggle } from '@renderer/components/ui/policy-decision-toggle'
+import { PolicyDecisionDropdown } from '@renderer/components/ui/policy-decision-toggle'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -13,31 +13,10 @@ import {
   AlertDialogTitle,
 } from '@renderer/components/ui/alert-dialog'
 import type { CapabilityPolicy } from '@shared/lib/config/settings'
+import { SETTINGS_CARD_CLASS, SETTINGS_SECTION_HEADING, SettingRow } from './setting-row'
 
-const CARD_CLASS = 'rounded-card border bg-background divide-y divide-border/50 overflow-hidden'
-const SECTION_HEADING = 'text-xs font-medium text-muted-foreground px-1'
-
-interface SettingRowProps {
-  name: string
-  subtitle?: ReactNode
-  right: ReactNode
-}
-
-function SettingRow({ name, subtitle, right }: SettingRowProps) {
-  return (
-    <div className="py-3 px-4">
-      <div className="flex items-center gap-3">
-        <div className="min-w-0 flex-1">
-          <div className="text-xs font-medium truncate">{name}</div>
-          {subtitle && (
-            <div className="text-[11px] text-muted-foreground mt-0.5">{subtitle}</div>
-          )}
-        </div>
-        <div className="flex items-center gap-2 shrink-0">{right}</div>
-      </div>
-    </div>
-  )
-}
+const CARD_CLASS = SETTINGS_CARD_CLASS
+const SECTION_HEADING = SETTINGS_SECTION_HEADING
 
 export function CapabilitiesTab() {
   const { data: settings, isLoading } = useSettings()
@@ -73,26 +52,26 @@ export function CapabilitiesTab() {
         <div className={CARD_CLASS}>
           <SettingRow
             name="Subagents"
-            subtitle="Delegated agents launched with the Task tool — browsing, dashboards, research fan-outs. Review pauses each launch for your approval; Block removes the capability entirely."
+            help="Agents another agent launches to delegate work: browsing, dashboards, research. Review pauses each launch for your approval; Block removes the ability entirely."
             right={
               <div data-testid="capability-policy-subagents" className={isLoading ? 'pointer-events-none opacity-50' : undefined}>
-                <PolicyDecisionToggle
+                <PolicyDecisionDropdown
                   value={capabilities.subagents}
                   onChange={handleSubagentsChange}
-                  allowDeselect={false}
+                  includeDefault={false}
                 />
               </div>
             }
           />
           <SettingRow
             name="Workflows"
-            subtitle="Multi-agent orchestrations launched with the Workflow tool. A single workflow can fan out into dozens of agents, so these default to Review."
+            help="Multi-agent runs an agent orchestrates. A single workflow can fan out into dozens of agents, so these default to Review."
             right={
               <div data-testid="capability-policy-workflows" className={isLoading ? 'pointer-events-none opacity-50' : undefined}>
-                <PolicyDecisionToggle
+                <PolicyDecisionDropdown
                   value={capabilities.workflows}
                   onChange={handleWorkflowsChange}
-                  allowDeselect={false}
+                  includeDefault={false}
                 />
               </div>
             }

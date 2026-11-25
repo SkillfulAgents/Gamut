@@ -114,38 +114,43 @@ test.describe('Capability policy settings', () => {
     const workflowsToggle = page.locator('[data-testid="capability-policy-workflows"]')
 
     // Defaults: subagents allow, workflows review
-    await expect(subagentsToggle.locator('[data-testid="policy-toggle-allow"]')).toHaveAttribute('data-active', 'true')
-    await expect(workflowsToggle.locator('[data-testid="policy-toggle-review"]')).toHaveAttribute('data-active', 'true')
+    await expect(subagentsToggle.locator('[data-testid="policy-dropdown-trigger"]')).toHaveAttribute('data-decision', 'allow')
+    await expect(workflowsToggle.locator('[data-testid="policy-dropdown-trigger"]')).toHaveAttribute('data-decision', 'review')
 
     // Selecting block for subagents opens the warning instead of applying
-    await subagentsToggle.locator('[data-testid="policy-toggle-block"]').click()
+    await subagentsToggle.locator('[data-testid="policy-dropdown-trigger"]').click()
+    await page.locator('[data-testid="policy-menu-block"]').click()
     await expect(page.locator('[data-testid="block-subagents-use-review"]')).toBeVisible()
 
     // Cancel applies nothing
     await page.locator('[data-testid="block-subagents-cancel"]').click()
     await expect(page.locator('[data-testid="block-subagents-use-review"]')).toHaveCount(0)
-    await expect(subagentsToggle.locator('[data-testid="policy-toggle-allow"]')).toHaveAttribute('data-active', 'true')
+    await expect(subagentsToggle.locator('[data-testid="policy-dropdown-trigger"]')).toHaveAttribute('data-decision', 'allow')
 
     // Take the recommended path — review is applied, not block
-    await subagentsToggle.locator('[data-testid="policy-toggle-block"]').click()
+    await subagentsToggle.locator('[data-testid="policy-dropdown-trigger"]').click()
+    await page.locator('[data-testid="policy-menu-block"]').click()
     await expect(page.locator('[data-testid="block-subagents-use-review"]')).toBeVisible()
     await page.locator('[data-testid="block-subagents-use-review"]').click()
-    await expect(subagentsToggle.locator('[data-testid="policy-toggle-review"]')).toHaveAttribute('data-active', 'true', { timeout: 10000 })
-    await expect(subagentsToggle.locator('[data-testid="policy-toggle-block"]')).toHaveAttribute('data-active', 'false')
+    await expect(subagentsToggle.locator('[data-testid="policy-dropdown-trigger"]')).toHaveAttribute('data-decision', 'review', { timeout: 10000 })
+    await expect(subagentsToggle.locator('[data-testid="policy-dropdown-trigger"]')).not.toHaveAttribute('data-decision', 'block')
 
     // Workflows -> allow persists across reload
-    await workflowsToggle.locator('[data-testid="policy-toggle-allow"]').click()
-    await expect(workflowsToggle.locator('[data-testid="policy-toggle-allow"]')).toHaveAttribute('data-active', 'true', { timeout: 10000 })
+    await workflowsToggle.locator('[data-testid="policy-dropdown-trigger"]').click()
+    await page.locator('[data-testid="policy-menu-allow"]').click()
+    await expect(workflowsToggle.locator('[data-testid="policy-dropdown-trigger"]')).toHaveAttribute('data-decision', 'allow', { timeout: 10000 })
 
     await page.reload()
     await expect(page.locator('[data-testid="global-settings-page"]')).toBeVisible()
-    await expect(page.locator('[data-testid="capability-policy-workflows"] [data-testid="policy-toggle-allow"]')).toHaveAttribute('data-active', 'true', { timeout: 10000 })
+    await expect(page.locator('[data-testid="capability-policy-workflows"] [data-testid="policy-dropdown-trigger"]')).toHaveAttribute('data-decision', 'allow', { timeout: 10000 })
 
     // Restore defaults so other specs see the stock policy
-    await page.locator('[data-testid="capability-policy-workflows"] [data-testid="policy-toggle-review"]').click()
-    await expect(page.locator('[data-testid="capability-policy-workflows"] [data-testid="policy-toggle-review"]')).toHaveAttribute('data-active', 'true', { timeout: 10000 })
+    await page.locator('[data-testid="capability-policy-workflows"] [data-testid="policy-dropdown-trigger"]').click()
+    await page.locator('[data-testid="policy-menu-review"]').click()
+    await expect(page.locator('[data-testid="capability-policy-workflows"] [data-testid="policy-dropdown-trigger"]')).toHaveAttribute('data-decision', 'review', { timeout: 10000 })
     const subagents = page.locator('[data-testid="capability-policy-subagents"]')
-    await subagents.locator('[data-testid="policy-toggle-allow"]').click()
-    await expect(subagents.locator('[data-testid="policy-toggle-allow"]')).toHaveAttribute('data-active', 'true', { timeout: 10000 })
+    await subagents.locator('[data-testid="policy-dropdown-trigger"]').click()
+    await page.locator('[data-testid="policy-menu-allow"]').click()
+    await expect(subagents.locator('[data-testid="policy-dropdown-trigger"]')).toHaveAttribute('data-decision', 'allow', { timeout: 10000 })
   })
 })
