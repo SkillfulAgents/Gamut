@@ -30,17 +30,17 @@ describe('AuthTab', () => {
 
   it('hides Signup & Access, Authentication Methods, and Password Policy when platform-controlled', () => {
     render(<AuthTab hideLocalAuthSections />)
-    expect(screen.queryByText('Signup & Access')).not.toBeInTheDocument()
-    expect(screen.queryByText('Authentication Methods')).not.toBeInTheDocument()
-    expect(screen.queryByText('Password Policy')).not.toBeInTheDocument()
-    expect(screen.getByText('Session & Lockout')).toBeInTheDocument()
-    expect(screen.getByText('Trusted Origins')).toBeInTheDocument()
+    expect(screen.queryByText('Signup & access')).not.toBeInTheDocument()
+    expect(screen.queryByText('Authentication methods')).not.toBeInTheDocument()
+    expect(screen.queryByText('Password policy')).not.toBeInTheDocument()
+    expect(screen.getByText('Session & lockout')).toBeInTheDocument()
+    expect(screen.getByText('Trusted origins')).toBeInTheDocument()
   })
 
   it('shows local auth sections by default', () => {
     render(<AuthTab />)
-    expect(screen.getByText('Signup & Access')).toBeInTheDocument()
-    expect(screen.getByText('Authentication Methods')).toBeInTheDocument()
-    expect(screen.getByText('Password Policy')).toBeInTheDocument()
+    expect(screen.getByText('Signup & access')).toBeInTheDocument()
+    expect(screen.getByText('Authentication methods')).toBeInTheDocument()
+    expect(screen.getByText('Password policy')).toBeInTheDocument()
   })
 })
