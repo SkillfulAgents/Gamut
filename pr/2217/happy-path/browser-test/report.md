@@ -1,0 +1,7 @@
+[TEST_PASS]
+[REASON] Sent the browser task to agent QA-20261125-183407-v4ay and verified the reply names the page title "Example Domain".
+[STEP] Step 1: Navigated to http://localhost:47891. The Gamut home page loaded with the sidebar listing QA-20261125-183407-v4ay and QA-20261125-183406-g12y.
+[STEP] Step 2: Clicked the QA-20261125-183407-v4ay entry in the sidebar. Its agent page opened with status "idle" and an empty message composer.
+[STEP] Step 3: Typed "Open a browser and go to https://example.com. Tell me the page title." into the composer and clicked Send. A new session "Check Example.com Page Title" opened, showing the message, an "Open Browser" tool card, and the agent status changing to "working".
+[STEP] Step 4: Waited for the response. The reply "Example Domain" appeared, the agent status returned to "idle", and the turn showed "Worked for 4s · 3 tool calls". The wait finished well within the 3-minute limit.
+[STEP] Step 5: Verified the response text reads: "The page title is "Example Domain". The page at https://example.com loaded normally (HTTP 200), and I've closed the browser." The screenshot shows this text in the chat.
