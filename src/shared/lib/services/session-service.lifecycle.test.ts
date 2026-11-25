@@ -16,6 +16,7 @@ import {
   getSession,
   getSessionMetadata,
   getSessionSummary,
+  getSessionWithMetadata,
   getSessionsByScheduledTask,
   isSessionRegistered,
   listSessions,
@@ -344,6 +345,118 @@ describe('the time a single read answers', () => {
     expect((await getSession(store, 's1'))?.lastActivityAt).toEqual(new Date('2026-11-01T09:00:00Z'))
     expect((await listSessionsByIds(store, ['s1']))[0].lastActivityAt).toEqual(new Date('2026-11-01T09:00:00Z'))
     expect((await listSessions(store))[0].lastActivityAt).toEqual(new Date('2026-11-01T09:00:00Z'))
+  })
+})
+
+describe('a session read with its metadata', () => {
+  /** The statements sent to the driver from here on: every one is prepared by the drizzle session. */
+  function statements(): () => string[] {
+    const prepare = vi.spyOn((database.db as unknown as { session: { prepareQuery(query: { sql: string }): unknown } }).session, 'prepareQuery')
+    return () => prepare.mock.calls.map(([query]) => query.sql)
+  }
+
+  /** What the single-session route read before: the session, and its metadata out of every session's. */
+  async function readSeparately(sessionId: string) {
+    const all = await readSessionMetadata(store)
+    const metadata = Object.hasOwn(all, sessionId) ? all[sessionId] : null
+    const session = await getSession(store, sessionId, { metadata })
+    return session && { session, metadata }
+  }
+
+  it('answers the session and its metadata as the two reads did, for every kind of session', async () => {
+    writeTranscript('written', '2026-11-01T09:00:00Z')
+    await registerSession(store, 'written', 'Written', { model: 'claude-sonnet-5', forkedFromSessionId: 'source' })
+    writeTranscript('unregistered', '2026-11-01T10:00:00Z')
+    await registerSession(store, 'fresh', 'Fresh', { invokedByAgentSlug: 'caller' })
+    await store.index.update('orphaned', () => ({ name: 'Orphaned', createdAt: new Date(Date.now() - 2 * 3_600_000).toISOString() }))
+    await store.index.update('starred-only', () => ({ starred: true }))
+    // Seen by a listing, as the app's sessions are by the time one is opened.
+    await listSessions(store)
+
+    for (const sessionId of ['written', 'unregistered', 'fresh', 'orphaned', 'starred-only', 'no-such-session']) {
+      const together = await getSessionWithMetadata(store, sessionId)
+      expect(together, sessionId).toEqual(await readSeparately(sessionId))
+      expect(together?.session ?? null, sessionId).toEqual(await getSession(store, sessionId))
+      if (together) expect(together.metadata, sessionId).toEqual(await getSessionMetadata(store, sessionId))
+    }
+    expect(await getSessionWithMetadata(store, 'written')).toMatchObject({
+      session: { id: 'written', name: 'Written', lastActivityAt: new Date('2026-11-01T09:00:00Z') },
+      metadata: { name: 'Written', model: 'claude-sonnet-5', forkedFromSessionId: 'source' },
+    })
+    // A transcript nobody registered is a session the app keeps nothing about.
+    expect(await getSessionWithMetadata(store, 'unregistered')).toMatchObject({ session: { id: 'unregistered', name: 'New Session' }, metadata: null })
+    expect(await getSessionWithMetadata(store, 'fresh')).toMatchObject({ session: { name: 'Fresh' }, metadata: { invokedByAgentSlug: 'caller' } })
+    expect(await getSessionWithMetadata(store, 'orphaned')).toBeNull()
+    expect(await getSessionWithMetadata(store, 'starred-only')).toBeNull()
+    expect(await getSessionWithMetadata(store, 'no-such-session')).toBeNull()
+  })
+
+  it('carries activity recorded since the last listing', async () => {
+    writeTranscript('s1', '2026-11-01T09:00:00Z')
+    await registerSession(store, 's1', 'One')
+    await listSessions(store)
+
+    recordSessionActivity(store, 's1', new Date('2026-11-01T11:00:00Z'))
+
+    const together = await getSessionWithMetadata(store, 's1')
+    expect(together?.session.lastActivityAt).toEqual(new Date('2026-11-01T11:00:00Z'))
+    expect(together?.metadata).toMatchObject({ name: 'One' })
+  })
+
+  it('does not follow a link to another agent\'s transcript', async () => {
+    const other = path.join(dataDir, 'agents', 'other-agent', 'workspace', '.claude', 'projects', '-workspace')
+    fs.mkdirSync(other, { recursive: true })
+    fs.writeFileSync(path.join(other, 'theirs.jsonl'), '{}\n')
+    fs.mkdirSync(sessionsDir(), { recursive: true })
+    fs.symlinkSync(path.join(other, 'theirs.jsonl'), transcriptFile('linked'))
+    await registerSession(store, 'linked', 'Linked')
+
+    expect(await getSessionWithMetadata(store, 'linked')).toBeNull()
+    expect(await getSession(store, 'linked')).toBeNull()
+  })
+
+  it.each([1, 50, 1500])('reads one row of the index among %i sessions, where the two reads read them all', async (count) => {
+    fs.mkdirSync(sessionsDir(), { recursive: true })
+    for (let i = 0; i < count; i++) fs.writeFileSync(transcriptFile(`session-${i}`), '{}\n')
+    await store.index.fill(Array.from({ length: count }, (_, i) => ({
+      sessionId: `session-${i}`,
+      meta: { name: `Session ${i}`, createdAt: '2030-01-01T00:00:00.000Z' },
+      transcript: null,
+    })))
+    expect(await listSessions(store)).toHaveLength(count)
+    const target = `session-${count - 1}`
+    // A write to any of the agent's sessions (a turn's activity, a rename)
+    // makes the index forget what it listed: the state a session is opened in
+    // while another one is running.
+    await updateSessionMetadata(store, 'another-session', { starred: true })
+    const sent = statements()
+    const selected = vi.spyOn(database.db, 'select')
+
+    const together = await getSessionWithMetadata(store, target)
+
+    expect(together).toMatchObject({ session: { id: target, name: `Session ${count - 1}` }, metadata: { name: `Session ${count - 1}` } })
+    expect(sent()).toHaveLength(1)
+    expect(sent()[0]).toMatch(/"session_id" = \?/)
+    expect(selected).toHaveBeenCalledTimes(1)
+
+    // The counter sees what this replaced: every row of the agent, then the session's own.
+    await updateSessionMetadata(store, 'another-session', { starred: false })
+    const before = sent().length
+    expect(await readSeparately(target)).toEqual(together)
+    const replaced = sent().slice(before)
+    expect(replaced).toHaveLength(2)
+    expect(replaced[0]).not.toMatch(/"session_id" = \?/)
+  })
+
+  it('reads one row while the index still holds its last listing, too', async () => {
+    writeTranscript('s1', '2026-11-01T09:00:00Z')
+    await registerSession(store, 's1', 'One')
+    await listSessions(store)
+    const sent = statements()
+
+    expect(await getSessionWithMetadata(store, 's1')).toMatchObject({ session: { id: 's1' }, metadata: { name: 'One' } })
+
+    expect(sent()).toHaveLength(1)
   })
 })
 
