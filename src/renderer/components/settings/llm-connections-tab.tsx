@@ -43,15 +43,16 @@ import type {
 import { isOAuthProvider, type LlmProviderId, type OAuthProvider } from '@shared/lib/llm-provider/provider-types'
 import { SIGN_IN, type SubscriptionSignInProvider } from './subscription-sign-in'
 import type { ConnectionSetupObserver } from './connection-setup-events'
+import { SETTINGS_CARD_CLASS, SETTINGS_SECTION_HEADING, SettingRow } from './setting-row'
 
 const SIGN_IN_PROVIDER: Record<OAuthProvider, SubscriptionSignInProvider> = {
   'grok-subscription': 'grok', 'codex-subscription': 'codex', 'kimi-subscription': 'kimi', 'minimax-subscription': 'minimax',
 }
 
-const CARD_CLASS = 'rounded-card border bg-background divide-y divide-border/50 overflow-hidden'
+const CARD_CLASS = SETTINGS_CARD_CLASS
 // Shared by connection rows and the Add connection row so the list keeps one row height.
 const CONNECTION_ROW = 'min-h-[3.75rem] py-3 px-4 flex items-center'
-const SECTION_HEADING = 'text-xs font-medium text-muted-foreground px-1'
+const SECTION_HEADING = SETTINGS_SECTION_HEADING
 // Radix Select items can't use '' as a value, so "Everyone" (a global connection, owner null) gets a sentinel.
 const EVERYONE = 'everyone'
 const providers = {
@@ -144,7 +145,7 @@ export function LlmConnectionsTab() {
                 {!connection.reconnectRequired && <ProviderUsage connection={connection} />}
               </div>
               {connection.reconnectRequired && connection.canManage && isOAuthProvider(connection.provider) && (
-                <Button type="button" variant="outline" size="sm" className="shrink-0" onClick={() => setReconnecting(connection)}>
+                <Button type="button" variant="soft" size="sm" className="shrink-0" onClick={() => setReconnecting(connection)}>
                   Reconnect
                 </Button>
               )}
@@ -202,66 +203,67 @@ export function LlmConnectionsTab() {
           <div className={CARD_CLASS}>
             {data && (
               <>
-                <div className="py-3 px-4 flex items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <span className="text-xs font-medium">App default</span>
-                    <p className="text-[11px] text-muted-foreground mt-0.5">Used by every agent that doesn&apos;t set its own model.</p>
-                  </div>
-                  <SettingsModelSelect
-                    variant="row"
-                    model={data.defaultSelection?.model}
-                    llmProviderId={data.defaultSelection?.llmProviderId}
-                    globalOnly
-                    disabled={mutation.isPending}
-                    includeEffort
-                    effort={settings?.models?.agentEffort}
-                    onEffortChange={(agentEffort) => updateSettings.mutate({ models: { agentEffort } })}
-                    onModelChange={() => {}}
-                    onSelectionChange={(s) => changeDefault('default', s)}
-                  />
-                </div>
-                <div className="py-3 px-4 flex items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <span className="text-xs font-medium">Summarizer</span>
-                    <p className="text-[11px] text-muted-foreground mt-0.5">Writes session titles and notification summaries.</p>
-                    {data.defaultSelection && !data.summarizerSelection && !defaultRequiresSummarizer && <p className="text-[11px] text-muted-foreground mt-0.5">Using app default</p>}
-                    {defaultRequiresSummarizer && (
-                      <p className="text-[11px] text-muted-foreground mt-0.5">This app default requires a separate API-capable summarizer.</p>
-                    )}
-                  </div>
-                  <SettingsModelSelect
-                    variant="row"
-                    model={summarizerSelection?.model}
-                    llmProviderId={summarizerSelection?.llmProviderId}
-                    globalOnly
-                    directApiOnly
-                    disabled={mutation.isPending}
-                    onModelChange={() => {}}
-                    onSelectionChange={(s) => changeDefault('summarizer', s)}
-                    appDefault={{
-                      // An app default that can't summarize needs its own summarizer, so there's nothing to fall back to.
-                      isOverride: !!data.summarizerSelection && !defaultRequiresSummarizer,
-                      onUseAppDefault: () => changeDefault('summarizer', null),
-                      label: 'Use app default',
-                      hideSettingsLink: true,
-                    }}
-                  />
-                </div>
+                <SettingRow
+                  name="Default model for agents"
+                  right={
+                    <SettingsModelSelect
+                      variant="row"
+                      model={data.defaultSelection?.model}
+                      llmProviderId={data.defaultSelection?.llmProviderId}
+                      globalOnly
+                      disabled={mutation.isPending}
+                      includeEffort
+                      effort={settings?.models?.agentEffort}
+                      onEffortChange={(agentEffort) => updateSettings.mutate({ models: { agentEffort } })}
+                      onModelChange={() => {}}
+                      onSelectionChange={(s) => changeDefault('default', s)}
+                    />
+                  }
+                />
+                <SettingRow
+                  name="Model for session titles and summaries"
+                  // Which model is in effect, when the picker alone doesn't say.
+                  status={
+                    defaultRequiresSummarizer
+                      ? 'This app default requires a separate API-capable summarizer.'
+                      : data.defaultSelection && !data.summarizerSelection
+                        ? 'Using app default'
+                        : undefined
+                  }
+                  right={
+                    <SettingsModelSelect
+                      variant="row"
+                      model={summarizerSelection?.model}
+                      llmProviderId={summarizerSelection?.llmProviderId}
+                      globalOnly
+                      directApiOnly
+                      disabled={mutation.isPending}
+                      onModelChange={() => {}}
+                      onSelectionChange={(s) => changeDefault('summarizer', s)}
+                      appDefault={{
+                        // An app default that can't summarize needs its own summarizer, so there's nothing to fall back to.
+                        isOverride: !!data.summarizerSelection && !defaultRequiresSummarizer,
+                        onUseAppDefault: () => changeDefault('summarizer', null),
+                        label: 'Use app default',
+                        hideSettingsLink: true,
+                      }}
+                    />
+                  }
+                />
               </>
             )}
-            <div className="py-3 px-4 flex items-center justify-between gap-3">
-              <div className="min-w-0">
-                <label htmlFor="llm-tool-search" className="text-xs font-medium">
-                  Tool search
-                </label>
-                <p className="text-[11px] text-muted-foreground mt-0.5">Load tools only when needed to save context.</p>
-              </div>
-              <Switch
-                id="llm-tool-search"
-                checked={settings?.enableToolSearch !== false}
-                onCheckedChange={(enableToolSearch) => updateSettings.mutate({ enableToolSearch })}
-              />
-            </div>
+            <SettingRow
+              name="Load tools only when needed"
+              help="Tool search: agents look tools up as they need them instead of loading every tool up front, which saves context."
+              htmlFor="llm-tool-search"
+              right={
+                <Switch
+                  id="llm-tool-search"
+                  checked={settings?.enableToolSearch !== false}
+                  onCheckedChange={(enableToolSearch) => updateSettings.mutate({ enableToolSearch })}
+                />
+              }
+            />
           </div>
         </div>
       )}
@@ -752,15 +754,12 @@ export function ConnectionEditor({
         Model Defaults
         <div className="overflow-hidden rounded-card border divide-y divide-border/50" data-testid="connection-default-models">
           {([
-            { label: 'Browser model', description: 'Runs web browsing for agents.', model: browserModel, onPick: setBrowserModel },
+            { label: 'Model for web browsing', model: browserModel, onPick: setBrowserModel },
             // Stored as the dashboard model; users know dashboards as agentic apps.
-            { label: 'Agentic app model', description: 'Builds and edits agentic apps.', model: dashboardModel, onPick: setDashboardModel },
-          ]).map(({ label, description, model, onPick }) => (
+            { label: 'Model for building agentic apps', model: dashboardModel, onPick: setDashboardModel },
+          ]).map(({ label, model, onPick }) => (
             <div key={label} className="flex items-center justify-between gap-3 px-4 py-3">
-              <div className="min-w-0">
-                <div className="text-xs font-medium">{label}</div>
-                <div className="text-[11px] text-muted-foreground mt-0.5">{description}</div>
-              </div>
+              <div className="min-w-0 text-xs font-normal">{label}</div>
               <ProviderModelPickerPopover
                 connection={existing}
                 catalog={catalog}
@@ -777,7 +776,7 @@ export function ConnectionEditor({
           data-testid="connection-advanced-trigger"
           className="flex w-fit items-center gap-1.5 text-left text-muted-foreground transition-colors hover:text-foreground"
         >
-          Advanced Settings
+          Advanced settings
           <ChevronDown className="h-4 w-4 shrink-0 opacity-70 transition-transform [[data-state=closed]>&]:rotate-[-90deg]" />
         </CollapsibleTrigger>
         <CollapsibleContent className="overflow-hidden rounded-card border divide-y divide-border/50">
