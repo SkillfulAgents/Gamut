@@ -1,9 +1,9 @@
 import { useState } from 'react'
 import { Smartphone } from 'lucide-react'
 import { Button } from '@renderer/components/ui/button'
-import { DeclineButton } from '../requests/decline-button'
 import { siteLabel, type LoginContext } from './login-request'
-import { LoginSiteHeading, SignInOnPage } from './login-form'
+import { SignInOnPage } from './login-form'
+import { LOGIN_PRIMARY_BUTTON, LoginActionRow } from './login-parts'
 import { AddSignInMethodBox } from './login-vault-sections'
 import { useLoginRequestActions, useLoginVaultInfo } from './use-login-request'
 
@@ -24,7 +24,7 @@ interface LoginWaysProps {
  * next sign-in needs none of this.
  */
 export function LoginWays({ agentSlug, sessionId, toolUseId, context }: LoginWaysProps) {
-  const { state, chooseWay, requestMethod, completeManually, decline } = useLoginRequestActions({ agentSlug, sessionId, toolUseId })
+  const { state, chooseWay, requestMethod, completeManually } = useLoginRequestActions({ agentSlug, sessionId, toolUseId })
   const vaultInfo = useLoginVaultInfo(agentSlug, sessionId, toolUseId, true)
   const [mode, setMode] = useState<'ways' | 'manual'>('ways')
   const [picking, setPicking] = useState<number | null>(null)
@@ -47,7 +47,6 @@ export function LoginWays({ agentSlug, sessionId, toolUseId, context }: LoginWay
           error={error}
           busy={busy}
           finishing={running === 'manual'}
-          back="Back to the ways"
           onBack={() => setMode('ways')}
           onDone={() => void completeManually()}
         />
@@ -57,9 +56,8 @@ export function LoginWays({ agentSlug, sessionId, toolUseId, context }: LoginWay
 
   return (
     <div className="space-y-3 pt-4" data-testid="login-ways-step">
-      <LoginSiteHeading context={context} />
       {prompt ? (
-        <div className="flex items-start gap-2 rounded-md border border-border bg-muted/40 p-3 text-sm text-foreground" data-testid="login-way-prompt">
+        <div className="flex items-start gap-2 rounded-md bg-muted/50 p-3 text-sm text-foreground" data-testid="login-way-prompt">
           <Smartphone className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
           <span className="min-w-0">
             <span className="block break-words">{prompt.label}</span>
@@ -87,42 +85,32 @@ export function LoginWays({ agentSlug, sessionId, toolUseId, context }: LoginWay
       )}
       {addMethod && <AddSignInMethodBox addMethod={addMethod} onRequest={requestMethod} disabled={busy} />}
       {error && <p className="text-xs text-destructive" role="alert" data-testid="login-error">{error}</p>}
-      <div className="flex flex-wrap items-center justify-between gap-2">
+      {/* The same row as the form's: the way on the page as a ghost, then Done. */}
+      <LoginActionRow>
         <Button
           type="button"
-          variant="link"
-          size="xs"
-          className="h-auto px-0 text-xs text-muted-foreground"
+          variant="ghost"
+          size="sm"
+          className="font-normal text-muted-foreground"
           onClick={() => setMode('manual')}
           disabled={busy}
           data-testid="login-take-over"
         >
           Do it on the page instead
         </Button>
-        <div className="flex items-center gap-2">
-          <DeclineButton
-            onDecline={(reason) => void decline(reason)}
+        {prompt && (
+          <Button
+            size="sm"
+            className={LOGIN_PRIMARY_BUTTON}
+            onClick={() => pick(0)}
+            loading={running === 'way'}
             disabled={busy}
-            label="Decline"
-            showIcon={false}
-            size="xs"
-            className="border-border text-foreground hover:bg-muted"
-            data-testid="login-decline"
-          />
-          {prompt && (
-            <Button
-              size="xs"
-              className="min-w-24 bg-blue-600 text-white hover:bg-blue-700"
-              onClick={() => pick(0)}
-              loading={running === 'way'}
-              disabled={busy}
-              data-testid="login-way-done"
-            >
-              Done
-            </Button>
-          )}
-        </div>
-      </div>
+            data-testid="login-way-done"
+          >
+            Done
+          </Button>
+        )}
+      </LoginActionRow>
     </div>
   )
 }

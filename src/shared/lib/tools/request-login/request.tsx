@@ -1,14 +1,14 @@
 import { useEffect, useRef } from 'react'
-import { KeyRound } from 'lucide-react'
+import { KeyRound, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@shared/lib/utils/cn'
 import { RequestItemShell } from '../requests/request-item-shell'
 import type { LoginFieldSummary, LoginVaultPayload, LoginWay } from './login-request'
 import { siteLabel } from './login-request'
-import { LoginForm } from './login-form'
+import { LoginForm, LoginSiteHeading } from './login-form'
 import { LoginWays } from './login-ways'
 import { loginRequestKey, useLoginRequestState, type LoginKept } from './login-request-store'
-import { useLoginContext } from './use-login-request'
+import { useLoginContext, useLoginRequestActions } from './use-login-request'
 
 interface LoginRequestItemProps {
   toolUseId: string
@@ -56,6 +56,7 @@ export function LoginRequestItem({
   onComplete,
 }: LoginRequestItemProps) {
   const state = useLoginRequestState(loginRequestKey(agentSlug, sessionId, toolUseId))
+  const { decline } = useLoginRequestActions({ agentSlug, sessionId, toolUseId })
   // Viewers who cannot answer do not read the form's context (they may not).
   const context = useLoginContext(agentSlug, sessionId, toolUseId, !readOnly)
   const origin = context.data?.origin ?? null
@@ -119,10 +120,24 @@ export function LoginRequestItem({
       // The site comes from the browser, never from the agent: it is the
       // one thing a person must read before typing a password.
       title={origin ? `Sign in to ${siteLabel(origin)}` : 'Sign in'}
-      subtitle={message}
+      // Under the title, the address the values go to. The agent's own words
+      // are only for a viewer who cannot answer: the form is the rest.
+      subtitle={readOnly ? message : <LoginSiteHeading context={context.data ?? null} />}
       theme="blue"
-      sessionId={sessionId}
-      agentSlug={agentSlug}
+      // Declining ends the agent's turn too, so the X declines: one click, no menu.
+      close={(
+        <button
+          type="button"
+          onClick={() => void decline()}
+          disabled={state.status === 'submitting'}
+          aria-label="Decline"
+          title="Decline"
+          data-testid="login-decline"
+          className="inline-flex h-5 w-5 items-center justify-center rounded-control text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          <X className="h-3.5 w-3.5" />
+        </button>
+      )}
       waitingText="Waiting for sign-in"
       completed={
         done
