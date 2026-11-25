@@ -1,8 +1,9 @@
 import type { RuntimeOptions } from './runtime-options'
 import type { ContainerVolume } from '@shared/lib/types/mount'
-import type { SessionMetadata, SessionOrigin } from '@shared/lib/types/agent'
+import type { SessionMetadata } from '@shared/lib/types/agent'
 import type { ObserveUnexpectedDeathInput, RuntimeFatalKind, UnexpectedDeathPlan } from './runtime-death'
 import type { AppSettings } from '@shared/lib/config/settings'
+import type { MessageSender, SessionContext as MessageContext } from '../../../../agent-container/src/session-context'
 
 /** The container has the route but the session is gone (HTTP 404 + JSON). */
 export class ContainerNotFoundError extends Error {
@@ -12,33 +13,11 @@ export class ContainerNotFoundError extends Error {
   }
 }
 
-/** Who sent a message, as the container's session context holds it. */
-export interface MessageSender {
-  /** The user id, agent slug, or task or trigger id. Absent for a person reached through an integration. */
-  id?: string
-  /** Absent where none is known (local mode's one person). */
-  name?: string
-  /** The person's role on the agent, when the sender is a member. */
-  role?: 'owner' | 'user' | 'viewer'
-  type: 'human' | 'agent' | 'automated'
-}
-
-/**
- * Facts about a message that change how its session behaves, sent with it to
- * the container. Partial: a send carries what it knows, and the container
- * merges it onto the session's context. Advisory there: who is billed or
- * attributed is decided on the host.
- */
-export interface MessageContext {
-  /** What started the session, re-sent with every message. */
-  session_trigger?: SessionOrigin
-  sender?: MessageSender
-  /** Where the conversation happens: `ui`, or the integration's provider (`slack`, `telegram`, ...). */
-  channel?: string
-}
+// Type-only bridge: the container's boundary schema owns the values.
+export type { MessageSender, MessageContext }
 
 /** What a caller knows about its message: who sent it, always, and where. The delivery adds what started the session. */
-export type MessageOrigin = { sender: MessageSender; channel?: string }
+export type MessageOrigin = { sender: MessageSender; channel?: MessageContext['channel'] }
 
 /** A run with no person behind it: a task, trigger or widget, by its id. */
 export function automatedSender(id: string, name?: string | null): MessageSender {

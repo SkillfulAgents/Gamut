@@ -192,7 +192,7 @@ describe('recoverFromUnexpectedDeath', () => {
   })
 
   it('delivers a held message with the context it was sent with', async () => {
-    const messageContext = { session_trigger: 'user' as const, channel: 'ui', sender: { type: 'human' as const, id: 'u-ben' } }
+    const messageContext = { session_trigger: 'user' as const, channel: 'ui' as const, sender: { type: 'human' as const, id: 'u-ben' } }
     const deps = createDeps({
       takeCoalescedUserMessages: (id) => (id === 'sess-1' ? [{ uuid: TEST_MESSAGE_UUID, text: 'keep going', messageContext }] : []),
     })

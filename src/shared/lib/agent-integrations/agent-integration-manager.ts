@@ -45,6 +45,7 @@ import { recordIntegrationMessage } from '@shared/lib/services/agent-integration
 import { INTEGRATION_MESSAGE_DISPLAY_VERSION, INTEGRATION_MESSAGE_LIMITS, clampIntegrationText, type IntegrationMessageDisplay } from './message-display-schema'
 import { continuationPrompt } from './continuation-prompt'
 import { answerSetupRequests } from './setup-request'
+import { setupProviderSchema } from './finished-setup-schema'
 // ── Sentry helpers ─────────────────────────────────────────────────────
 
 const COMPONENT = 'agent-integration'
@@ -63,9 +64,10 @@ function reportError(
 }
 
 /** Who sent an integration's message and where, as its session's context holds it. */
-function integrationContext(integration: AgentIntegrationRecord, input: PreparedIntegrationInput): MessageOrigin {
+export function integrationContext(integration: AgentIntegrationRecord, input: PreparedIntegrationInput): MessageOrigin {
   const name = input.display?.request?.author?.name
-  return { channel: integration.provider, sender: { type: 'human', ...(name ? { name } : {}) } }
+  const provider = setupProviderSchema.safeParse(integration.provider)
+  return { sender: { type: 'human', ...(name ? { name } : {}) }, ...(provider.success ? { channel: provider.data } : {}) }
 }
 
 function breadcrumb(message: string, data?: Record<string, unknown>): void {
