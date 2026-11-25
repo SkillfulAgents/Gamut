@@ -26,4 +26,16 @@ describe('artifactsRefetchIntervalMs', () => {
     // not watching, nothing starting → idle cadence unchanged
     expect(artifactsRefetchIntervalMs([artifact('running')], false, false)).toBe(60_000)
   })
+
+  it('uses the caller\'s idle interval only when nothing is starting or watched', () => {
+    // The sidebar's slow fallback behind the notifications stream.
+    expect(artifactsRefetchIntervalMs(undefined, false, false, 300_000)).toBe(300_000)
+    expect(artifactsRefetchIntervalMs([artifact('running')], false, false, 300_000)).toBe(300_000)
+    expect(artifactsRefetchIntervalMs([artifact('stopped')], false, false, 300_000)).toBe(300_000)
+    expect(artifactsRefetchIntervalMs([artifact('crashed')], false, false, 300_000)).toBe(300_000)
+    // The cadences of a starting dashboard never slow.
+    expect(artifactsRefetchIntervalMs([artifact('running', 'a'), artifact('starting', 'b')], false, false, 300_000)).toBe(1_000)
+    expect(artifactsRefetchIntervalMs([artifact('running')], false, true, 300_000)).toBe(1_000)
+    expect(artifactsRefetchIntervalMs([artifact('running')], true, false, 300_000)).toBe(300)
+  })
 })
