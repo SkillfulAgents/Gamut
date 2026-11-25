@@ -1,6 +1,9 @@
 /**
- * Runs proxy rules in `node:vm` contexts inside a small pool of child
- * processes.
+ * Runs proxy rules. The local runner, below, runs them in `node:vm` contexts inside a small pool
+ * of child processes. A deployment that cannot start child processes passes its own runner to
+ * `setRuleRunner` at boot.
+ *
+ * The local runner:
  *
  * The sandbox is for robustness, not for hostile code (rules are confirmed by
  * a person): the input is written by the agent, so a rule's own regex or loop
@@ -26,6 +29,7 @@
 import vm from 'node:vm'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { RULE_HELPERS_SOURCE } from './helpers-source'
+import { parseRunnerResult, RUN_RULE_SOURCE, type RuleOutcome } from './rule-program'
 
 export const RULE_TIMEOUT_MS = 50
 /** Heap available to the rules in one sandbox process. */
@@ -35,14 +39,6 @@ const WATCHDOG_GRACE_MS = 250
 /** Extra time a just-started process gets for its first job. */
 const STARTUP_GRACE_MS = 5_000
 
-export type RuleOutcome =
-  | { result: 'true' }
-  | { result: 'false' }
-  | { result: 'non_boolean'; detail: string }
-  | { result: 'threw'; detail: string }
-  | { result: 'timeout' }
-  | { result: 'invalid_code'; detail: string }
-
 // The rule's own source compiles alone, so it can only produce a value: the
 // runner (helpers included) is a separate script that reads that value.
 function definitionSource(code: string): string {
@@ -51,37 +47,7 @@ function definitionSource(code: string): string {
 
 const RUNNER_SOURCE = `
 globalThis.__helpers = ${RULE_HELPERS_SOURCE};
-(function () {
-  'use strict'
-  function deepFreeze(value) {
-    if (value && typeof value === 'object' && !Object.isFrozen(value)) {
-      Object.freeze(value)
-      for (var key of Object.keys(value)) deepFreeze(value[key])
-    }
-    return value
-  }
-  try {
-    var input = deepFreeze(JSON.parse(globalThis.__inputJson))
-    var rule = globalThis.__rule
-    if (typeof rule !== 'function') return 'invalid_code:rule is not a function'
-    var result = rule(input, globalThis.__helpers)
-    if (result === true) return 'true'
-    if (result === false) return 'false'
-    var kind = result === null ? 'null' : typeof result
-    if (kind === 'object' && typeof result.then === 'function') kind = 'promise'
-    return 'non_boolean:' + kind
-  } catch (error) {
-    var message
-    try {
-      message = error && typeof error === 'object' && typeof error.message === 'string'
-        ? String(error.name || 'Error') + ': ' + error.message
-        : String(error)
-    } catch (_) {
-      message = 'unprintable error'
-    }
-    return 'threw:' + message.slice(0, 500)
-  }
-})()
+${RUN_RULE_SOURCE}(globalThis.__rule, globalThis.__inputJson, globalThis.__helpers)
 `
 
 // Runs inside each sandbox process. Plain CommonJS, no imports from the app,
@@ -286,19 +252,40 @@ export interface RunRuleOptions {
   pool?: keyof typeof pools
 }
 
+/** Where rule code runs. */
+export interface RuleRunner {
+  /** Runs code that compiles (`checkSyntax`) against an input serialized with JSON.stringify. */
+  run(code: string, inputJson: string, options: Required<RunRuleOptions>): Promise<RuleOutcome>
+  /** Checks that `code` compiles as a single expression, without running it: the error, or null. */
+  checkSyntax(code: string): Promise<string | null>
+}
+
+const localRuleRunner: RuleRunner = {
+  run: (code, inputJson, { pool, timeoutMs }) => new Promise((resolve) => {
+    pools[pool].run({ id: nextJobId++, code, inputJson, timeoutMs, resolve })
+  }),
+  async checkSyntax(code) {
+    try {
+      new vm.Script(definitionSource(code), { filename: 'proxy-rule.js' })
+      return null
+    } catch (e) {
+      return e instanceof Error ? e.message : String(e)
+    }
+  },
+}
+let current: RuleRunner = localRuleRunner
+
+/** Set once at boot by a deployment with its own runner. A test passes null to go back to the local one. */
+export function setRuleRunner(runner: RuleRunner | null): void {
+  current = runner ?? localRuleRunner
+  syntaxCache.clear()
+}
+
 /** Run a rule against an input already serialized with JSON.stringify. */
-export function runRuleOnJson(code: string, inputJson: string, options: RunRuleOptions = {}): Promise<RuleOutcome> {
-  const syntaxError = checkRuleSyntax(code)
-  if (syntaxError) return Promise.resolve({ result: 'invalid_code', detail: syntaxError })
-  return new Promise((resolve) => {
-    pools[options.pool ?? 'evaluate'].run({
-      id: nextJobId++,
-      code,
-      inputJson,
-      timeoutMs: options.timeoutMs ?? RULE_TIMEOUT_MS,
-      resolve,
-    })
-  })
+export async function runRuleOnJson(code: string, inputJson: string, options: RunRuleOptions = {}): Promise<RuleOutcome> {
+  const syntaxError = await checkRuleSyntax(code)
+  if (syntaxError) return { result: 'invalid_code', detail: syntaxError }
+  return current.run(code, inputJson, { pool: options.pool ?? 'evaluate', timeoutMs: options.timeoutMs ?? RULE_TIMEOUT_MS })
 }
 
 export function runRule(code: string, input: unknown, options: RunRuleOptions = {}): Promise<RuleOutcome> {
@@ -319,28 +306,11 @@ export function serializeRuleInput(input: unknown): string | RuleOutcome {
 const syntaxCache = new Map<string, string | null>()
 
 /** Check that `code` compiles as a single expression (compiles only; runs nothing). */
-export function checkRuleSyntax(code: string): string | null {
+export async function checkRuleSyntax(code: string): Promise<string | null> {
   const cached = syntaxCache.get(code)
   if (cached !== undefined) return cached
-  let error: string | null = null
-  try {
-    new vm.Script(definitionSource(code), { filename: 'proxy-rule.js' })
-  } catch (e) {
-    error = e instanceof Error ? e.message : String(e)
-  }
+  const error = await current.checkSyntax(code)
   if (syntaxCache.size > 500) syntaxCache.clear()
   syntaxCache.set(code, error)
   return error
-}
-
-function parseRunnerResult(raw: string): RuleOutcome {
-  if (raw === 'true') return { result: 'true' }
-  if (raw === 'false') return { result: 'false' }
-  if (raw === 'timeout') return { result: 'timeout' }
-  const colon = raw.indexOf(':')
-  const kind = colon === -1 ? raw : raw.slice(0, colon)
-  const detail = colon === -1 ? '' : raw.slice(colon + 1)
-  if (kind === 'non_boolean') return { result: 'non_boolean', detail }
-  if (kind === 'invalid_code') return { result: 'invalid_code', detail }
-  return { result: 'threw', detail }
 }
