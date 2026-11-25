@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useNavigate, useRouter, useSearch } from '@tanstack/react-router'
 import { StaleAgentsNotice } from './stale-agents-notice'
+import { SettingsHeaderActions } from './settings-page'
 import { toast } from 'sonner'
 import { z } from 'zod'
 import { VolumeDetailPage } from '@renderer/components/volumes/volume-detail-page'
@@ -61,10 +62,10 @@ export function VolumesTab() {
       {selectedId ? selectedVolume ? <VolumeDetailPage key={selectedVolume.id} volume={selectedVolume} onBack={back.onBack} backLabel={back.label} onDelete={() => { setError(null); setDeleting(selectedVolume) }} />
         : <div className="space-y-3"><Button variant="ghost" onClick={back.onBack}>{homeAgent ? `Back to ${homeAgent.name}` : back.label ?? 'Back to drives'}</Button><p role={registry.isLoading ? 'status' : 'alert'} className="text-sm text-muted-foreground">{registry.isLoading ? 'Loading drive…' : registry.error ? 'Could not load this drive. Please try again.' : 'This drive is no longer available.'}</p></div>
         : <>
-      <div className="flex items-start justify-between gap-4">
-        <p className="text-sm text-muted-foreground">Save folders once, then add them to any of your agents from their Drives card.</p>
+      {/* Adding is the page's one action, so it sits on the title's row. */}
+      <SettingsHeaderActions>
         <Button size="sm" onClick={() => setCreating(true)}><Plus className="h-4 w-4" />Add drive</Button>
-      </div>
+      </SettingsHeaderActions>
       {((error && !deleting) || registry.error) && <p role="alert" className="text-sm text-destructive">{error ?? 'Could not load drives. Please try again.'}</p>}
       {registry.isLoading ? <p className="text-sm text-muted-foreground" role="status">Loading drives…</p> : definitions.length === 0 ? (
         <div className="rounded-card border border-dashed p-8 text-center">
