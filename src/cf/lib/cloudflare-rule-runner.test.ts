@@ -7,13 +7,14 @@ import { createCloudflareRuleRunner, type RuleWorkerCode, type RuleWorkerLoader 
  * as a module is. As with the
  * real loader, code that does not compile fails the request, not the load.
  */
-const loaded: RuleWorkerCode[] = []
+const loaded: Array<{ id: string; limits: { cpuMs: number; subRequests: number }; code: RuleWorkerCode }> = []
 const loader: RuleWorkerLoader = {
-  load(code) {
-    loaded.push(code)
+  get(id, getCode) {
     return {
-      getEntrypoint: () => ({
+      getEntrypoint: (_name, { limits }) => ({
         async fetch(request) {
+          const code = await getCode()
+          loaded.push({ id, limits, code })
           const rule = code.modules['rule.js'].replace('export function define', 'function define')
           const main = code.modules['main.js'].replace("import { define } from './rule.js'", rule).replace('export default', 'return')
           // eslint-disable-next-line no-new-func -- stands in for the loader compiling the Worker
@@ -23,7 +24,7 @@ const loader: RuleWorkerLoader = {
     }
   },
 }
-const failing = (error: Error): RuleWorkerLoader => ({ load: () => ({ getEntrypoint: () => ({ fetch: () => Promise.reject(error) }) }) })
+const failing = (error: Error): RuleWorkerLoader => ({ get: () => ({ getEntrypoint: () => ({ fetch: () => Promise.reject(error) }) }) })
 const runner = createCloudflareRuleRunner(loader)
 const run = (code: string, input: unknown = {}) => runner.run(code, JSON.stringify(input), { timeoutMs: 50, pool: 'evaluate' })
 
@@ -44,11 +45,23 @@ describe('Cloudflare rule runner', () => {
     expect((await run('(req) => { req.path = "x"; return true }', { path: '/a' })).result).toBe('threw')
   })
 
-  it('loads each rule with no network, no subrequests and a CPU limit of twice the timeout', async () => {
+  it('loads a rule with no network, and calls it with no subrequests and a CPU limit of twice the timeout', async () => {
     await run('() => true')
     expect(loaded).toHaveLength(1)
-    expect(loaded[0]).toMatchObject({ mainModule: 'main.js', globalOutbound: null, limits: { cpuMs: 100, subRequests: 0 } })
-    expect(loaded[0].modules['rule.js']).toContain('() => true')
+    expect(loaded[0].code).toMatchObject({ mainModule: 'main.js', globalOutbound: null })
+    expect(loaded[0].limits).toEqual({ cpuMs: 100, subRequests: 0 })
+    expect(loaded[0].code.modules['rule.js']).toContain('() => true')
+  })
+
+  it('loads a rule under one id however often it runs, and another rule under another', async () => {
+    await run('() => true')
+    await run('() => true', { other: 'input' })
+    await runner.checkSyntax('() => true')
+    await run('() => false')
+    const ids = loaded.map(load => load.id)
+    expect(ids[0]).toMatch(/^rule-[0-9a-f]{64}$/)
+    expect(new Set(ids.slice(0, 3)).size).toBe(1)
+    expect(ids[3]).not.toBe(ids[0])
   })
 
   it('checks syntax by loading the rule, without running it', async () => {
@@ -69,7 +82,7 @@ describe('Cloudflare rule runner', () => {
 
   it('answers timeout for a call that never returns', async () => {
     vi.useFakeTimers()
-    const silent = createCloudflareRuleRunner({ load: () => ({ getEntrypoint: () => ({ fetch: () => new Promise<Response>(() => {}) }) }) })
+    const silent = createCloudflareRuleRunner({ get: () => ({ getEntrypoint: () => ({ fetch: () => new Promise<Response>(() => {}) }) }) })
     const outcome = silent.run('() => true', '{}', { timeoutMs: 50, pool: 'evaluate' })
     await vi.advanceTimersByTimeAsync(5_200)
     expect(await outcome).toEqual({ result: 'timeout' })
