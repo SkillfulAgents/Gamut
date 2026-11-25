@@ -125,8 +125,20 @@ export async function buildHomeGraph(scope: HomeGraphScope): Promise<HomeGraphDa
     }
   }
 
-  const [accountLinkRows, mcpLinkRows, permissionRows, webhooksByAgent, cronsByAgent, accountUsage, mcpUsage] =
-    await Promise.all([
+  // Every read below depends only on the scope, so all of them are issued
+  // before any is awaited: on a driver where a statement is a network round
+  // trip the route waits for the slowest one, not for their sum.
+  const [
+    accountLinkRows,
+    mcpLinkRows,
+    permissionRows,
+    webhooksByAgent,
+    cronsByAgent,
+    accountUsage,
+    mcpUsage,
+    chatsByAgent,
+    sessionCounts,
+  ] = await Promise.all([
       // Junction rows for visible agents — but in auth mode joined to the
       // accounts/servers table and filtered to the CALLER's own, so a shared
       // agent never leaks another user's account/MCP ids in the payload
@@ -172,10 +184,9 @@ export async function buildHomeGraph(scope: HomeGraphScope): Promise<HomeGraphDa
       listPendingScheduledTasksByAgents(agentSlugs),
       accountUsageCounts(agentSlugs, userId),
       mcpUsageCounts(agentSlugs, userId),
+      listAgentIntegrationsByAgents(agentSlugs, { allStatuses: true }),
+      countSessionsPerIntegration(agentSlugs),
     ])
-
-  const chatsByAgent = await listAgentIntegrationsByAgents(agentSlugs, { allStatuses: true })
-  const sessionCounts = await countSessionsPerIntegration(agentSlugs)
 
   const chats: HomeGraphData['chats'] = [...chatsByAgent.values()].flat().map((chat) => ({
     id: chat.id,

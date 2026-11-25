@@ -48,15 +48,42 @@ describe('SessionPersistence', () => {
     for (const secret of ['old-key', 'access-token', 'oauth-token']) expect(file).not.toContain(secret);
   });
 
-  it('loads pre-catalog session records with an empty subagent catalog', async () => {
-    fs.writeFileSync(sessionsFile, JSON.stringify({ legacy: legacySession('legacy') }));
+  const modelData = () => ({
+    subagentModels: [{ id: 'claude-haiku-5', label: 'Claude Haiku 5', blurb: 'Fast model for small tasks' }],
+    modelContextWindows: { 'claude-haiku-5': 200000 },
+    modelPromptHints: ['Call one tool at a time and wait for its result.'],
+  });
+
+  it('drops the model data an older build stored in each record and rewrites the file at load', async () => {
+    fs.writeFileSync(
+      sessionsFile,
+      JSON.stringify({
+        first: { ...legacySession('first'), ...modelData(), effort: 'high' },
+        second: { ...legacySession('second'), ...modelData() },
+      }),
+    );
 
     const persistence = await loadPersistence();
 
-    expect(persistence.getSession('legacy')).toMatchObject({
-      sessionId: 'legacy',
-      subagentModels: [],
-    });
+    expect(persistence.getSession('first')).toMatchObject({ ...legacySession('first'), effort: 'high' });
+    const file = JSON.parse(fs.readFileSync(sessionsFile, 'utf8'));
+    expect(Object.keys(file)).toEqual(['first', 'second']);
+    expect(file.first).toMatchObject({ ...legacySession('first'), effort: 'high' });
+    for (const field of Object.keys(modelData())) {
+      expect(persistence.getSession('first')).not.toHaveProperty(field);
+      expect(file.first).not.toHaveProperty(field);
+      expect(file.second).not.toHaveProperty(field);
+    }
+  });
+
+  it('does not rewrite a file that holds no model data at load', async () => {
+    const written = JSON.stringify({ legacy: legacySession('legacy') });
+    fs.writeFileSync(sessionsFile, written);
+
+    const persistence = await loadPersistence();
+
+    expect(persistence.getSession('legacy')).toMatchObject(legacySession('legacy'));
+    expect(fs.readFileSync(sessionsFile, 'utf8')).toBe(written);
   });
 
   it('drops only an invalid record while preserving other resume metadata', async () => {

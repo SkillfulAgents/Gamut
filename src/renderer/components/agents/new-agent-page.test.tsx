@@ -4,8 +4,9 @@ import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { CreateAgentFormProps } from './create-agent-form'
 
-const { mockPush, mockUpdateSettings, mockBack, search, captured } = vi.hoisted(() => ({
+const { mockPush, mockUpdateSettings, mockBack, mockTrack, search, captured } = vi.hoisted(() => ({
   mockPush: vi.fn(),
+  mockTrack: vi.fn(),
   mockUpdateSettings: vi.fn(),
   // Whether there was a step to go back to.
   mockBack: vi.fn(() => false),
@@ -21,6 +22,7 @@ vi.mock('@renderer/hooks/use-user-settings', () => ({
   useUpdateUserSettings: () => ({ mutateAsync: mockUpdateSettings }),
 }))
 vi.mock('sonner', () => ({ toast: { error: vi.fn() } }))
+vi.mock('@renderer/context/analytics-context', () => ({ useAnalyticsTracking: () => ({ track: mockTrack }) }))
 // The form itself is covered by create-agent-form.test.tsx; here only the
 // page's way out and what it does once an agent exists.
 vi.mock('@renderer/components/wizard/create-agent-step', () => ({
@@ -83,6 +85,19 @@ describe('NewAgentPage', () => {
     search.surface = 'home'
     render(<NewAgentPage />)
     expect(captured.surface).toBe('home')
+  })
+
+  it('reports the open once, with the surface that opened it', () => {
+    search.surface = 'nav'
+    const { rerender } = render(<NewAgentPage />)
+    rerender(<NewAgentPage />)
+    expect(mockTrack).toHaveBeenCalledTimes(1)
+    expect(mockTrack).toHaveBeenCalledWith('agent_creation_opened', { surface: 'nav' })
+  })
+
+  it('reports an open from a cold deep link without a surface', () => {
+    render(<NewAgentPage />)
+    expect(mockTrack).toHaveBeenCalledWith('agent_creation_opened', {})
   })
 
   it('files the new agent into the section it was opened from', async () => {

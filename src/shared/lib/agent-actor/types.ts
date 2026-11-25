@@ -377,6 +377,8 @@ export interface SessionOps {
   listByIds(sessionIds: string[], options?: { excludeAutomated?: boolean }): Promise<SessionInfo[]>
   /** `getSession` */
   get(sessionId: string, already?: { metadata: SessionMetadata | null }): Promise<SessionInfo | null>
+  /** `getSessionWithMetadata` — `get`, with the session's metadata, from one read of its index entry. */
+  getWithMetadata(sessionId: string): Promise<{ session: SessionInfo; metadata: SessionMetadata | null } | null>
   /** `getSessionSummary` */
   summary(): Promise<SessionSummary>
   /** `sessionExists` */

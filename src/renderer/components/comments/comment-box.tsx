@@ -81,6 +81,7 @@ export function CommentBox({
   const glow = variant === 'glow'
   return (
     <div
+      data-dictation-scope
       className={cn(
         'rounded-lg border p-2 space-y-2',
         glow
@@ -113,7 +114,7 @@ export function CommentBox({
       <VoiceInputError error={voiceInput.error} onDismiss={voiceInput.clearError} />
       {error && <p className="text-xs text-destructive" role="alert">{error}</p>}
       <div className="flex justify-end gap-1">
-        <VoiceInputButton voiceInput={voiceInput} message={text} disabled={voiceModeOn || busy} size="xs" />
+        <VoiceInputButton voiceInput={voiceInput} message={text} disabled={voiceModeOn || busy} size="xs" onSend={() => void handleSubmit()} />
         <Button size="sm" variant="ghost" className="h-6 text-xs" onClick={onCancel} disabled={busy}>
           Cancel
         </Button>

@@ -564,6 +564,10 @@ export class WSL2ContainerClient extends BaseContainerClient {
     }
   }
 
+  static debugCliCommand(): string {
+    return `wsl -d ${WSL2_DISTRO_NAME} -- sudo nerdctl`
+  }
+
   /**
    * Check if WSL2 is available (wsl.exe exists and WSL2 is enabled).
    */

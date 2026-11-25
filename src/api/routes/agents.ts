@@ -95,6 +95,7 @@ import { HEIC_PREVIEW_MAX_SOURCE_BYTES } from '@shared/lib/utils/heic-preview'
 import { HEIC_EXTENSIONS, heicUploadAsJpeg } from './heic-jpeg'
 import { imageService } from '@shared/lib/images/image-service'
 import { servedRange } from '@shared/lib/utils/http-range'
+import { ifNoneMatchMatches, ifRangeAllowsRange } from '@shared/lib/utils/http-conditional'
 import { globalFeed } from '@shared/lib/notifications/global-feed'
 import { announceAgentCreated } from '@shared/lib/services/collaboration-events'
 import { isSystemMessageText } from '@shared/lib/utils/system-message'
@@ -3085,34 +3086,38 @@ agents.get('/:id/sessions/:sessionId', AgentRead(), async (c) => {
     const sessionId = c.req.param('sessionId')
     const actor = agentRegistry.get(agentSlug)
 
-    // One metadata read serves the session, its fork source's name, and the
-    // fields below.
-    const metadataMap = await actor.sessions.readMetadata()
-    const metadataOf = (id: string) => (Object.hasOwn(metadataMap, id) ? metadataMap[id] : null)
-    const metadata = metadataOf(sessionId)
-    const session = await actor.sessions.get(sessionId, { metadata })
+    // The session's one index entry serves the session and the fields below:
+    // this runs on every session open, and an agent can have thousands of
+    // sessions.
+    const found = await actor.sessions.getWithMetadata(sessionId)
 
-    if (!session) {
+    if (!found) {
       return c.json({ error: 'Session not found' }, 404)
     }
+    const { session, metadata } = found
 
-    const live = await actor.sessions.live(sessionId)
-    let effective: Awaited<ReturnType<typeof resolveConnectionRuntimeInherit>> | null = null
-    // One read for the session's display defaults; the next view reads again.
-    const settings = await getSettings()
-    if (settings.llmDefault) {
+    const displayDefaults = async (): Promise<Awaited<ReturnType<typeof resolveConnectionRuntimeInherit>> | null> => {
+      // One read for the session's display defaults; the next view reads again.
+      const settings = await getSettings()
+      if (!settings.llmDefault) return null
       try {
-        effective = await resolveConnectionRuntimeInherit(metadata ?? {}, await readAgentPreferences(agentSlug, settings), effectiveModelsFrom(settings), settings)
+        return await resolveConnectionRuntimeInherit(metadata ?? {}, await readAgentPreferences(agentSlug, settings), effectiveModelsFrom(settings), settings)
       } catch (error) {
         // History remains readable during provider/configuration outages.
         // A new turn still resolves and validates its runtime before sending.
         console.warn('Could not resolve session display defaults:', error)
+        return null
       }
     }
-    const pendingWake = await getPendingWakeForSession(agentSlug, sessionId)
-    const invokingAgent = metadata?.invokedByAgentSlug
-      ? await getAgent(metadata.invokedByAgentSlug)
-      : null
+    // None of these reads needs another's answer, so none waits for another.
+    const [live, effective, pendingWake, invokingAgent, forkSource] = await Promise.all([
+      actor.sessions.live(sessionId),
+      displayDefaults(),
+      getPendingWakeForSession(agentSlug, sessionId),
+      // Only its name is used, which the catalog holds: its instructions are not read.
+      metadata?.invokedByAgentSlug ? getAgentRecord(metadata.invokedByAgentSlug) : null,
+      metadata?.forkedFromSessionId ? actor.sessions.metadata(metadata.forkedFromSessionId) : null,
+    ])
 
     return c.json({
       id: session.id,
@@ -3133,15 +3138,13 @@ agents.get('/:id/sessions/:sessionId', AgentRead(), async (c) => {
       webhookTriggerName: metadata?.webhookTriggerName,
       invokedByAgentSlug: metadata?.invokedByAgentSlug,
       invokedByAgentName: metadata?.invokedByAgentSlug
-        ? invokingAgent?.frontmatter.name ?? metadata.invokedByAgentSlug
+        ? invokingAgent?.name ?? metadata.invokedByAgentSlug
         : undefined,
       mcpInvocation: metadata?.mcpInvocation ? { clientName: metadata.mcpInvocation.clientName } : undefined,
       isWidgetRepair: metadata?.isWidgetRepair,
       widgetRepairSlug: metadata?.widgetRepairSlug,
       forkedFromSessionId: metadata?.forkedFromSessionId,
-      forkedFromSessionName: metadata?.forkedFromSessionId
-        ? metadataOf(metadata.forkedFromSessionId)?.name
-        : undefined,
+      forkedFromSessionName: forkSource?.name,
       effort: metadata?.effort,
       speed: metadata?.speed,
       model: effective?.model ?? metadata?.model,
@@ -7406,6 +7409,9 @@ async function renderHeicPreview(actor: AgentActor, resolvedPath: string, stat: 
   return preview
 }
 
+/** The Sec-Fetch-Dest values whose inline workspace file the browser may keep and revalidate. */
+const REVALIDATED_FETCH_DESTS: ReadonlySet<string> = new Set(['video', 'audio'])
+
 // GET /api/agents/:id/files/* - Download a file from the agent workspace
 agents.get('/:id/files/*', AgentRead(), async (c) => {
   try {
@@ -7456,16 +7462,38 @@ agents.get('/:id/files/*', AgentRead(), async (c) => {
     // an authorized response is a leak as well as a staleness bug. `private`
     // keeps it out of shared caches, `no-store` out of the browser's too.
     //
-    // `no-store` over `no-cache` is deliberate, and it is the strict choice: it
-    // costs re-fetches (a seek past the media element's buffer below, an inline
-    // markdown image on remount) to buy an unconditional guarantee that no cache
-    // anywhere holds these bytes. Reclaiming those bytes means serving a
-    // validator — an mtime/size ETag plus If-None-Match → 304 — which is worth
-    // doing, but not as an unvalidated rider on a leak fix.
+    // `no-store` stays the answer to every request but one kind: an inline file
+    // the browser says it is loading into a <video> or <audio> (Sec-Fetch-Dest,
+    // which page script cannot set). A player re-downloaded what it had already
+    // fetched on every seek back and every remount, so those get `no-cache`:
+    // the browser may keep the bytes but must ask before each use, which runs
+    // AgentRead() again and compares the ETag below. Two kinds of request are
+    // left out on purpose, because Chromium reuses a `no-cache` copy for them
+    // without asking: a navigation to the file, shown again on Back (it would
+    // survive a sign-out or a removed share), and an <img>, reused for as long
+    // as its document lives (a rewritten image would keep showing the old
+    // one). `Vary` keeps a copy stored for a player from answering any other
+    // kind of request for the same URL. A client that sends no Sec-Fetch-Dest
+    // (plain http off localhost, an older browser, the cloud proxy, a script)
+    // gets `no-store`, as before. So does every error below: `keep` is called
+    // only for an answer that is the file, or says the stored copy still is.
+    // (On the context, not as a header passed with the body: Hono lets what a
+    // middleware already put on the response win over a body's own headers.)
+    const revalidated = inline && REVALIDATED_FETCH_DESTS.has(c.req.header('sec-fetch-dest') ?? '')
+    const keep = () => { if (revalidated) c.header('Cache-Control', 'private, no-cache, max-age=0') }
     c.header('Cache-Control', 'private, no-store, max-age=0')
-    // What an open preview compares to learn the file changed, from a HEAD.
-    // Weak, so no client sends it back as an If-Range this route does not read.
-    c.header('ETag', `W/"${stat.mtimeMs}-${stat.size}"`)
+    c.header('Vary', 'Sec-Fetch-Dest', { append: true })
+    // The file's state: what a stored copy is checked against, what a seek
+    // sends as If-Range, and what an open preview compares, from a HEAD, to
+    // learn the file changed. The birth time tells a file moved into place
+    // from the one it replaced when both have the same size and mtime.
+    const etag = `"${stat.mtimeMs}-${stat.size}${stat.birthtimeMs ? `-${stat.birthtimeMs}` : ''}"`
+    c.header('ETag', etag)
+    // Before anything is opened.
+    if (revalidated && ifNoneMatchMatches(c.req.header('if-none-match'), etag)) {
+      keep()
+      return c.body(null, 304)
+    }
 
     if (heicPreview) {
       if (c.req.method === 'HEAD') return c.body(null)
@@ -7483,7 +7511,8 @@ agents.get('/:id/files/*', AgentRead(), async (c) => {
       }
     }
 
-    const served = servedRange(c.req.header('range'), stat.size)
+    // A range asked for on top of bytes of another version gets the whole file.
+    const served = servedRange(ifRangeAllowsRange(c.req.header('if-range'), etag) ? c.req.header('range') : undefined, stat.size)
 
     // Hono has no HEAD routing: its dispatcher answers a HEAD by running the
     // GET handler and dropping the body (`new Response(null, await dispatch(…,
@@ -7494,8 +7523,14 @@ agents.get('/:id/files/*', AgentRead(), async (c) => {
     // the entire answer to a HEAD anyway; return before opening anything.
     // (`c.req.method` is the real method — the dispatcher overrides its routing
     // key, not the request.)
-    if (served.status === 416 || c.req.method === 'HEAD') return c.body(null, served.status, served.headers)
-    return c.body(await actor.files.read(resolved, served.range ?? undefined), served.status, served.headers)
+    if (served.status === 416) return c.body(null, 416, served.headers)
+    if (c.req.method === 'HEAD') {
+      keep()
+      return c.body(null, served.status, served.headers)
+    }
+    const body = await actor.files.read(resolved, served.range ?? undefined)
+    keep()
+    return c.body(body, served.status, served.headers)
   } catch (error) {
     if (error instanceof WorkspaceFileError) {
       return c.json({ error: error.status === 400 ? 'Invalid path' : error.message }, error.status)

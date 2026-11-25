@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { gmailDraftCreateCustomPreview, gmailDraftUpdateCustomPreview, gmailSendCustomPreview } from './gmail-send'
 import { gitHubBlobCustomPreview, gitHubFileCommitCustomPreview, gitHubTreeCustomPreview } from './github'
+import { outlookDraftCreateCustomPreview, outlookDraftUpdateCustomPreview, outlookSendCustomPreview } from './outlook-send'
 
 /** Draws one call from the request body the card already has, the way its service shows it. */
 export interface CustomPreview {
@@ -13,7 +14,7 @@ export interface CustomPreview {
   read: (requestBody: string) => Promise<ReactNode | undefined>
 }
 
-export const CUSTOM_PREVIEWS: readonly CustomPreview[] = [gmailSendCustomPreview, gmailDraftCreateCustomPreview, gmailDraftUpdateCustomPreview, gitHubBlobCustomPreview, gitHubFileCommitCustomPreview, gitHubTreeCustomPreview]
+export const CUSTOM_PREVIEWS: readonly CustomPreview[] = [gmailSendCustomPreview, gmailDraftCreateCustomPreview, gmailDraftUpdateCustomPreview, gitHubBlobCustomPreview, gitHubFileCommitCustomPreview, gitHubTreeCustomPreview, outlookSendCustomPreview, outlookDraftCreateCustomPreview, outlookDraftUpdateCustomPreview]
 
 export function customPreviewFor(toolkit: string, method: string, targetPath: string): CustomPreview | undefined {
   return CUSTOM_PREVIEWS.find((preview) => preview.toolkit === toolkit && preview.method === method.toUpperCase() && preview.path.test(targetPath))

@@ -36,6 +36,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useMessages } from './use-messages'
 import { useAgentIntegrationSessions } from './use-agent-integrations'
 import { useAgent, useAgents } from './use-agents'
+import { useArtifacts } from './use-artifacts'
 import { useRuntimeStatus } from './use-runtime-status'
 import { useSettings } from './use-settings'
 import { useNotifications, useUnreadNotificationCount } from './use-notifications'
@@ -148,6 +149,44 @@ describe('polling cadence (reviewed interval constants)', () => {
       expect((pollOf('settings') as (query: unknown) => number)({ state: { error: null } })).toBe(60_000)
       expect(pollOf('agents')).toBe(60_000)
       expect(capturedOptions.find((options) => (options.queryKey as unknown[]).length === 2 && (options.queryKey as unknown[])[0] === 'agents')?.refetchInterval).toBe(60_000)
+    })
+  })
+
+  // The sidebar shows dashboards by name, and every change to the names the
+  // stream leaves unannounced is rare (a rename elsewhere, a file changed
+  // outside a turn); a view of a dashboard's state has no such cover.
+  describe('useArtifacts', () => {
+    const interval = (data: unknown) => (pollOf('artifacts', 'agent-1') as (query: unknown) => number)({ state: { data } })
+    const starting = [{ slug: 'd', name: 'd', description: '', status: 'starting', port: 1 }]
+
+    it('namesOnly (the sidebar) polls every 60 s without the stream, every 5 min with it', () => {
+      const { rerender } = renderHook(() => useArtifacts('agent-1', { namesOnly: true }), { wrapper })
+      expect(interval([])).toBe(60_000)
+
+      act(() => noteNotificationStreamFrame('connected'))
+      rerender()
+      expect(interval([])).toBe(300_000)
+      expect(interval(undefined)).toBe(300_000)
+      // A starting dashboard is polled as before.
+      expect(interval(starting)).toBe(1_000)
+
+      act(() => noteNotificationStreamDown())
+      rerender()
+      expect(interval([])).toBe(60_000)
+    })
+
+    it('a view of a dashboard keeps 60 s, 1 s and 300 ms with the stream delivering', () => {
+      act(() => noteNotificationStreamFrame('connected'))
+      renderHook(() => useArtifacts('agent-1'), { wrapper })
+      expect(interval([])).toBe(60_000)
+      expect(interval(starting)).toBe(1_000)
+      renderHook(() => useArtifacts('agent-1', { watching: true }), { wrapper })
+      expect(interval([])).toBe(1_000)
+      renderHook(() => useArtifacts('agent-1', { pollFast: true, watching: true }), { wrapper })
+      expect(interval([])).toBe(300)
+      // namesOnly does not slow a caller that is also waiting on a dashboard.
+      renderHook(() => useArtifacts('agent-1', { namesOnly: true, watching: true }), { wrapper })
+      expect(interval([])).toBe(1_000)
     })
   })
 

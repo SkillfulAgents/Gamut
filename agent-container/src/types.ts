@@ -40,7 +40,6 @@ export interface Session {
   workingDirectory: string;
   envVars?: Record<string, string>;
   systemPrompt?: string;
-  modelPromptHints?: string[];
   availableEnvVars?: string[];
   slashCommands?: SlashCommandInfo[];
 }
