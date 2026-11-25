@@ -1,12 +1,13 @@
 /**
  * GET /api/runtime-status is polled by every open window, so what it reads is
- * pinned here: the settings and the shared connections, together, and nothing
- * after them, whatever the app default points at.
+ * pinned here for each state of the app default.
  *
- * Before, it read the settings, then the default's connection row, then (when
- * that row was missing or personal) up to three more rows, one after another.
+ * The usual state (a saved default that is a shared connection) costs what it
+ * always did: the settings, then that one row by id. What changed is the rest:
+ * the default's row is read once, not again for the fallback within it, and
+ * the other candidates (two at most) are read in one statement, not one each.
  */
-import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Hono } from 'hono'
 import { createTestDatabase, type TestDatabase } from '@shared/lib/db/testing/create-test-database'
 
@@ -23,32 +24,29 @@ vi.mock('@shared/lib/agent-actor', () => ({
 }))
 vi.mock('@shared/lib/startup', () => ({ getServicesInitError: () => null }))
 
-import * as records from '@shared/lib/app-records/records'
-import { SETTINGS_RECORD_KEY } from '@shared/lib/app-records/record-schemas'
-import { mutateSettings, type AppSettings } from '@shared/lib/config/settings'
+import { getSettings, mutateSettings, type AppSettings } from '@shared/lib/config/settings'
 import { llmConnections, user } from '@shared/lib/db/schema'
-import { resolveGlobalSelection } from '@shared/lib/llm-provider/connections'
-import { activeLlmProviderFrom } from '@shared/lib/llm-provider'
-import { getSettings } from '@shared/lib/config/settings'
+import { resolveGlobalSelection, type ConnectionRow } from '@shared/lib/llm-provider/connections'
 import runtimeStatusRoutes from './runtime-status'
 
 const app = new Hono().route('/runtime-status', runtimeStatusRoutes)
 
-type Session = { prepareQuery(query: { sql: string }, ...rest: unknown[]): unknown }
+type Statement = { sql: string; params: unknown[] }
+type Session = { prepareQuery(query: Statement, ...rest: unknown[]): unknown }
 const session = () => (handle.db as unknown as { session: Session }).session
 
 /** Statements sent to the driver from here on: every one is prepared by the drizzle session. */
-function countStatements(): { count(): number; sql(): string[] } {
+function countStatements(): { count(): number; connections(): Statement[] } {
   const prepare = vi.spyOn(session(), 'prepareQuery')
   return {
     count: () => prepare.mock.calls.length,
-    sql: () => prepare.mock.calls.map(([query]) => query.sql),
+    connections: () => prepare.mock.calls.map(([query]) => query).filter(({ sql }) => sql.includes('llm_connections')),
   }
 }
 
-async function connection(id: string, options: { userId?: string | null; apiKey?: string | null; provider?: string } = {}) {
+async function connection(id: string, options: { userId?: string | null; apiKey?: string | null; provider?: string } = {}): Promise<ConnectionRow> {
   const apiKey = options.apiKey === undefined ? 'private-key' : options.apiKey
-  await handle.db.insert(llmConnections).values({
+  const [row] = await handle.db.insert(llmConnections).values({
     id,
     provider: options.provider ?? 'generic',
     name: id,
@@ -57,7 +55,8 @@ async function connection(id: string, options: { userId?: string | null; apiKey?
     modelOverrides: JSON.stringify([{ id: 'model', label: 'Model', supportedEfforts: ['low'] }]),
     createdAt: new Date(),
     updatedAt: new Date(),
-  }).run()
+  }).returning()
+  return row
 }
 
 const setSettings = (change: (s: AppSettings) => void) => mutateSettings(change)
@@ -68,16 +67,12 @@ async function status(): Promise<{ apiKeyConfigured: boolean }> {
   return await response.json() as { apiKeyConfigured: boolean }
 }
 
-/** What the route answered before: the default resolved one row at a time. */
-async function sequentialAnswer(): Promise<boolean> {
-  const settings = await getSettings()
-  const root = await resolveGlobalSelection(undefined, settings)
-  return (root?.provider ?? activeLlmProviderFrom(settings)).apiKeyStatusFrom(settings).isConfigured
-}
-
 beforeEach(async () => {
   handle = await createTestDatabase()
+  // With no shared connection to answer, the route asks the ambient Anthropic
+  // provider, which reads both of these from the environment.
   vi.stubEnv('ANTHROPIC_API_KEY', '')
+  vi.stubEnv('ANTHROPIC_AUTH_TOKEN', '')
   await handle.db.insert(user).values({ id: 'alice', name: 'Alice', email: 'alice@example.com' }).run()
 })
 afterEach(async () => {
@@ -86,51 +81,70 @@ afterEach(async () => {
   await handle.close()
 })
 
-/**
- * Each state of the app default the resolver distinguishes, with the number of
- * statements the route issued for it before (settings included).
- */
-const states: Array<{ name: string; before: number; configured: boolean; arrange(): Promise<void> }> = [
+interface State {
+  name: string
+  /** Statements the route issues, the settings read included. */
+  statements: number
+  /** What it issued before the candidates were read together. */
+  before: number
+  /** Ids bound by the one statement that reads the remaining candidates; none when it is not needed. */
+  together: string[] | null
+  configured: boolean
+  /** The connection the default resolves to. */
+  resolved: string | null
+  arrange(): Promise<void>
+}
+
+const states: State[] = [
   {
     name: 'the default is a shared connection',
-    before: 2,
-    configured: true,
+    statements: 2, before: 2, together: null, configured: true, resolved: 'shared',
     arrange: async () => {
       await connection('shared')
       await setSettings((s) => { s.llmDefault = { llmProviderId: 'shared', model: 'model' } })
     },
   },
   {
-    name: 'the default is a shared connection whose model retired',
-    before: 3,
-    configured: true,
+    name: 'the default is a shared connection and every other candidate exists',
+    statements: 2, before: 2, together: null, configured: true, resolved: 'shared',
     arrange: async () => {
       await connection('shared')
-      await setSettings((s) => { s.llmDefault = { llmProviderId: 'shared', model: 'retired-model' } })
+      await connection('migrated', { apiKey: null })
+      await connection('legacy-anthropic', { apiKey: null })
+      await setSettings((s) => {
+        s.llmDefault = { llmProviderId: 'shared', model: 'model' }
+        s.llmLegacyProviderId = 'migrated'
+      })
     },
   },
   {
     name: 'the default is a shared connection without a key',
-    before: 2,
-    configured: false,
+    statements: 2, before: 2, together: null, configured: false, resolved: 'shared',
     arrange: async () => {
       await connection('shared', { apiKey: null })
       await setSettings((s) => { s.llmDefault = { llmProviderId: 'shared', model: 'model' } })
     },
   },
   {
+    name: 'the default is a shared connection whose model retired',
+    statements: 2, before: 3, together: null, configured: true, resolved: 'shared',
+    arrange: async () => {
+      await connection('shared')
+      await setSettings((s) => { s.llmDefault = { llmProviderId: 'shared', model: 'retired-model' } })
+    },
+  },
+  {
     name: 'no default is saved and the migrated connection answers',
-    before: 2,
-    configured: true,
+    statements: 2, before: 2, together: ['migrated', 'legacy-anthropic'], configured: true, resolved: 'migrated',
     arrange: async () => {
       await connection('migrated')
+      await connection('legacy-anthropic', { apiKey: null })
       await setSettings((s) => { s.llmLegacyProviderId = 'migrated' })
     },
   },
   {
     name: 'the default is a personal connection and the migrated one answers',
-    before: 4,
-    configured: true,
+    statements: 3, before: 4, together: ['migrated', 'legacy-anthropic'], configured: true, resolved: 'migrated',
     arrange: async () => {
       await connection('personal', { userId: 'alice', apiKey: null })
       await connection('migrated')
@@ -142,8 +156,7 @@ const states: Array<{ name: string; before: number; configured: boolean; arrange
   },
   {
     name: 'the default and the migrated connection are gone and the provider\'s own answers',
-    before: 5,
-    configured: true,
+    statements: 3, before: 5, together: ['also-deleted', 'legacy-generic'], configured: true, resolved: 'legacy-generic',
     arrange: async () => {
       await connection('legacy-generic')
       await connection('other')
@@ -155,9 +168,17 @@ const states: Array<{ name: string; before: number; configured: boolean; arrange
     },
   },
   {
+    name: 'the migrated connection is personal and the provider\'s own answers',
+    statements: 2, before: 3, together: ['personal', 'legacy-anthropic'], configured: true, resolved: 'legacy-anthropic',
+    arrange: async () => {
+      await connection('personal', { userId: 'alice' })
+      await connection('legacy-anthropic')
+      await setSettings((s) => { s.llmLegacyProviderId = 'personal' })
+    },
+  },
+  {
     name: 'only a personal connection exists',
-    before: 5,
-    configured: false,
+    statements: 3, before: 5, together: ['deleted', 'legacy-anthropic'], configured: false, resolved: null,
     arrange: async () => {
       await connection('personal', { userId: 'alice' })
       await setSettings((s) => {
@@ -167,66 +188,62 @@ const states: Array<{ name: string; before: number; configured: boolean; arrange
     },
   },
   {
+    name: 'the migrated connection is the provider\'s own',
+    statements: 2, before: 2, together: ['legacy-anthropic'], configured: false, resolved: null,
+    arrange: async () => {
+      await setSettings((s) => { s.llmLegacyProviderId = 'legacy-anthropic' })
+    },
+  },
+  {
     name: 'nothing is set up',
-    before: 2,
-    configured: false,
+    statements: 2, before: 2, together: ['legacy-anthropic'], configured: false, resolved: null,
     arrange: async () => {},
   },
 ]
 
 describe('GET /api/runtime-status reads', () => {
-  it.each(states)('two statements when $name', async ({ arrange, before, configured }) => {
+  it.each(states)('$statements statements when $name', async ({ arrange, statements, before, together, configured, resolved }) => {
     await arrange()
-    const expected = await sequentialAnswer()
-    expect(expected).toBe(configured)
+    expect((await resolveGlobalSelection(undefined, await getSettings()))?.llmProviderId ?? null).toBe(resolved)
 
-    // The sequential resolver, as the route called it before.
-    const earlier = countStatements()
-    await sequentialAnswer()
-    expect(earlier.count()).toBe(before)
-    vi.restoreAllMocks()
+    const issued = countStatements()
+    expect((await status()).apiKeyConfigured).toBe(configured)
 
-    const statements = countStatements()
-    expect((await status()).apiKeyConfigured).toBe(expected)
-    expect(statements.count()).toBe(2)
-    expect(statements.sql().filter(sql => sql.includes('llm_connections'))).toHaveLength(1)
+    expect(issued.count()).toBe(statements)
+    // Never more than it issued before.
+    expect(statements).toBeLessThanOrEqual(before)
+    // The saved default is read alone, by id: one row at most. Whatever else is
+    // read is one statement over the candidates not read yet.
+    const lists = issued.connections().filter(({ sql }) => / in \(/.test(sql))
+    const single = issued.connections().filter(({ sql }) => !/ in \(/.test(sql))
+    expect(single.length).toBeLessThanOrEqual(1)
+    expect(lists.map(({ params }) => params)).toEqual(together ? [together] : [])
+    expect(issued.count()).toBe(1 + single.length + lists.length)
   })
 
-  it('reads the shared connections while the settings are still being read', async () => {
-    await connection('shared')
-    await setSettings((s) => { s.llmDefault = { llmProviderId: 'shared', model: 'model' } })
-
-    let releaseSettings!: () => void
-    const held = new Promise<void>((resolve) => { releaseSettings = resolve })
-    const read = records.readStoredRecord
-    const reads: MockInstance<typeof records.readStoredRecord> = vi.spyOn(records, 'readStoredRecord')
-      .mockImplementation(async (...args) => {
-        if (args[0] === SETTINGS_RECORD_KEY) await held
-        return read(...args)
-      })
-    const statements = countStatements()
-
-    const pending = app.request('/runtime-status')
-    await vi.waitFor(() => expect(reads).toHaveBeenCalled())
-    // The settings read has not answered, and the connections were asked for already.
-    await vi.waitFor(() => expect(statements.sql().some(sql => sql.includes('llm_connections'))).toBe(true))
-
-    releaseSettings()
-    const response = await pending
-    expect(await response.json()).toMatchObject({ apiKeyConfigured: true })
-    expect(statements.count()).toBe(2)
+  it('binds two ids at most, whatever the settings name', async () => {
+    for (const { arrange } of states) {
+      await handle.db.delete(llmConnections).run()
+      await setSettings((s) => { delete s.llmDefault; delete s.llmLegacyProviderId; delete s.llmProvider })
+      await arrange()
+      const issued = countStatements()
+      await status()
+      for (const { params } of issued.connections()) expect(params.length).toBeLessThanOrEqual(2)
+      vi.restoreAllMocks()
+    }
   })
 
-  it('does not bind an id per connection, however many are shared', async () => {
+  it('reads one connection row however many are shared', async () => {
     for (let i = 0; i < 150; i++) await connection(`shared-${i}`)
     await connection('personal', { userId: 'alice' })
     await setSettings((s) => { s.llmDefault = { llmProviderId: 'shared-149', model: 'model' } })
 
-    const statements = countStatements()
+    const issued = countStatements()
     expect((await status()).apiKeyConfigured).toBe(true)
-    expect(statements.count()).toBe(2)
-    const [connections] = statements.sql().filter(sql => sql.includes('llm_connections'))
-    expect(connections).not.toContain('?')
+    expect(issued.count()).toBe(2)
+    const [read] = issued.connections()
+    expect(read.sql).toMatch(/where "llm_connections"\."id" = \?/)
+    expect(read.params.slice(0, 1)).toEqual(['shared-149'])
   })
 
   it('answers from what is saved now on every request', async () => {
@@ -239,17 +256,54 @@ describe('GET /api/runtime-status reads', () => {
     expect((await status()).apiKeyConfigured).toBe(true)
   })
 
-  it('fails the request when the connections cannot be read, as before', async () => {
-    await connection('shared')
-    await setSettings((s) => { s.llmDefault = { llmProviderId: 'shared', model: 'model' } })
+  it('fails the request when the candidates cannot be read', async () => {
+    await setSettings((s) => { s.llmDefault = { llmProviderId: 'deleted', model: 'model' } })
     const target = session()
     const prepare = target.prepareQuery.bind(target)
     vi.spyOn(target, 'prepareQuery').mockImplementation((query, ...rest) => {
-      if (query.sql.includes('llm_connections')) throw new Error('database is gone')
+      if (/ in \(/.test(query.sql)) throw new Error('database is gone')
       return prepare(query, ...rest)
     })
 
     const response = await app.request('/runtime-status')
     expect(response.status).toBe(500)
+  })
+})
+
+describe('resolveGlobalSelection with rows already read', () => {
+  it('reads nothing when the default is among them', async () => {
+    const shared = await connection('shared')
+    await setSettings((s) => { s.llmDefault = { llmProviderId: 'shared', model: 'retired-model' } })
+    const settings = await getSettings()
+
+    const issued = countStatements()
+    const root = await resolveGlobalSelection(new Map([[shared.id, shared]]), settings)
+    expect(root?.llmProviderId).toBe('shared')
+    expect(issued.count()).toBe(0)
+  })
+
+  it('reads only the candidates that are not among them, together', async () => {
+    const personal = await connection('personal', { userId: 'alice' })
+    await connection('migrated')
+    await setSettings((s) => {
+      s.llmDefault = { llmProviderId: 'personal', model: 'model' }
+      s.llmLegacyProviderId = 'migrated'
+    })
+    const settings = await getSettings()
+
+    const issued = countStatements()
+    const root = await resolveGlobalSelection(new Map([[personal.id, personal]]), settings)
+    expect(root?.llmProviderId).toBe('migrated')
+    expect(issued.count()).toBe(1)
+    expect(issued.connections()[0].params).toEqual(['migrated', 'legacy-anthropic'])
+  })
+
+  it('does not change the map it was given', async () => {
+    const personal = await connection('personal', { userId: 'alice' })
+    await setSettings((s) => { s.llmDefault = { llmProviderId: 'personal', model: 'model' } })
+    const read = new Map([[personal.id, personal]])
+
+    await resolveGlobalSelection(read, await getSettings())
+    expect([...read.keys()]).toEqual(['personal'])
   })
 })

@@ -12,7 +12,7 @@ import { parseConnectionJson } from './connection-schema'
 import { randomUUID } from 'node:crypto'
 import { legacyLlmProviderId, providerCredentialFields } from './provider-settings'
 import { changesOf } from '../db/batch'
-import { sql, eq, isNull, or, and } from 'drizzle-orm'
+import { sql, eq, inArray, isNull, or, and } from 'drizzle-orm'
 import { z } from 'zod'
 import { db } from '../db'
 import {
@@ -529,38 +529,28 @@ export async function storedSelection(
 export async function resolveGlobalSelection(read?: ReadConnections, settings?: AppSettings): Promise<ResolvedConnection | null> {
   const current = settings ?? await getSettings()
   const root = current.llmDefault
-  const selected = await resolveConnectionSelection(root, false, read, current)
+  const known = new Map(read)
+  // The default's row is read once and kept, so falling back within it (a
+  // retired model) does not read it again.
+  if (root) known.set(root.llmProviderId, await connectionRow(root.llmProviderId, read))
+  const selected = await resolveConnectionSelection(root, false, known, current)
   if (selected?.connection.userId === null) return selected
-  for (const id of globalSelectionIds(current)) {
-    const row = await connectionRow(id, read)
+  const ids = new Set([root?.llmProviderId, current.llmLegacyProviderId, legacyLlmProviderId(current.llmProvider ?? 'anthropic')]
+    .filter((id): id is string => !!id))
+  for (const id of ids) {
+    if (!known.has(id)) {
+      // The candidates not read yet (two at most) in one statement, not one
+      // each, and only once a candidate already read did not answer.
+      const unread = [...ids].filter((candidate) => !known.has(candidate))
+      const rows = await db.select().from(llmConnections).where(inArray(llmConnections.id, unread)).all()
+      for (const candidate of unread) known.set(candidate, rows.find((row) => row.id === candidate) ?? null)
+    }
+    const row = known.get(id)
     if (row?.userId !== null) continue
     const fallback = defaultSelectionForConnection(row, 'agent', current)
     if (fallback) return fallback
   }
   return null
-}
-
-/** The connections the app default can come from, in the order {@link resolveGlobalSelection} tries them. */
-function globalSelectionIds(settings: AppSettings): Set<string> {
-  const ids = [settings.llmDefault?.llmProviderId, settings.llmLegacyProviderId, legacyLlmProviderId(settings.llmProvider ?? 'anthropic')]
-  return new Set(ids.filter((id): id is string => !!id))
-}
-
-/**
- * The settings and the app default resolved from them, in one wave of two
- * reads: the shared connections are read alongside the settings instead of one
- * row at a time after them. Only a shared connection can be the app default,
- * so a candidate that is not among them is known to be no candidate, and
- * nothing is read after the wave. For a caller polled often (runtime status).
- */
-export async function readGlobalSelection(): Promise<{ settings: AppSettings; root: ResolvedConnection | null }> {
-  const [rows, settings] = await Promise.all([
-    db.select().from(llmConnections).where(isNull(llmConnections.userId)).all(),
-    getSettings(),
-  ])
-  const read = new Map<string, ConnectionRow | null>(rows.map((row) => [row.id, row]))
-  for (const id of globalSelectionIds(settings)) if (!read.has(id)) read.set(id, null)
-  return { settings, root: await resolveGlobalSelection(read, settings) }
 }
 
 /**
