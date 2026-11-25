@@ -447,6 +447,10 @@ function WorkflowAgentDetail({
 }) {
   const isRunning = agent?.status === 'running'
   const messages = useWorkflowAgentMessages(sessionId, agentSlug, runId, agentId, { isRunning })
+  const media = useMemo(
+    () => ({ agentSlug, sessionId, subagent: { subagentId: agentId, workflowRunId: runId } }),
+    [agentSlug, sessionId, agentId, runId],
+  )
   const finished = agent?.status === 'done' || agent?.status === 'failed'
 
   return (
@@ -487,7 +491,17 @@ function WorkflowAgentDetail({
           </div>
         )}
         {!agent && loading && <div className="text-xs text-muted-foreground italic">Loading agent…</div>}
-        <WorkflowAgentTranscript messages={messages.data} agentSlug={agentSlug} isRunning={isRunning} />
+        {messages.hasOlder && (
+          <button
+            type="button"
+            onClick={() => void messages.fetchOlder()}
+            disabled={messages.isFetchingOlder}
+            className="text-xs text-foreground hover:text-foreground/70 font-medium transition-colors py-1 disabled:opacity-50"
+          >
+            Show earlier messages
+          </button>
+        )}
+        <WorkflowAgentTranscript messages={messages.data} agentSlug={agentSlug} isRunning={isRunning} media={media} />
         {finished && agent?.result && (
           <div className="rounded-item bg-muted/50 px-3 py-2 text-xs" data-testid="workflow-agent-result">
             <div className="mb-1 text-2xs text-muted-foreground/70">{agent.status === 'failed' ? 'Error' : 'Result'}</div>

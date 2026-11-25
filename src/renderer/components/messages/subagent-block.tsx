@@ -1,5 +1,5 @@
 
-import { useRef, useMemo, useState } from 'react'
+import { useEffect, useRef, useMemo, useState } from 'react'
 import { cn } from '@shared/lib/utils/cn'
 import { ArrowLeft, ChevronRight, Workflow } from 'lucide-react'
 import { StreamingToolCallItem, StatusIndicator } from './tool-call-item'
@@ -176,10 +176,28 @@ export function SubagentTranscript(props: SubAgentBlockProps & {
   const { toolCall, sessionId, agentSlug, isSessionActive, activeSubagent, onBack } = props
   const { subagentId, status, isRunning, subagentDisplayType, description, prompt, resultText, stats } = useSubagentRun(props)
 
-  // Both entry points read the same transcript query, invalidated by the session stream.
-  const { data: subMessages } = useSubagentMessages(sessionId, agentSlug, subagentId)
-  const firstMessage = subMessages?.[0]
+  // The trailing page of the subagent's transcript; stream events refresh it with deltas.
+  const {
+    data: subMessages,
+    fetchOlder,
+    hasOlder,
+    isFetchingOlder,
+    olderFailed,
+  } = useSubagentMessages(sessionId, agentSlug, subagentId)
+  const media = useMemo(
+    () => (subagentId ? { agentSlug, sessionId, subagent: { subagentId } } : undefined),
+    [agentSlug, sessionId, subagentId],
+  )
+  // Only the transcript's first page starts with the task.
+  const firstMessage = hasOlder ? undefined : subMessages?.[0]
   const task = prompt || (firstMessage?.type === 'user' ? firstMessage.content.text : '')
+  const [showAll, setShowAll] = useState(false)
+
+  // "Show earlier messages" walks the older pages until the transcript's start.
+  // A failed page stops the walk, and the button comes back to retry it.
+  useEffect(() => {
+    if (showAll && hasOlder && !isFetchingOlder && !olderFailed) void fetchOlder()
+  }, [showAll, hasOlder, isFetchingOlder, olderFailed, fetchOlder])
 
   // The parent selects this block's original or resumed run. A SendMessage
   // run has a different tool id but still streams into the same transcript.
@@ -276,7 +294,18 @@ export function SubagentTranscript(props: SubAgentBlockProps & {
             </div>
           )}
 
-          <TranscriptItems items={flatItems} agentSlug={agentSlug} isSessionActive={isSessionActive} />
+          {hasOlder && (!showAll || olderFailed) && (
+            <button
+              type="button"
+              onClick={() => (showAll ? void fetchOlder() : setShowAll(true))}
+              className="text-xs text-foreground hover:text-foreground/70 font-medium transition-colors py-1"
+              data-testid="subagent-show-earlier"
+            >
+              Show earlier messages
+            </button>
+          )}
+
+          <TranscriptItems items={flatItems} agentSlug={agentSlug} isSessionActive={isSessionActive} media={media} />
 
           {/* Streaming text from subagent (not yet persisted) */}
           {subagentStreamingMessage && !isStreamingMessagePersisted && (

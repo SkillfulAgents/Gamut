@@ -61,8 +61,14 @@ vi.mock('@shared/lib/tools/request-browser-input/use-browser-input-actions', () 
   }),
 }))
 const historyMessages: ApiMessage[] = []
-vi.mock('@renderer/hooks/use-messages', () => ({ useMessages: () => ({ data: historyMessages }) }))
-const mockApiFetch = vi.fn((_url: string) => Promise.resolve({ ok: true, json: () => Promise.resolve([]) }))
+vi.mock('@renderer/hooks/use-messages', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@renderer/hooks/use-messages')>()),
+  useMessages: () => ({ data: historyMessages }),
+}))
+// Transcript reads answer with a page; every other read with a list.
+const mockApiFetch = vi.fn((url: string) =>
+  Promise.resolve({ ok: true, json: () => Promise.resolve(url.includes('/messages') ? { messages: [], nextCursor: null } : []) }),
+)
 vi.mock('@renderer/lib/api', () => ({
   apiFetch: (url: string) => mockApiFetch(url),
   apiJson: async (url: string) => (await mockApiFetch(url)).json(),
