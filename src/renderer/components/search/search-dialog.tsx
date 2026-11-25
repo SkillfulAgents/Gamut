@@ -185,7 +185,7 @@ export function SearchDialog() {
               setQuery(e.target.value)
               setActiveIndex(0)
             }}
-            placeholder="Search agents, sessions, and settings..."
+            placeholder="Search agents, sessions, dashboards, and settings..."
             className="min-w-0 flex-1 bg-transparent text-lg outline-none placeholder:text-muted-foreground/60"
             data-testid="search-input"
           />
