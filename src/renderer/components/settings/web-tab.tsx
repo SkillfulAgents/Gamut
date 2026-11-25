@@ -4,8 +4,9 @@ import { useSettings, useUpdateSettings } from '@renderer/hooks/use-settings'
 import { usePlatformAuthStatus } from '@renderer/hooks/use-platform-auth'
 import type { WebProviderId } from '@shared/lib/config/settings'
 import { ProviderApiKeyInput } from './provider-api-key-input'
+import { SETTINGS_SECTION_HEADING } from './setting-row'
 
-const SECTION_HEADING = 'text-xs font-medium text-muted-foreground px-1'
+const SECTION_HEADING = SETTINGS_SECTION_HEADING
 
 const WEB_PROVIDERS: {
   value: WebProviderId
@@ -153,7 +154,7 @@ export function WebTab() {
   return (
     <div className="space-y-6">
       <div className="space-y-2">
-        <h3 className={SECTION_HEADING}>Web Provider</h3>
+        <h3 className={SECTION_HEADING}>Web provider</h3>
         <p className="text-[11px] text-muted-foreground px-1">
           How your agents search the web and read pages. If you don&apos;t pick one, Gamut is
           used when you&apos;re signed in; otherwise Native.

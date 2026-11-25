@@ -5,7 +5,6 @@ import { useUser } from '@renderer/context/user-context'
 import { useGlobalInstructions, useUpdateSettings } from '@renderer/hooks/use-settings'
 import { GLOBAL_INSTRUCTIONS_MAX_LENGTH } from '@shared/lib/config/global-instructions-schema'
 
-const SECTION_HEADING = 'text-xs font-medium text-muted-foreground px-1'
 
 export function GlobalInstructionsTab() {
   const { isAuthMode, isAdmin } = useUser()
@@ -34,7 +33,6 @@ export function GlobalInstructionsTab() {
 
   return (
     <div className="space-y-2">
-      <h3 className={SECTION_HEADING}>Global guidance</h3>
       <Textarea
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
@@ -57,7 +55,7 @@ export function GlobalInstructionsTab() {
               {draft.length.toLocaleString()} / {GLOBAL_INSTRUCTIONS_MAX_LENGTH.toLocaleString()}
             </span>
             {hasChanges && (
-              <Button variant="outline" size="sm" onClick={() => setDraft(saved)} disabled={updateSettings.isPending}>
+              <Button variant="soft" size="sm" onClick={() => setDraft(saved)} disabled={updateSettings.isPending}>
                 Discard
               </Button>
             )}

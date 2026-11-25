@@ -373,7 +373,7 @@ export function UsageTab() {
 
             <Button
               size="sm"
-              variant="outline"
+              variant="soft"
               className="h-8 px-2.5 text-xs"
               onClick={() => refetch()}
               disabled={isFetching}

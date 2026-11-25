@@ -97,10 +97,6 @@ export function AuditLogTab() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <span className="text-sm font-medium">Audit Log</span>
-      </div>
-
       {/* Filters */}
       <div className="flex items-center gap-2">
         <Select value={objectFilter} onValueChange={setObjectFilter}>
@@ -215,7 +211,7 @@ export function AuditLogTab() {
           {totalPages > 1 && (
             <div className="flex items-center gap-2">
               <Button
-                variant="outline"
+                variant="soft"
                 size="sm"
                 className="h-7 w-7 p-0"
                 disabled={page === 0}
@@ -227,7 +223,7 @@ export function AuditLogTab() {
                 Page {page + 1} of {totalPages}
               </span>
               <Button
-                variant="outline"
+                variant="soft"
                 size="sm"
                 className="h-7 w-7 p-0"
                 disabled={page >= totalPages - 1}
