@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react'
+import { useState } from 'react'
 import { Button } from '@renderer/components/ui/button'
 import {
   AlertDialog,
@@ -14,31 +14,10 @@ import {
 import { useFactoryReset } from '@renderer/hooks/use-settings'
 import { RotateCcw, Bug } from 'lucide-react'
 import { DebugTab } from './debug-tab'
+import { SETTINGS_CARD_CLASS, SETTINGS_SECTION_HEADING, SettingRow } from './setting-row'
 
-const CARD_CLASS = 'rounded-card border bg-background divide-y divide-border/50 overflow-hidden'
-const SECTION_HEADING = 'text-xs font-medium text-muted-foreground px-1'
-
-interface SettingRowProps {
-  name: string
-  subtitle?: ReactNode
-  right: ReactNode
-}
-
-function SettingRow({ name, subtitle, right }: SettingRowProps) {
-  return (
-    <div className="py-3 px-4">
-      <div className="flex items-center gap-3">
-        <div className="min-w-0 flex-1">
-          <div className="text-xs font-medium truncate">{name}</div>
-          {subtitle && (
-            <div className="text-[11px] text-muted-foreground mt-0.5">{subtitle}</div>
-          )}
-        </div>
-        <div className="flex items-center gap-2 shrink-0">{right}</div>
-      </div>
-    </div>
-  )
-}
+const CARD_CLASS = SETTINGS_CARD_CLASS
+const SECTION_HEADING = SETTINGS_SECTION_HEADING
 
 export function AdminTab() {
   const factoryReset = useFactoryReset()
@@ -59,17 +38,16 @@ export function AdminTab() {
   return (
     <div className="space-y-6">
       <div className="space-y-2">
-        <h3 className={SECTION_HEADING}>Danger Zone</h3>
+        <h3 className={SECTION_HEADING}>Danger zone</h3>
         <div className={CARD_CLASS}>
           <SettingRow
-            name="Factory Reset"
-            subtitle="Delete all agents, sessions, files, and settings"
+            name="Delete all agents, sessions, files, and settings"
             right={
               <AlertDialog>
                 <AlertDialogTrigger asChild>
                   <Button variant="destructive" size="sm">
                     <RotateCcw className="h-4 w-4 mr-2" />
-                    Factory Reset
+                    Factory reset
                   </Button>
                 </AlertDialogTrigger>
                 <AlertDialogContent>
@@ -87,7 +65,7 @@ export function AdminTab() {
                       disabled={isResetting}
                       className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
                     >
-                      {isResetting ? 'Resetting...' : 'Reset Everything'}
+                      {isResetting ? 'Resetting...' : 'Reset everything'}
                     </AlertDialogAction>
                   </AlertDialogFooter>
                 </AlertDialogContent>

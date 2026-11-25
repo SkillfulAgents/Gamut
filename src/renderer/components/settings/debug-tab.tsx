@@ -167,9 +167,9 @@ export function DebugTab() {
       {/* Runtime / VM Status */}
       <Section title="Runtime & VM Status">
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={fetchRuntime} disabled={runtimeLoading}>
+          <Button variant="soft" size="sm" onClick={fetchRuntime} disabled={runtimeLoading}>
             {runtimeLoading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-2" />}
-            {runtimeInfo ? 'Refresh' : 'Load Status'}
+            {runtimeInfo ? 'Refresh' : 'Load status'}
           </Button>
         </div>
         {runtimeError && <p className="text-xs text-destructive">{runtimeError}</p>}
@@ -223,9 +223,9 @@ export function DebugTab() {
       {/* Containers */}
       <Section title="Containers">
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={fetchContainers} disabled={containersLoading}>
+          <Button variant="soft" size="sm" onClick={fetchContainers} disabled={containersLoading}>
             {containersLoading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Terminal className="h-4 w-4 mr-2" />}
-            {containers ? 'Refresh' : 'List Containers'}
+            {containers ? 'Refresh' : 'List containers'}
           </Button>
         </div>
         {containersError && <p className="text-xs text-destructive">{containersError}</p>}

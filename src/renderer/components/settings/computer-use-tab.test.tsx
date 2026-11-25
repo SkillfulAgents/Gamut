@@ -65,7 +65,7 @@ describe('ComputerUseTab', () => {
   it('shows the compact caution and card-based empty state without the old legend', () => {
     render(<ComputerUseTab />)
 
-    expect(screen.getByText('Persistent Permissions')).toBeInTheDocument()
+    expect(screen.getByText('Persistent permissions')).toBeInTheDocument()
     expect(
       screen.getByText('Agents you grant `always allow` computer use permissions will appear here.')
     ).toBeInTheDocument()
@@ -136,7 +136,7 @@ describe('ComputerUseTab', () => {
     render(<ComputerUseTab />)
 
     expect(screen.getByText('Not Available')).toBeInTheDocument()
-    expect(screen.queryByText('Persistent Permissions')).not.toBeInTheDocument()
+    expect(screen.queryByText('Persistent permissions')).not.toBeInTheDocument()
   })
 
   it('asks the agents’ machine, not this window’s', () => {
