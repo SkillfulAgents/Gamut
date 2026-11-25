@@ -24,6 +24,8 @@ export interface IntegrationSetupWizardAction {
 export interface IntegrationSetupWizardStep {
   /** What to do, as a short instruction: the step's name in the rail. */
   label: string
+  /** This step only opens once its prerequisite is complete. */
+  disabled?: boolean
   /** Shown above the instructions: something to decide before following them, such as a name. */
   lead?: ReactNode
   /** Where and how to do it. A place named here goes in `<strong>`. */
@@ -57,7 +59,7 @@ export interface IntegrationSetupWizardAside { label: string; busyLabel?: string
 /**
  * A provider's setup, one step at a time: the steps' names in a narrow rail
  * on the dialog's own surface (the ones before the current step ticked, the
- * ones after it grey, any of them clickable), the current step beside it.
+ * ones after it grey), the current step beside it.
  * Team Brain's set-up modal at the size of what a connection asks: the dialog
  * is only as large as the step in it.
  *
@@ -106,10 +108,10 @@ export function IntegrationSetupWizard({ provider, label, verb = 'Connect', head
           <ol className="-mx-2 space-y-0.5" aria-label="Setup steps">
             {steps.map((s, i) => (
               <li key={s.label} aria-current={i === index ? 'step' : undefined}>
-                <button type="button" onClick={() => onStepChange(i)} className={cn(
+                <button type="button" disabled={s.disabled} onClick={() => onStepChange(i)} className={cn(
                   'flex min-h-8 w-full items-start gap-2.5 rounded-md px-2 py-1.5 text-left text-sm transition-colors',
                   // The current step in a filled brand-blue pill, as in Team Brain's set-up.
-                  i === index ? 'bg-brand' : 'hover:bg-white/10',
+                  i === index ? 'bg-brand' : 'enabled:hover:bg-white/10',
                   i <= index ? 'text-white' : 'text-white/50',
                 )}>
                   {/* Numbered 01, 02…, as in Team Brain's set-up modal; the label's colour says done, open or to come. */}

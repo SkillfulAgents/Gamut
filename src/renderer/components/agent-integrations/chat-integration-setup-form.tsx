@@ -1,10 +1,5 @@
 /**
- * Chat integration setup form — provider-specific instructions and credentials.
- *
- * Opened from the agent home "Chat via …" rows or the Chat settings tab.
- * Renders provider-specific instructions, credential fields, credential
- * testing, and creation. One dialog instance handles a single provider; the
- * inner form is keyed by provider so state resets when the provider changes.
+ * Chat provider setup, including the manual Slack Socket Mode flow.
  */
 
 import { useState, type ReactNode } from 'react'
@@ -12,7 +7,7 @@ import { Button } from '@renderer/components/ui/button'
 import { ChatSetupBehavior, DEFAULT_CHAT_SETUP_BEHAVIOR, SETTINGS_STEP_LABEL, SETTINGS_STEP_SUBTITLE, slackBehaviorConfig } from './chat-setup-behavior'
 import { useIntegrationSetupName, type IntegrationSetupName } from './use-integration-setup-name'
 import type { IntegrationSetupProps } from './setup-types'
-import { IntegrationSetupField, IntegrationSetupFeedback, IntegrationSetupAdvanced, IntegrationSetupList, IntegrationSetupNote, IntegrationSetupCode } from './integration-setup-layout'
+import { IntegrationSetupField, IntegrationSetupFeedback, IntegrationSetupAdvanced, IntegrationSetupNote, IntegrationSetupCode } from './integration-setup-layout'
 import { IntegrationSetupWizard, IntegrationSetupWizardLink, type IntegrationSetupWizardStep } from './integration-setup-wizard'
 import {
   useCreateAgentIntegration,
@@ -25,6 +20,7 @@ import { SLACK_BOT_EVENTS, SLACK_BOT_SCOPES, slackAppManifest, type SlackAppIden
 import { useAgent } from '@renderer/hooks/use-agents'
 import { slackAppIconStep } from './slack-app-appearance'
 import { slackAppIdentity, type SlackAppAgent } from './slack-app-identity'
+import { TelegramSetupForm } from './telegram-setup-form'
 
 function generateSlackManifest(app: SlackAppIdentity): string {
   return JSON.stringify(slackAppManifest(app), null, 2)
@@ -59,25 +55,19 @@ function SlackNames({ names }: { names: string[] }) {
   </ul>
 }
 
+type ManualChatProvider = Exclude<ChatProvider, 'telegram'>
+
 /** Under each setup's heading: what connecting gets you. */
-const CHAT_DESCRIPTIONS: Record<ChatProvider, string> = {
-  telegram: 'Chat with this agent in Telegram, through a bot of its own.',
+const CHAT_DESCRIPTIONS: Record<ManualChatProvider, string> = {
   slack: 'DM this agent in Slack, or mention it in channels.',
   imessage: 'Text this agent from your phone.',
 }
 
-const PROVIDER_INFO: Record<ChatProvider, {
+const PROVIDER_INFO: Record<ManualChatProvider, {
   label: string
   /** `optional` fields sit under Options: the setup works without them. */
   fields: Array<{ key: string; label: string; placeholder: string; type: 'text' | 'password'; optional?: boolean }>
 }> = {
-  telegram: {
-    label: 'Telegram',
-    fields: [
-      { key: 'botToken', label: 'Bot Token', placeholder: '123456789:ABCdefGHIjklMNO…', type: 'password' as const },
-      { key: 'chatId', label: 'Chat ID', placeholder: 'Auto-detected on first message', type: 'text' as const, optional: true },
-    ],
-  },
   slack: {
     label: 'Slack',
     fields: [
@@ -98,14 +88,19 @@ const PROVIDER_INFO: Record<ChatProvider, {
 /** A wizard step, plus the required fields it holds: an empty one brings the person back to it. */
 type ChatSetupStep = IntegrationSetupWizardStep & { fields?: string[] }
 
-export function ChatIntegrationSetupForm(props: IntegrationSetupProps & { provider: ChatProvider }) {
+export function ChatIntegrationSetupForm({ provider, ...props }: IntegrationSetupProps & { provider: ChatProvider }) {
+  if (provider === 'telegram') return <TelegramSetupForm {...props} />
+  return <ManualChatSetupForm {...props} provider={provider} />
+}
+
+function ManualChatSetupForm(props: IntegrationSetupProps & { provider: ManualChatProvider }) {
   const { data: agent } = useAgent(props.agentSlug)
   const name = useIntegrationSetupName(agent?.name || props.agentSlug, props.initial?.name)
   return <ChatSetupSteps {...props} agent={agent} name={name} />
 }
 
 export function ChatSetupSteps({ agentSlug, provider, onClose, leading, agent, name }: IntegrationSetupProps & {
-  provider: ChatProvider
+  provider: ManualChatProvider
   agent: SlackAppAgent | undefined
   name: IntegrationSetupName
   leading?: ReactNode
@@ -122,10 +117,7 @@ export function ChatSetupSteps({ agentSlug, provider, onClose, leading, agent, n
 
   const info = PROVIDER_INFO[provider]
   const [step, setStep] = useState(0)
-  // Telegram's last step comes after connecting, so the dialog stays open once the bot is connected.
-  const [connected, setConnected] = useState(false)
-
-  const readOnly = connected || createIntegration.isPending
+  const readOnly = createIntegration.isPending
   const nameField = <IntegrationSetupField id="setup-integration-name" label={provider === 'slack' ? 'App name' : 'Integration name'} {...name.input} disabled={readOnly} />
 
   const field = (key: string, { label, verify, hideLabel }: { label?: string; verify?: boolean; hideLabel?: boolean } = {}) => {
@@ -133,7 +125,7 @@ export function ChatSetupSteps({ agentSlug, provider, onClose, leading, agent, n
     if (!spec) return null
     return <IntegrationSetupField
       key={spec.key} id={`setup-${spec.key}`} label={label ?? spec.label} hideLabel={hideLabel} optional={spec.optional}
-      action={verify && !connected ? verifyAction : undefined}
+      action={verify ? verifyAction : undefined}
       type={spec.type} value={formData[spec.key] || ''}
       onChange={e => setFormData({ ...formData, [spec.key]: e.target.value })}
       placeholder={spec.placeholder}
@@ -179,32 +171,7 @@ export function ChatSetupSteps({ agentSlug, provider, onClose, leading, agent, n
     return step ? [step] : []
   }
 
-  const providerSteps: ChatSetupStep[] = provider === 'telegram' ? [
-    {
-      // Making the bot and pasting its token are one sitting in BotFather's chat, so one step.
-      label: 'Create a bot',
-      content: <>
-        <IntegrationSetupList items={[
-          <>In Telegram, open a chat with <IntegrationSetupWizardLink href="https://t.me/BotFather">@BotFather</IntegrationSetupWizardLink>.</>,
-          <>Send <IntegrationSetupCode>/newbot</IntegrationSetupCode>.</>,
-          'Give the bot a name and a username ending in “bot”.',
-          // The last thing done in BotFather's chat, so the last instruction, with its field under it.
-          <>Paste the token BotFather sends back.<div className="mt-2">{field('botToken', { label: 'Paste the token BotFather sends back', verify: true, hideLabel: true })}</div></>,
-        ]} />
-      </>,
-      fields: ['botToken'],
-    },
-    {
-      ...optionsStep,
-      // Connecting moves on to saying hello; once connected, these steps are only for looking back.
-      action: connected ? undefined : connectAction,
-    },
-    {
-      label: 'Say hello',
-      subtitle: <>Open your new bot in Telegram and send <IntegrationSetupCode>/start</IntegrationSetupCode> to begin your first conversation with this agent.</>,
-      action: { label: 'Done', disabled: !connected, onClick: onClose },
-    },
-  ] : provider === 'imessage' ? [
+  const steps: ChatSetupStep[] = provider === 'imessage' ? [
     {
       label: 'Get a setup code',
       subtitle: <>From the phone you want to connect, text <IntegrationSetupCode>/setup</IntegrationSetupCode> to <PhoneNumberCopyButton />. You’ll get a 6-digit code back.</>,
@@ -292,14 +259,12 @@ export function ChatSetupSteps({ agentSlug, provider, onClose, leading, agent, n
     botTokenStep,
     optionsStep,
   ]
-  const steps = providerSteps
 
   // Returns an error message string when required fields are missing, else null.
   const validateRequired = (): string | null => {
     const missingRequired = info.fields.some((f) => !f.optional && !formData[f.key]?.trim())
     if (!missingRequired) return null
     if (provider === 'slack') return 'Paste the app token and the bot token first.'
-    if (provider === 'telegram') return 'Paste the bot token first.'
     return 'Enter your phone number and setup code first.'
   }
 
@@ -312,9 +277,7 @@ export function ChatSetupSteps({ agentSlug, provider, onClose, leading, agent, n
     }
     try {
       const result = await testCredentials.mutateAsync({ provider, config: formData })
-      const detail = provider === 'telegram'
-        ? `Bot: @${result.botUsername || result.botName}`
-        : provider === 'slack'
+      const detail = provider === 'slack'
         ? `Workspace: ${result.team}`
         : `Connected: ${result.phoneNumber || 'OK'}`
       setTestResult({ valid: true, info: detail })
@@ -344,7 +307,7 @@ export function ChatSetupSteps({ agentSlug, provider, onClose, leading, agent, n
         showToolCalls: behavior.showToolCalls,
         sessionTimeout: behavior.sessionTimeout,
       })
-      if (provider === 'telegram') { setConnected(true); setTestResult(null); setStep(steps.length - 1) } else onClose()
+      onClose()
     } catch {
       // Error surfaced via createIntegration.error
     }
@@ -354,9 +317,7 @@ export function ChatSetupSteps({ agentSlug, provider, onClose, leading, agent, n
     <IntegrationSetupWizard
       provider={provider}
       label={info.label}
-      heading={provider === 'telegram' ? 'Chat with this agent over Telegram' : undefined}
       description={CHAT_DESCRIPTIONS[provider]}
-      complete={connected}
       steps={steps}
       step={step}
       // A check's result belongs to the step it was made on.
@@ -373,7 +334,7 @@ export function ChatSetupSteps({ agentSlug, provider, onClose, leading, agent, n
           </IntegrationSetupFeedback>
         )}
       </>}
-      finish={provider === 'telegram' ? undefined : connectAction}
+      finish={connectAction}
     />
   )
 }

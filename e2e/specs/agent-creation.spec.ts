@@ -270,12 +270,18 @@ test('removing Dream before leaving the wizard clears its first-job instruction'
 
 test('Telegram setup returns to the wizard after connecting', async ({ page }) => {
   await page.route('**/api/agent-integrations/providers', route => route.fulfill({ json: [{ provider: 'telegram' }, { provider: 'linear' }] }))
+  await page.route('**/api/agent-integrations/test-credentials', route => {
+    const { botToken } = route.request().postDataJSON().config
+    return botToken === 'fixture-token'
+      ? route.fulfill({ json: { valid: true, botName: 'Research Desk', botUsername: 'research_desk_bot' } })
+      : route.fulfill({ status: 400, json: { valid: false, error: 'Invalid bot token' } })
+  })
   let connected = false
   await page.route('**/api/agent-integrations/agents/*', route => {
     const agentSlug = route.request().url().split('/').pop()!
     const record = { id: 'test-telegram', agentSlug, provider: 'telegram', status: 'active', connected: true, hasCredentials: true }
     if (route.request().method() === 'POST') {
-      expect(route.request().postDataJSON().provider).toBe('telegram')
+      expect(route.request().postDataJSON()).toMatchObject({ provider: 'telegram', name: 'Research Desk', config: { botToken: 'fixture-token' } })
       connected = true
       return route.fulfill({ status: 201, json: record })
     }
@@ -305,8 +311,14 @@ test('Telegram setup returns to the wizard after connecting', async ({ page }) =
   await telegram.click()
   const dialog = page.getByRole('dialog')
   await dialog.getByTestId('integration-setup-start').click()
+  await dialog.getByTestId('integration-setup-next').click()
+  await expect(dialog.getByRole('alert')).toHaveText('Paste the bot token first.')
+  await dialog.getByLabel('Paste the token BotFather sends back').fill('wrong-token')
+  await dialog.getByRole('button', { name: 'Review settings' }).click()
+  await expect(dialog.getByRole('alert')).toHaveText('Invalid bot token')
   await dialog.getByLabel('Paste the token BotFather sends back').fill('fixture-token')
   await dialog.getByTestId('integration-setup-next').click()
+  await expect(dialog.getByLabel('Integration name')).toHaveValue('Research Desk')
   await dialog.getByRole('button', { name: 'Connect', exact: true }).click()
   // Connecting moves on to saying hello to the bot; Done closes the setup.
   await dialog.getByRole('button', { name: 'Done' }).click()
