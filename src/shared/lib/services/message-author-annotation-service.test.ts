@@ -1,3 +1,4 @@
+// @libsql-must-pass
 /**
  * The messages API's author read against a real database: one statement per
  * response whatever its size, a fixed number of bound parameters, and the same

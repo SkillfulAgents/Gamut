@@ -1,3 +1,4 @@
+// @libsql-must-pass
 /**
  * Better Auth reads a session with its user, an account with its user, and a user with their
  * accounts. On the real endpoints and adapter: each is one query through the schema's relations,

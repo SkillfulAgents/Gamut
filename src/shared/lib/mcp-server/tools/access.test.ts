@@ -1,3 +1,4 @@
+// @libsql-must-pass
 /**
  * What a tool lets a person see, decided by their own access: drive
  * visibility (public drives and their own, `selectableVolumes`) and their

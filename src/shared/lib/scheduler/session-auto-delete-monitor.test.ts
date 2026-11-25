@@ -1,3 +1,4 @@
+// @libsql-must-pass
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import type { AgentConfig, SessionInfo } from '@shared/lib/types/agent'
 import { perTestDatabase } from '@shared/lib/db/testing/per-test-database'

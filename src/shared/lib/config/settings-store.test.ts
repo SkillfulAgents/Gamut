@@ -1,3 +1,4 @@
+// @libsql-must-pass
 /**
  * Settings stored as an app record: fresh reads, fail-closed writes, and
  * revision compare-and-set instead of a process cache or a transaction.

@@ -1,3 +1,4 @@
+// @libsql-must-pass
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { Hono } from 'hono'
 import { APP_VERSION } from '@shared/lib/config/version'

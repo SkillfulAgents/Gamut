@@ -1,3 +1,4 @@
+// @libsql-must-pass
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { eq } from 'drizzle-orm'
 import { setMaxBoundParameters } from '@shared/lib/db/bound-parameters'

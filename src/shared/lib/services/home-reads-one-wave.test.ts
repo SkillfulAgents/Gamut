@@ -1,3 +1,4 @@
+// @libsql-must-pass
 /**
  * The home graph and the activity statistics read several tables that do not
  * depend on one another. On a driver where a statement is a network round

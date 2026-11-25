@@ -1,3 +1,4 @@
+// @libsql-must-pass
 import { DeliveryError } from '../agent-actor/delivery-errors'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { registerTasks } from '@shared/lib/background-work/testing/register-tasks'

@@ -1,3 +1,4 @@
+// @libsql-must-pass
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { backgroundSettled } from '@shared/lib/background'
 import { eq } from 'drizzle-orm'

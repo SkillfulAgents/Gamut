@@ -1,3 +1,4 @@
+// @libsql-must-pass
 import { CredentialRefreshError } from '../../../../agent-container/src/credential-refresh-error'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { eq } from 'drizzle-orm'

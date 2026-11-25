@@ -1,3 +1,4 @@
+// @libsql-must-pass
 /**
  * Host-browser context mappings (browserbase-provider / platform-provider),
  * one app record per key. Creating a context is a paid network call, so a

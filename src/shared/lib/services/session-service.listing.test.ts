@@ -1,3 +1,4 @@
+// @libsql-must-pass
 /**
  * The visible-session listing contract, pinned on a real filesystem.
  *

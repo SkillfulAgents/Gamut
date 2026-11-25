@@ -1,3 +1,4 @@
+// @libsql-must-pass
 /**
  * Pins how SQLite answers the hot per-agent reads after migration 0069: which
  * index each one seeks on, and that the ones meant to skip a sort or a table

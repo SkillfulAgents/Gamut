@@ -1,3 +1,4 @@
+// @libsql-must-pass
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import type { AppDatabase } from '@shared/lib/db/drivers/types'
 import { createTestDatabase, type TestDatabase } from '@shared/lib/db/testing/create-test-database'

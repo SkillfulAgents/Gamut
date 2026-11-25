@@ -1,3 +1,4 @@
+// @libsql-must-pass
 /**
  * The Linear connector in relay mode: the app's webhooks arrive through the
  * host's webhook relay (faked here), are verified, read back by id from

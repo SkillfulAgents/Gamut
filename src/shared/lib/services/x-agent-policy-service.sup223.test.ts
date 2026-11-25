@@ -1,3 +1,4 @@
+// @libsql-must-pass
 /**
  * SUP-223 regression tests.
  *
