@@ -85,8 +85,8 @@ export function SessionTimeoutSelect({ value, onCommit, disabled, id, descriptio
   id: string
   /** Short helper text shown under the label (inline layout only). */
   description?: string
-  /** `inline` puts the label/control on one row (settings card); `stacked` keeps the label above (setup dialog). */
-  layout?: 'inline' | 'stacked'
+  /** `inline` puts the label/control on one row (settings card); `setup` does too, at the setup dialog's size; `stacked` keeps the label above. */
+  layout?: 'inline' | 'setup' | 'stacked'
   /** Override the row padding for the stacked layout (the setup dialog passes its own). */
   wrapperClassName?: string
 }) {
@@ -103,7 +103,9 @@ export function SessionTimeoutSelect({ value, onCommit, disabled, id, descriptio
       disabled={disabled}
       onValueChange={(v) => onCommit(v === 'never' ? null : parseInt(v, 10))}
     >
-      <SelectTrigger id={id} className={layout === 'inline' ? undefined : 'h-7'}>
+      <SelectTrigger id={id} className={layout === 'inline' ? undefined
+        : layout === 'setup' ? 'h-7 w-auto shrink-0 gap-1.5 border-0 bg-transparent px-2 text-xs text-muted-foreground shadow-none hover:bg-muted hover:text-foreground'
+          : 'h-7'}>
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
@@ -115,6 +117,16 @@ export function SessionTimeoutSelect({ value, onCommit, disabled, id, descriptio
       </SelectContent>
     </Select>
   )
+
+  if (layout === 'setup') {
+    // A row of the setup's settings box: the same height and padding as its toggle rows.
+    return (
+      <div className="flex min-h-11 items-center justify-between gap-4 px-3.5 py-2">
+        <Label htmlFor={id} className="text-xs font-normal">{TIMEOUT_LABEL}</Label>
+        <div className="-mr-2">{select}</div>
+      </div>
+    )
+  }
 
   if (layout === 'inline') {
     return (

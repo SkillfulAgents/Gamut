@@ -29,7 +29,9 @@ test.describe('Integration setup request', () => {
 
     await card.getByTestId('integration-setup-open-btn').click()
     const dialog = page.getByRole('dialog')
-    await expect(dialog.getByLabel('Integration name')).toHaveValue('Support Triage')
+    await dialog.getByTestId('integration-setup-start').click()
+    await expect(dialog.getByLabel('App name')).toHaveValue('Support Triage')
+    await dialog.getByLabel('App name').fill('Customer Support')
     await page.keyboard.press('Escape')
     await expect(dialog).toBeHidden()
     // Closing the form leaves the ask open.

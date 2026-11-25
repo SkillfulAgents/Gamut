@@ -20,7 +20,7 @@ const VARIANTS = {
 /** Hover or focus to preview the roster; clicking pins it for sharing. */
 export function MemberRosterPopover({
   users, agents, count = users.length + (agents?.length ?? 0), maxFaces = 5, variant = 'page', label, title, rosterLabel,
-  className, contentClassName, trigger, testIds, children,
+  className, contentClassName, trigger, align, testIds, children,
 }: {
   users: readonly UserSummary[]
   agents?: readonly MemberAgent[]
@@ -33,6 +33,8 @@ export function MemberRosterPopover({
   className?: string
   contentClassName?: string
   trigger?: ReactNode
+  /** Which edge of the trigger the roster lines up with, where the variant's own isn't right. */
+  align?: 'start' | 'end'
   testIds?: { trigger: string; count: string; list: string }
   children: ReactNode
 }) {
@@ -112,7 +114,7 @@ export function MemberRosterPopover({
       </PopoverTrigger>
       <PopoverContent
         ref={contentRef}
-        align={variant === 'sidebar' ? 'start' : 'end'}
+        align={align ?? (variant === 'sidebar' ? 'start' : 'end')}
         side={isMobile || variant === 'page' ? 'bottom' : 'right'}
         sideOffset={12}
         collisionPadding={12}

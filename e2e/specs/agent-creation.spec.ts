@@ -1,6 +1,8 @@
+import { randomUUID } from 'node:crypto'
 import { test, expect, type Page } from '@playwright/test'
 import { AppPage } from '../pages/app.page'
 import { AgentPage } from '../pages/agent.page'
+import { openHomeSection } from '../helpers/agent-home'
 
 test.beforeEach(async ({ page }) => {
   const app = new AppPage(page)
@@ -11,7 +13,7 @@ test.beforeEach(async ({ page }) => {
 test('refresh and Skip keep one named agent with no sessions', async ({ page, request }) => {
   const agentPage = new AgentPage(page)
   await agentPage.clickCreateAgent()
-  const name = `Research ${Date.now()}`
+  const name = `Research ${randomUUID()}`
   const created = page.waitForResponse(r => r.url().endsWith('/api/agents') && r.request().method() === 'POST' && r.status() === 201)
   await agentPage.nameNewAgent(name)
   const agent = await (await created).json()
@@ -36,7 +38,7 @@ test('refresh while the creation response is in flight resumes the same agent an
     // Let the server create the agent, but withhold the response from this document.
     await route.fetch()
   })
-  const name = `Planner ${Date.now()}`
+  const name = `Planner ${randomUUID()}`
   await agentPage.nameNewAgent(name)
   const prompt = page.getByTestId('create-agent-prompt')
   await prompt.fill('Write a weekly brief')
@@ -269,12 +271,18 @@ test('removing Dream before leaving the wizard clears its first-job instruction'
 
 test('Telegram setup returns to the wizard after connecting', async ({ page }) => {
   await page.route('**/api/agent-integrations/providers', route => route.fulfill({ json: [{ provider: 'telegram' }, { provider: 'linear' }] }))
+  await page.route('**/api/agent-integrations/test-credentials', route => {
+    const { botToken } = route.request().postDataJSON().config
+    return botToken === 'fixture-token'
+      ? route.fulfill({ json: { valid: true, botName: 'Research Desk', botUsername: 'research_desk_bot' } })
+      : route.fulfill({ status: 400, json: { valid: false, error: 'Invalid bot token' } })
+  })
   let connected = false
   await page.route('**/api/agent-integrations/agents/*', route => {
     const agentSlug = route.request().url().split('/').pop()!
     const record = { id: 'test-telegram', agentSlug, provider: 'telegram', status: 'active', connected: true, hasCredentials: true }
     if (route.request().method() === 'POST') {
-      expect(route.request().postDataJSON().provider).toBe('telegram')
+      expect(route.request().postDataJSON()).toMatchObject({ provider: 'telegram', name: 'Research Desk', config: { botToken: 'fixture-token' } })
       connected = true
       return route.fulfill({ status: 201, json: record })
     }
@@ -295,12 +303,26 @@ test('Telegram setup returns to the wizard after connecting', async ({ page }) =
   await expect(github).toHaveAccessibleDescription(/webhook relay/)
   await expect(page.getByRole('button', { name: 'Set up Meetings' })).toBeDisabled()
   await page.getByRole('button', { name: 'Set up Linear' }).click()
+  // Each setup opens on its intro; its keys are on the second step. The rail goes there: the first step's own
+  // button opens Linear.
+  await page.getByRole('dialog').getByTestId('integration-setup-start').click()
+  await page.getByRole('dialog').getByRole('button', { name: 'Paste the keys' }).click()
   await expect(page.getByRole('dialog').getByLabel('Client ID')).toBeVisible()
   await page.keyboard.press('Escape')
   await telegram.click()
   const dialog = page.getByRole('dialog')
-  await dialog.getByLabel('Bot Token').fill('fixture-token')
+  await dialog.getByTestId('integration-setup-start').click()
+  await dialog.getByTestId('integration-setup-next').click()
+  await expect(dialog.getByRole('alert')).toHaveText('Paste the bot token first.')
+  await dialog.getByLabel('Paste the token BotFather sends back').fill('wrong-token')
+  await dialog.getByRole('button', { name: 'Review settings' }).click()
+  await expect(dialog.getByRole('alert')).toHaveText('Invalid bot token')
+  await dialog.getByLabel('Paste the token BotFather sends back').fill('fixture-token')
+  await dialog.getByTestId('integration-setup-next').click()
+  await expect(dialog.getByLabel('Integration name')).toHaveValue('Research Desk')
   await dialog.getByRole('button', { name: 'Connect', exact: true }).click()
+  // Connecting moves on to saying hello to the bot; Done closes the setup.
+  await dialog.getByRole('button', { name: 'Done' }).click()
   await expect(dialog).toBeHidden()
   await expect(page.getByRole('button', { name: 'Configured Telegram' })).toBeDisabled()
   await expect(page.getByTestId('create-agent-finish')).toBeEnabled()
@@ -340,7 +362,8 @@ test('deferred channels survive reload, reopen from Agent Home, and dismiss inde
   await dismissSlack.click()
   await expect(panel.getByText('Slack')).toBeHidden()
   await panel.getByRole('button', { name: 'Finish setup Telegram' }).click()
-  await expect(dialog.getByLabel('Bot Token')).toBeVisible()
+  await dialog.getByTestId('integration-setup-start').click()
+  await expect(dialog.getByLabel('Paste the token BotFather sends back')).toBeVisible()
   await page.keyboard.press('Escape')
   expect(await (await request.get(reminders)).json()).toEqual({ steps: [{ type: 'channel', provider: 'telegram' }] })
   await panel.getByRole('heading').hover()
@@ -355,17 +378,45 @@ test('deferred channels survive reload, reopen from Agent Home, and dismiss inde
   expect(await (await request.get(reminders)).json()).toEqual({ steps: [] })
 })
 
-test('the defer action stays visible beneath long Slack instructions on a small phone', async ({ page }) => {
+test('the defer action stays visible beside Get started on Slack\'s intro on a small phone', async ({ page }) => {
   await reachAddons(page)
   await page.setViewportSize({ width: 320, height: 568 })
   await page.getByRole('button', { name: 'Set up Slack' }).click()
-  const dialog = page.getByRole('dialog', { name: 'Set up integration with Slack' })
-  await expect(dialog.getByTestId('integration-setup-layout')).toBeVisible()
+  const dialog = page.getByRole('dialog', { name: /Add this agent to Slack/ })
+  await expect(dialog.getByTestId('integration-setup-start')).toBeInViewport({ ratio: 1 })
   const defer = dialog.getByRole('button', { name: 'Set this up later' })
   await expect(defer).toBeInViewport({ ratio: 1 })
   await defer.click()
   await expect(dialog).toBeHidden()
   await expect(page.getByRole('button', { name: 'Set up Slack, saved for later' })).toBeEnabled()
+})
+
+test('Agent Home can defer Linear from a phone on the keys step, even for a long agent name', async ({ page, context, request }) => {
+  await page.route('**/api/agent-integrations/providers', route => route.fulfill({ json: [{ provider: 'linear' }] }))
+  await context.route('https://linear.app/**', route => route.fulfill({ body: 'Linear app creation' }))
+  await page.setViewportSize({ width: 320, height: 568 })
+  const name = 'Release Notes Assistant '.repeat(4).trim()
+  const agent = await new AgentPage(page).openEmptyAgent(name)
+  const reminders = `/api/agent-integrations/agents/${agent.slug}/finished-setup`
+  await openHomeSection(page, 'External Integrations')
+  const setup = page.getByRole('button', { name: 'Set up Linear' })
+  const dialog = page.getByRole('dialog', { name: /Linear/ })
+  await setup.click()
+  await page.keyboard.press('Escape')
+  await expect(dialog).toBeHidden()
+  expect(await (await request.get(reminders)).json()).toEqual({ steps: [] })
+  await setup.click()
+  await dialog.getByTestId('integration-setup-start').click()
+  await expect(dialog.getByLabel('App name')).toHaveValue(name.slice(0, 80))
+  await dialog.getByTestId('linear-create-app').click()
+  await expect(dialog.getByLabel('Client ID')).toBeVisible()
+  const defer = dialog.getByRole('button', { name: 'Set this up later' })
+  await expect(defer).toBeInViewport({ ratio: 1 })
+  await defer.click()
+  await expect(dialog).toBeHidden()
+  await page.reload()
+  await expect(page.getByRole('button', { name: 'Finish setup Linear' })).toBeVisible()
+  expect(await (await request.get(reminders)).json()).toEqual({ steps: [{ type: 'channel', provider: 'linear' }] })
 })
 
 for (const surface of ['the wizard', 'Agent Home']) {

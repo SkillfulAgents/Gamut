@@ -20,6 +20,7 @@ export interface IntegrationSetupProps {
 export interface IntegrationSetupProvider {
   slug: AgentIntegrationProvider
   label: string
+  /** What connecting it gets you, in a few words, for the list of providers. */
   description: string
   unavailableReason?: string
   managementAccess?: 'user' | 'owner'

@@ -12,13 +12,17 @@ const ICON_SIZE = 1024
  * The agent's avatar as an app icon, for any provider's app: the orb at rest
  * on a pale wash of its rim (`orbGround`, shared with its face in a stack of
  * people), so every colourway (the black one too) stands off the background
- * it is shown on.
+ * it is shown on. As the SVG the PNG is made from, `size` px square.
  */
-export async function agentAppIcon(agent: AppIconAgent): Promise<Blob> {
+export function agentAppIconSvg(agent: AppIconAgent, size = ICON_SIZE): string {
   if (!agent.avatar) throw new Error('This agent has no avatar')
   const { orb, shape } = avatarSource(agent.avatar)
-  const svg = orbSvg({ orb, shape, restingPhi: orbRestingPhi(agent.slug), size: ICON_SIZE, fill: ORB_ON_GROUND_FILL, background: orbGround(orb) })
-  return svgToPng(svg, ICON_SIZE)
+  return orbSvg({ orb, shape, restingPhi: orbRestingPhi(agent.slug), size, fill: ORB_ON_GROUND_FILL, background: orbGround(orb) })
+}
+
+/** The app icon as the PNG a provider takes. */
+export async function agentAppIcon(agent: AppIconAgent): Promise<Blob> {
+  return svgToPng(agentAppIconSvg(agent), ICON_SIZE)
 }
 
 /** The agent's app icon as a base64 PNG, to send to the host (which uploads it to an app a directory created). */

@@ -15,7 +15,7 @@ let client: QueryClient
 let connected: boolean
 let failAuthorization: boolean
 const onClose = vi.fn()
-const integration = () => ({ ...makeChatIntegration(), id: 'github-1', agentSlug: 'a', provider: 'github', settings: {}, hasCredentials: connected, authorizationPendingUntil: connected ? undefined : Date.now() + 900000 })
+const integration = () => ({ ...makeChatIntegration(), id: 'github-1', agentSlug: 'a', provider: 'github', settings: connected ? { botLogin: 'triage-helper-42[bot]' } : {}, hasCredentials: connected, authorizationPendingUntil: connected ? undefined : Date.now() + 900000 })
 const creates = () => mocks.request.mock.calls.filter(([url, options]) => url === '/api/agent-integrations/agents/a' && options?.method === 'POST')
 function renderForm() { return render(<QueryClientProvider client={client}><Dialog open><DialogContent><GitHubSetupForm agentSlug="a" onClose={onClose} /></DialogContent></Dialog></QueryClientProvider>) }
 beforeEach(() => {
@@ -28,28 +28,55 @@ beforeEach(() => {
   })
 })
 afterEach(() => client.clear())
+// The account is chosen first; creating the app is the step after it.
+const next = () => fireEvent.click(screen.getByTestId('integration-setup-next'))
 it('uses the shared modal and creates nothing until the user continues', async () => {
   renderForm()
+  expect(screen.getByTestId('integration-setup-wizard')).toBeInTheDocument()
+  // Their own account unless they say otherwise, with no name to type for it.
+  expect(screen.getByRole('radio', { name: 'Your personal account' })).toBeChecked()
+  expect(screen.queryByLabelText('Organization name')).toBeNull()
+  next()
   await waitFor(() => expect(screen.getByRole('button', { name: 'Connect GitHub' })).toBeEnabled())
-  expect(screen.getByTestId('integration-setup-layout')).toBeInTheDocument()
-  expect(screen.getByLabelText('Integration name')).toHaveValue('Release Assistant')
+  expect(screen.getByRole('textbox', { name: 'App name' })).toHaveValue('Release Assistant')
   expect(creates()).toHaveLength(0)
 })
-it('launches the manifest flow and closes only when the callback has completed installation', async () => {
+it('previews how to use GitHub before installation without marking setup complete', () => {
   renderForm()
+  fireEvent.click(screen.getByRole('button', { name: 'Using GitHub' }))
+  expect(screen.getByText('Installing the app completes setup.')).toBeVisible()
+  expect(screen.getByRole('blockquote')).toHaveTextContent('@your-app-handle could you add a test for this case?')
+  expect(screen.getByRole('button', { name: 'Done' })).toBeDisabled()
+  expect(creates()).toHaveLength(0)
+})
+it('finishes setup on installation and shows a sample comment with the installed app’s handle', async () => {
+  renderForm()
+  fireEvent.click(screen.getByRole('radio', { name: 'An organization' }))
+  // An organization needs its name before the setup can move on.
+  expect(screen.getByTestId('integration-setup-next')).toBeDisabled()
+  fireEvent.change(screen.getByLabelText('Organization name'), { target: { value: ' team ' } })
+  next()
   await waitFor(() => expect(screen.getByRole('button', { name: 'Connect GitHub' })).toBeEnabled())
-  fireEvent.change(screen.getByLabelText('GitHub organization (optional)'), { target: { value: 'team' } })
+  fireEvent.change(screen.getByRole('textbox', { name: 'App name' }), { target: { value: 'Triage Bot' } })
   fireEvent.click(screen.getByRole('button', { name: 'Connect GitHub' }))
   await waitFor(() => expect(fakeLoginWindow.navigate).toHaveBeenCalledWith(expect.stringContaining('/providers/github/launch?state=')))
-  expect(JSON.parse(creates()[0][1].body)).toMatchObject({ provider: 'github', config: { organization: 'team' } })
+  expect(JSON.parse(creates()[0][1].body)).toMatchObject({ provider: 'github', name: 'Triage Bot', config: { organization: 'team' } })
   expect(onClose).not.toHaveBeenCalled()
   connected = true
   await client.invalidateQueries({ queryKey: agentIntegrationKeys.detail('github-1') })
-  await waitFor(() => expect(onClose).toHaveBeenCalledOnce())
+  await waitFor(() => expect(screen.getByTestId('integration-setup-step')).toHaveAttribute('data-step', '3'))
+  expect(screen.getByText('GitHub is connected.')).toBeVisible()
+  expect(screen.getByText(/ask your agent in Gamut to read code or open a pull request/)).toBeVisible()
+  expect(screen.getByRole('blockquote')).toHaveTextContent('@triage-helper-42 could you add a test for this case?')
   expect(fakeLoginWindow.close).toHaveBeenCalled()
+  expect(onClose).not.toHaveBeenCalled()
+  expect(screen.getByRole('button', { name: 'Done' })).toBeEnabled()
+  fireEvent.click(screen.getByRole('button', { name: 'Done' }))
+  expect(onClose).toHaveBeenCalledOnce()
 })
 it('retries setup on the same row after a failed authorization launch', async () => {
   failAuthorization = true; renderForm()
+  next()
   await waitFor(() => expect(screen.getByRole('button', { name: 'Connect GitHub' })).toBeEnabled())
   fireEvent.click(screen.getByRole('button', { name: 'Connect GitHub' }))
   expect(await screen.findByRole('alert')).toHaveTextContent('Relay unavailable')
@@ -57,6 +84,22 @@ it('retries setup on the same row after a failed authorization launch', async ()
   fireEvent.click(screen.getByRole('button', { name: 'Continue setup' }))
   await waitFor(() => expect(fakeLoginWindow.navigate).toHaveBeenCalled())
   expect(creates()).toHaveLength(1)
+})
+it('sends someone who skipped ahead back for the organization’s name, and forgets a name once the choice is their own account', async () => {
+  renderForm()
+  fireEvent.click(screen.getByRole('radio', { name: 'An organization' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Create the app' }))
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Connect GitHub' })).toBeEnabled())
+  fireEvent.click(screen.getByRole('button', { name: 'Connect GitHub' }))
+  expect(await screen.findByRole('alert')).toHaveTextContent('Enter the organization’s name first.')
+  expect(screen.getByTestId('integration-setup-step')).toHaveAttribute('data-step', '1')
+  expect(creates()).toHaveLength(0)
+  fireEvent.change(screen.getByLabelText('Organization name'), { target: { value: 'team' } })
+  fireEvent.click(screen.getByRole('radio', { name: 'Your personal account' }))
+  next()
+  fireEvent.click(screen.getByRole('button', { name: 'Connect GitHub' }))
+  await waitFor(() => expect(creates()).toHaveLength(1))
+  expect(JSON.parse(creates()[0][1].body).config).toEqual({})
 })
 
 it('shows the connected bot identity and reuses the same authorization flow for reconnect', async () => {
