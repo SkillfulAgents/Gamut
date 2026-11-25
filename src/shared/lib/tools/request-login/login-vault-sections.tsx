@@ -178,7 +178,7 @@ export function SaveToggle({ checked, onCheckedChange, site, username, disabled 
         checked={checked}
         onCheckedChange={onCheckedChange}
         disabled={disabled}
-        // On, it takes Sign in's blue: the two go together.
+        // On, it takes Submit's blue: the two go together.
         className="data-[state=checked]:bg-blue-600"
         data-testid="login-save"
         aria-describedby="login-save-hint"

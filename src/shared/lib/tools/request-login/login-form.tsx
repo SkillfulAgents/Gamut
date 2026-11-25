@@ -751,7 +751,7 @@ export function LoginForm({
             disabled={busy || !located || !!unavailable}
             data-testid="login-submit"
           >
-            {!secret ? 'Continue' : canSave && save ? 'Sign in and save' : 'Sign in'}
+            {secret ? 'Submit' : 'Continue'}
           </Button>
         </LoginActionRow>
       )}
