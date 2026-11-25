@@ -1,8 +1,8 @@
-import { useEffect, useRef, type ReactElement, type ReactNode } from 'react'
-import { cn } from '@shared/lib/utils/cn'
+import { useEffect, useRef, type ReactElement } from 'react'
 import { getPlatform } from '@renderer/lib/env'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@renderer/components/ui/dialog'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@renderer/components/ui/tooltip'
+import { Kbd } from '@renderer/components/ui/kbd'
 
 /*
  * Keyboard shortcuts for the Todo board, in the Linear style: single keys
@@ -48,20 +48,6 @@ export function usePlainKeys(handler: (event: KeyboardEvent) => boolean, enabled
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [enabled])
-}
-
-/** One key, drawn as a small chip. */
-export function Kbd({ children, className }: { children: ReactNode; className?: string }) {
-  return (
-    <kbd
-      className={cn(
-        'inline-flex h-5 min-w-5 items-center justify-center rounded border border-border/60 bg-muted px-1 font-sans text-[11px] font-medium leading-none text-muted-foreground',
-        className,
-      )}
-    >
-      {children}
-    </kbd>
-  )
 }
 
 /**
