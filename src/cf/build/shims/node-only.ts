@@ -7,7 +7,7 @@
  *   throws in a Worker. Computer use never runs on Cloudflare.
  * - `undici`: the MCP fetch pins DNS answers with an undici `Agent` as `dispatcher`. A Worker's fetch
  *   ignores `dispatcher`, and Cloudflare does not route a Worker's fetch to private addresses, so
- *   this `Agent` does nothing.
+ *   this `Agent` does nothing, and neither does the `Dispatcher1Wrapper` that hands it to fetch.
  */
 const unavailable = () => new Error('This Node-only package is not available in a Worker')
 
@@ -41,3 +41,5 @@ export class Agent {
     return Promise.resolve()
   }
 }
+
+export class Dispatcher1Wrapper extends Agent {}
