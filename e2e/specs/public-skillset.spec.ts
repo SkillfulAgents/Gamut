@@ -21,7 +21,7 @@ test.describe('Public Skillset Provider', () => {
     // testid rather than a button role.
     await page.locator('[data-testid="settings-nav-skillsets"]').click()
 
-    const publicRow = page.locator('div.flex.items-start.gap-3').filter({ hasText: 'E2E Public Skillset' })
+    const publicRow = page.locator('[data-testid="skillset-row"]').filter({ hasText: 'E2E Public Skillset' })
     await expect(publicRow).toBeVisible({ timeout: 10000 })
     await expect(publicRow.getByText('2 skills')).toBeVisible()
     await expect(publicRow.getByText('Public', { exact: true })).toBeVisible()

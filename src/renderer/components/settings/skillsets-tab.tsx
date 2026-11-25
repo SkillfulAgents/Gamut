@@ -1,7 +1,17 @@
 import { useState } from 'react'
 import { Input } from '@renderer/components/ui/input'
+import { Label } from '@renderer/components/ui/label'
 import { Button } from '@renderer/components/ui/button'
 import { Alert, AlertDescription } from '@renderer/components/ui/alert'
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@renderer/components/ui/collapsible'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@renderer/components/ui/dialog'
 import { offersPrivateSkillsets } from '@renderer/lib/capabilities'
 import {
   useSkillsets,
@@ -13,39 +23,45 @@ import {
 } from '@renderer/hooks/use-skillsets'
 import {
   AlertTriangle,
+  ChevronDown,
   ExternalLink,
   KeyRound,
   Loader2,
+  Plus,
   Trash2,
   RefreshCw,
-  Library,
   X,
 } from 'lucide-react'
+import { cn } from '@shared/lib/utils/cn'
+import { SETTINGS_CARD_CLASS } from './setting-row'
+import { SettingsHeaderActions } from './settings-page'
 
-export function SkillsetsTab() {
-  const { data: skillsets, isLoading } = useSkillsets()
+/**
+ * The form that adds a skillset repository, in a dialog off the page title's Add button: the page itself is the
+ * list of what is already added.
+ */
+function AddSkillsetDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
   const validateSkillset = useValidateSkillset()
   const addSkillset = useAddSkillset()
-  const removeSkillset = useRemoveSkillset()
-  const refreshSkillset = useRefreshSkillset()
-  const updateCredential = useUpdateSkillsetCredential()
   // A private repository clones on the server, which a sandboxed build can't do.
   const privateSkillsets = offersPrivateSkillsets()
   const [urlInput, setUrlInput] = useState('')
   const [tokenInput, setTokenInput] = useState('')
-  const [editingCredentialId, setEditingCredentialId] = useState<string | null>(null)
-  const [replacementToken, setReplacementToken] = useState('')
-  const [credentialError, setCredentialError] = useState<{
-    skillsetId: string
-    message: string
-  } | null>(null)
   const [validationResult, setValidationResult] = useState<{
     valid: boolean
     error?: string
   } | null>(null)
 
+  const isBusy = validateSkillset.isPending || addSkillset.isPending
+
+  const reset = () => {
+    setUrlInput('')
+    setTokenInput('')
+    setValidationResult(null)
+  }
+
   const handleValidateAndAdd = async () => {
-    if (!urlInput.trim()) return
+    if (!urlInput.trim() || isBusy) return
     setValidationResult(null)
 
     try {
@@ -54,9 +70,8 @@ export function SkillsetsTab() {
 
       if (result.valid) {
         await addSkillset.mutateAsync(input)
-        setUrlInput('')
-        setTokenInput('')
-        setValidationResult(null)
+        reset()
+        onOpenChange(false)
       } else {
         setValidationResult({ valid: false, error: result.error })
       }
@@ -68,7 +83,152 @@ export function SkillsetsTab() {
     }
   }
 
-  const isBusy = validateSkillset.isPending || addSkillset.isPending
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (!next) reset()
+        onOpenChange(next)
+      }}
+    >
+      <DialogContent data-testid="skillsets-add-dialog">
+        <DialogHeader>
+          <DialogTitle>Add a skillset</DialogTitle>
+          <DialogDescription>
+            A git repository of skills your agents can discover and install. It needs an index.json file.
+          </DialogDescription>
+        </DialogHeader>
+
+        <form
+          className="space-y-4"
+          onSubmit={(e) => {
+            e.preventDefault()
+            void handleValidateAndAdd()
+          }}
+        >
+          <div className="space-y-2">
+            <Label htmlFor="skillset-url">Repository URL</Label>
+            <Input
+              id="skillset-url"
+              placeholder="https://github.com/org/skillset-repo"
+              value={urlInput}
+              onChange={(e) => {
+                setUrlInput(e.target.value)
+                setValidationResult(null)
+              }}
+              disabled={isBusy}
+              autoFocus
+            />
+          </div>
+
+          {privateSkillsets && (
+            <div className="space-y-2">
+              <Label htmlFor="skillset-token">Repository token (optional)</Label>
+              <Input
+                id="skillset-token"
+                type="password"
+                autoComplete="off"
+                placeholder="Only for a private GitHub repository"
+                value={tokenInput}
+                onChange={(e) => {
+                  setTokenInput(e.target.value)
+                  setValidationResult(null)
+                }}
+                disabled={isBusy}
+              />
+              {/* The steps are for someone who needs a token: out of the way until asked for. */}
+              <Collapsible>
+                <CollapsibleTrigger
+                  className="flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
+                  data-testid="skillset-token-help"
+                >
+                  How to create a token
+                  <ChevronDown className="h-3.5 w-3.5 transition-transform [[data-state=closed]>&]:-rotate-90" />
+                </CollapsibleTrigger>
+                <CollapsibleContent className="pt-2 text-xs">
+                  <ol className="list-decimal space-y-1 pl-4 text-muted-foreground">
+                    <li>
+                      <a
+                        href="https://github.com/settings/personal-access-tokens/new"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 text-primary hover:underline"
+                      >
+                        Create a fine-grained personal access token
+                        <ExternalLink className="h-3 w-3" aria-hidden="true" />
+                      </a>{' '}
+                      and choose the repository owner.
+                    </li>
+                    <li>
+                      Under <span className="font-medium text-foreground">Repository access</span>, choose{' '}
+                      <span className="font-medium text-foreground">Only select repositories</span> and
+                      select this skillset repository.
+                    </li>
+                    <li>
+                      Under <span className="font-medium text-foreground">Repository permissions</span>,
+                      set <span className="font-medium text-foreground">Contents</span> to{' '}
+                      <span className="font-medium text-foreground">Read-only</span>. GitHub adds Metadata
+                      read access automatically.
+                    </li>
+                    <li>Generate the token and paste it above.</li>
+                  </ol>
+                  <p className="mt-2 text-muted-foreground">
+                    This minimum permission supports discovering, installing, and refreshing skills. A
+                    classic token also works with the broader{' '}
+                    <code className="rounded bg-muted px-1 py-0.5 text-foreground">repo</code> scope, but a
+                    fine-grained token is recommended. Publishing pull requests requires additional write
+                    and fork permissions. If GitHub marks an organization token as pending, an organization
+                    owner must approve it before it can read private repositories. A private repository
+                    must use an HTTPS URL.
+                  </p>
+                </CollapsibleContent>
+              </Collapsible>
+            </div>
+          )}
+
+          {validationResult && !validationResult.valid && (
+            <Alert variant="destructive">
+              <AlertTriangle className="h-4 w-4" />
+              <AlertDescription>{validationResult.error}</AlertDescription>
+            </Alert>
+          )}
+
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={isBusy}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={!urlInput.trim() || isBusy} data-testid="skillsets-add-submit">
+              {isBusy ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Validating...
+                </>
+              ) : (
+                'Add skillset'
+              )}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+const BADGE = 'text-2xs px-1.5 py-0.5 rounded-full font-medium'
+
+export function SkillsetsTab() {
+  const { data: skillsets, isLoading } = useSkillsets()
+  const removeSkillset = useRemoveSkillset()
+  const refreshSkillset = useRefreshSkillset()
+  const updateCredential = useUpdateSkillsetCredential()
+  const privateSkillsets = offersPrivateSkillsets()
+  const [adding, setAdding] = useState(false)
+  const [editingCredentialId, setEditingCredentialId] = useState<string | null>(null)
+  const [replacementToken, setReplacementToken] = useState('')
+  const [credentialError, setCredentialError] = useState<{
+    skillsetId: string
+    message: string
+  } | null>(null)
 
   const handleSaveCredential = async (id: string) => {
     if (!replacementToken.trim()) return
@@ -101,272 +261,156 @@ export function SkillsetsTab() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h3 className="text-sm font-medium mb-1">Skillsets</h3>
-        <p className="text-xs text-muted-foreground">
-          Add skillset repositories to discover and install skills for your agents.
-        </p>
-      </div>
+      {/* Adding is the page's one action, so it sits on the title's row. */}
+      <SettingsHeaderActions>
+        <Button size="sm" onClick={() => setAdding(true)} data-testid="skillsets-add-button">
+          <Plus className="h-4 w-4 mr-1.5" />
+          Add
+        </Button>
+      </SettingsHeaderActions>
+      <AddSkillsetDialog open={adding} onOpenChange={setAdding} />
 
-      {/* Add Skillset Form */}
-      <div className="space-y-2">
-        <div className="flex gap-2">
-          <Input
-            placeholder="https://github.com/org/skillset-repo"
-            value={urlInput}
-            onChange={(e) => {
-              setUrlInput(e.target.value)
-              setValidationResult(null)
-            }}
-            disabled={isBusy}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                e.preventDefault()
-                handleValidateAndAdd()
-              }
-            }}
-          />
-          <Button
-            onClick={handleValidateAndAdd}
-            disabled={!urlInput.trim() || isBusy}
-            size="sm"
-          >
-            {isBusy ? (
-              <>
-                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                Validating...
-              </>
-            ) : (
-              'Add'
-            )}
-          </Button>
+      {isLoading ? (
+        <div className={cn(SETTINGS_CARD_CLASS, 'flex items-center gap-2 py-3 px-4 text-[11px] text-muted-foreground')}>
+          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          Loading skillsets…
         </div>
-
-        {privateSkillsets && (
-          <>
-            <Input
-              type="password"
-              autoComplete="off"
-              aria-label="Repository token (optional)"
-              placeholder="Repository token (optional, for private GitHub repositories)"
-              value={tokenInput}
-              onChange={(e) => {
-                setTokenInput(e.target.value)
-                setValidationResult(null)
-              }}
-              disabled={isBusy}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  e.preventDefault()
-                  handleValidateAndAdd()
-                }
-              }}
-            />
-
-            <div className="rounded-card border bg-muted/30 p-3 text-xs">
-              <p className="font-medium">Private GitHub repository token</p>
-              <ol className="mt-1.5 list-decimal space-y-1 pl-4 text-muted-foreground">
-                <li>
-                  <a
-                    href="https://github.com/settings/personal-access-tokens/new"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1 text-primary hover:underline"
-                  >
-                    Create a fine-grained personal access token
-                    <ExternalLink className="h-3 w-3" aria-hidden="true" />
-                  </a>{' '}
-                  and choose the repository owner.
-                </li>
-                <li>
-                  Under <span className="font-medium text-foreground">Repository access</span>, choose{' '}
-                  <span className="font-medium text-foreground">Only select repositories</span> and
-                  select this skillset repository.
-                </li>
-                <li>
-                  Under <span className="font-medium text-foreground">Repository permissions</span>,
-                  set <span className="font-medium text-foreground">Contents</span> to{' '}
-                  <span className="font-medium text-foreground">Read-only</span>. GitHub adds Metadata
-                  read access automatically.
-                </li>
-                <li>Generate the token and paste it above.</li>
-              </ol>
-              <p className="mt-2 text-muted-foreground">
-                This minimum permission supports discovering, installing, and refreshing skills. A
-                classic token also works with the broader{' '}
-                <code className="rounded bg-muted px-1 py-0.5 text-foreground">repo</code> scope, but a
-                fine-grained token is recommended. Publishing pull requests requires additional write
-                and fork permissions. If GitHub marks an organization token as pending, an organization
-                owner must approve it before it can read private repositories.
-              </p>
-            </div>
-          </>
-        )}
-
-        {validationResult && !validationResult.valid && (
-          <Alert variant="destructive">
-            <AlertTriangle className="h-4 w-4" />
-            <AlertDescription>{validationResult.error}</AlertDescription>
-          </Alert>
-        )}
-
-        <p className="text-xs text-muted-foreground">
-          Enter a git repository URL containing an index.json file. Private GitHub repositories
-          must use an HTTPS URL.
-        </p>
-      </div>
-
-      {/* Skillset List */}
-      <div className="space-y-3">
-        {isLoading ? (
-          <div className="flex items-center justify-center py-4">
-            <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-          </div>
-        ) : !skillsets || skillsets.length === 0 ? (
-          <div className="text-center py-6">
-            <Library className="h-8 w-8 mx-auto text-muted-foreground mb-3" />
-            <p className="text-sm text-muted-foreground">No skillsets configured yet.</p>
-            <p className="text-xs text-muted-foreground mt-1">
-              Add a skillset repository URL above to get started.
-            </p>
-          </div>
-        ) : (
-          skillsets.map((ss) => (
-            <div
-              key={ss.id}
-              className="flex items-start gap-3 p-3 rounded-card border bg-card"
-            >
-              <Library className="h-4 w-4 mt-0.5 text-muted-foreground shrink-0" />
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                  <p className="text-sm font-medium truncate">{ss.name}</p>
-                  <span className="text-xs text-muted-foreground">
-                    {ss.skillCount} {ss.skillCount === 1 ? 'skill' : 'skills'}
-                  </span>
-                  {ss.badgeLabel && (
-                    <span className="text-2xs px-1.5 py-0.5 rounded-full bg-primary/10 text-primary font-medium">
-                      {ss.badgeLabel}
-                    </span>
-                  )}
-                  {ss.credential && (
-                    <span className="text-2xs px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground font-medium">
-                      Private · {ss.credential.tokenPreview}
-                    </span>
-                  )}
-                </div>
-                {ss.description && (
-                  <p className="text-xs text-muted-foreground mt-0.5 line-clamp-1">
-                    {ss.description}
-                  </p>
-                )}
-                {ss.showUrl && (
-                  <p className="text-xs text-muted-foreground mt-1 font-mono truncate">
-                    {ss.url}
-                  </p>
-                )}
-                {ss.error && (
-                  <div className="flex items-start gap-1.5 mt-1.5">
-                    <AlertTriangle className="h-3 w-3 mt-0.5 text-destructive shrink-0" />
-                    <p className="text-xs text-destructive line-clamp-2">{ss.error}</p>
-                  </div>
-                )}
-                {editingCredentialId === ss.id && (
-                  <div className="mt-2 space-y-2">
-                    <div className="flex items-center gap-2">
-                      <Input
-                        type="password"
-                        autoComplete="off"
-                        aria-label={`Repository token for ${ss.name}`}
-                        placeholder={ss.credential ? 'Replace repository token' : 'Add repository token'}
-                        value={replacementToken}
-                        onChange={(e) => {
-                          setReplacementToken(e.target.value)
-                          setCredentialError(null)
-                        }}
-                        className="h-8"
-                        disabled={updateCredential.isPending}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') {
-                            e.preventDefault()
-                            handleSaveCredential(ss.id)
-                          }
-                        }}
-                      />
-                      <Button
-                        size="sm"
-                        className="h-8"
-                        disabled={!replacementToken.trim() || updateCredential.isPending}
-                        onClick={() => handleSaveCredential(ss.id)}
-                      >
-                        Save
-                      </Button>
-                      {ss.credential && (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="h-8"
-                          disabled={updateCredential.isPending}
-                          onClick={() => handleRemoveCredential(ss.id)}
-                        >
-                          Remove
-                        </Button>
-                      )}
-                    </div>
-                    {credentialError?.skillsetId === ss.id && (
-                      <div
-                        role="alert"
-                        className="flex items-start gap-1.5 text-xs text-destructive"
-                      >
-                        <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
-                        <span>{credentialError.message}</span>
-                      </div>
+      ) : !skillsets || skillsets.length === 0 ? (
+        <div className={cn(SETTINGS_CARD_CLASS, 'py-3 px-4 text-[11px] text-muted-foreground')} data-testid="skillsets-empty">
+          No skillsets yet. Add a skillset repository to discover and install skills for your agents.
+        </div>
+      ) : (
+        <div className={SETTINGS_CARD_CLASS} data-testid="skillsets-list">
+          {skillsets.map((ss) => (
+            <div key={ss.id} className="py-3 px-4" data-testid="skillset-row">
+              <div className="flex items-center gap-3">
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <p className="text-xs font-normal truncate">{ss.name}</p>
+                    {ss.badgeLabel && (
+                      <span className={cn(BADGE, 'bg-primary/10 text-primary')}>{ss.badgeLabel}</span>
+                    )}
+                    {ss.credential && (
+                      <span className={cn(BADGE, 'bg-muted text-muted-foreground')}>
+                        Private · {ss.credential.tokenPreview}
+                      </span>
                     )}
                   </div>
-                )}
-              </div>
-              <div className="flex gap-1 shrink-0">
-                {privateSkillsets && (
+                  {/* How many skills it holds and what it is: data about the entry, not a description of a setting. */}
+                  <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[11px] text-muted-foreground">
+                    <span className="shrink-0">
+                      {ss.skillCount} {ss.skillCount === 1 ? 'skill' : 'skills'}
+                    </span>
+                    {ss.description && (
+                      <>
+                        <span className="shrink-0">·</span>
+                        <span className="min-w-0 truncate">{ss.description}</span>
+                      </>
+                    )}
+                  </div>
+                  {ss.showUrl && (
+                    <p className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground">{ss.url}</p>
+                  )}
+                  {ss.error && (
+                    <div className="mt-1.5 flex items-start gap-1.5">
+                      <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0 text-destructive" />
+                      <p className="line-clamp-2 text-[11px] text-destructive">{ss.error}</p>
+                    </div>
+                  )}
+                </div>
+                <div className="flex shrink-0 gap-1">
+                  {privateSkillsets && (
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                      onClick={() => {
+                        const nextId = editingCredentialId === ss.id ? null : ss.id
+                        setEditingCredentialId(nextId)
+                        setReplacementToken('')
+                        setCredentialError(null)
+                      }}
+                      disabled={updateCredential.isPending || (ss.provider ?? 'github') !== 'github'}
+                      title={ss.credential ? 'Replace or remove repository token' : 'Add repository token'}
+                    >
+                      {editingCredentialId === ss.id ? <X className="h-3.5 w-3.5" /> : <KeyRound className="h-3.5 w-3.5" />}
+                    </Button>
+                  )}
                   <Button
                     size="icon"
                     variant="ghost"
-                    className="h-7 w-7"
-                    onClick={() => {
-                      const nextId = editingCredentialId === ss.id ? null : ss.id
-                      setEditingCredentialId(nextId)
-                      setReplacementToken('')
-                      setCredentialError(null)
-                    }}
-                    disabled={updateCredential.isPending || (ss.provider ?? 'github') !== 'github'}
-                    title={ss.credential ? 'Replace or remove repository token' : 'Add repository token'}
+                    className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                    onClick={() => refreshSkillset.mutate(ss.id)}
+                    disabled={refreshSkillset.isPending}
+                    title="Refresh skillset"
                   >
-                    {editingCredentialId === ss.id ? <X className="h-3.5 w-3.5" /> : <KeyRound className="h-3.5 w-3.5" />}
+                    <RefreshCw className={`h-3.5 w-3.5 ${refreshSkillset.isPending ? 'animate-spin' : ''}`} />
                   </Button>
-                )}
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  className="h-7 w-7"
-                  onClick={() => refreshSkillset.mutate(ss.id)}
-                  disabled={refreshSkillset.isPending}
-                  title="Refresh skillset"
-                >
-                  <RefreshCw className={`h-3.5 w-3.5 ${refreshSkillset.isPending ? 'animate-spin' : ''}`} />
-                </Button>
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  className="h-7 w-7 text-destructive hover:text-destructive"
-                  onClick={() => removeSkillset.mutate(ss.id)}
-                  disabled={removeSkillset.isPending}
-                  title="Remove skillset"
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                </Button>
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                    onClick={() => removeSkillset.mutate(ss.id)}
+                    disabled={removeSkillset.isPending}
+                    title="Remove skillset"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
               </div>
+
+              {editingCredentialId === ss.id && (
+                <div className="mt-2 space-y-2">
+                  <div className="flex items-center gap-2">
+                    <Input
+                      type="password"
+                      autoComplete="off"
+                      aria-label={`Repository token for ${ss.name}`}
+                      placeholder={ss.credential ? 'Replace repository token' : 'Add repository token'}
+                      value={replacementToken}
+                      onChange={(e) => {
+                        setReplacementToken(e.target.value)
+                        setCredentialError(null)
+                      }}
+                      className="h-8 text-xs"
+                      disabled={updateCredential.isPending}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault()
+                          void handleSaveCredential(ss.id)
+                        }
+                      }}
+                    />
+                    <Button
+                      size="sm"
+                      disabled={!replacementToken.trim() || updateCredential.isPending}
+                      onClick={() => void handleSaveCredential(ss.id)}
+                    >
+                      Save
+                    </Button>
+                    {ss.credential && (
+                      <Button
+                        size="sm"
+                        variant="soft"
+                        disabled={updateCredential.isPending}
+                        onClick={() => void handleRemoveCredential(ss.id)}
+                      >
+                        Remove
+                      </Button>
+                    )}
+                  </div>
+                  {credentialError?.skillsetId === ss.id && (
+                    <div role="alert" className="flex items-start gap-1.5 text-[11px] text-destructive">
+                      <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
+                      <span>{credentialError.message}</span>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
-          ))
-        )}
-      </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
