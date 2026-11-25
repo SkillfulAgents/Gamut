@@ -23,9 +23,10 @@ import { mcpClientSetups, mcpOAuthClientSetups, type McpClientSetup } from '@sha
 import type { McpServerReach, McpServerStatusResponse } from '@shared/lib/mcp-server/mcp-server-settings-schema'
 import type { ConnectedMcpClient } from '@shared/lib/mcp-server/oauth/connected-clients'
 import { cn } from '@shared/lib/utils'
+import { SETTINGS_CARD_CLASS, SETTINGS_SECTION_HEADING } from './setting-row'
 
-const CARD_CLASS = 'rounded-card border bg-background divide-y divide-border/50 overflow-hidden'
-const SECTION_HEADING = 'text-xs font-medium text-muted-foreground px-1'
+const CARD_CLASS = SETTINGS_CARD_CLASS
+const SECTION_HEADING = SETTINGS_SECTION_HEADING
 const QUERY_KEY = ['mcp-server'] as const
 const CLIENTS_QUERY_KEY = ['mcp-server', 'oauth-clients'] as const
 
@@ -68,7 +69,7 @@ function CopyButton({ text, label, testId }: { text: string; label: string; test
   const [copied, setCopied] = useState(false)
   return (
     <Button
-      variant="outline"
+      variant="soft"
       size="sm"
       aria-label={label}
       data-testid={testId}
@@ -95,7 +96,7 @@ function SetupList({ setups }: { setups: McpClientSetup[] }) {
         <div key={setup.id} className="space-y-2 px-4 py-3" data-testid={`mcp-setup-${setup.id}`}>
           <div className="flex items-center gap-3">
             <div className="min-w-0 flex-1">
-              <div className="text-xs font-medium">{setup.label}</div>
+              <div className="text-xs font-normal">{setup.label}</div>
               <div className="mt-0.5 text-[11px] text-muted-foreground">{setup.hint}</div>
             </div>
             <CopyButton text={setup.text} label={`Copy ${setup.label} setup`} testId={`mcp-setup-copy-${setup.id}`} />
@@ -132,7 +133,7 @@ function ServerRows({ status, canManage, onText, offText, children }: { status: 
     <>
       <div className="flex items-center gap-3 px-4 py-3">
         <div className="min-w-0 flex-1">
-          <label htmlFor="mcp-server-enabled" className="block cursor-default text-xs font-medium">MCP server</label>
+          <label htmlFor="mcp-server-enabled" className="block cursor-default text-xs font-normal">MCP server</label>
           <div className="mt-0.5 text-[11px] text-muted-foreground" data-testid="mcp-server-enabled-state">
             {status.enabled ? onText : offText}
           </div>
@@ -148,7 +149,7 @@ function ServerRows({ status, canManage, onText, offText, children }: { status: 
       {children}
       <div className="flex items-center gap-3 px-4 py-3">
         <div className="min-w-0 flex-1">
-          <div className="text-xs font-medium">Endpoint</div>
+          <div className="text-xs font-normal">Endpoint</div>
           <div className="mt-0.5 break-all font-mono text-[11px] text-muted-foreground" data-testid="mcp-server-endpoint">
             {status.endpointUrl}
           </div>
@@ -216,7 +217,7 @@ function ConnectedClients() {
             </div>
             <AlertDialog>
               <AlertDialogTrigger asChild>
-                <Button variant="outline" size="sm" disabled={revoke.isPending} data-testid="mcp-connected-client-revoke">
+                <Button variant="soft" size="sm" disabled={revoke.isPending} data-testid="mcp-connected-client-revoke">
                   Disconnect
                 </Button>
               </AlertDialogTrigger>
@@ -345,7 +346,7 @@ export function McpServerTab() {
           <ServerRows status={status} canManage={canManage} onText="On: clients with the token can connect." offText="Off: the endpoint does not answer.">
             {reachChoice && (
               <div className="space-y-2 px-4 py-3" data-testid="mcp-server-reach-choice">
-                <div className="text-xs font-medium" id="mcp-server-reach-label">Who can connect</div>
+                <div className="text-xs font-normal" id="mcp-server-reach-label">Who can connect</div>
                 <div role="radiogroup" aria-labelledby="mcp-server-reach-label" className="inline-flex rounded-md border p-0.5">
                   {REACH_OPTIONS.map((option) => (
                     <button
@@ -378,7 +379,7 @@ export function McpServerTab() {
           </ServerRows>
           <div className="flex items-center gap-3 px-4 py-3">
             <div className="min-w-0 flex-1">
-              <div className="text-xs font-medium">Token</div>
+              <div className="text-xs font-normal">Token</div>
               <div className="mt-0.5 text-[11px] text-muted-foreground">
                 Anyone with it can read and run what you can in Gamut. Regenerating it disconnects every client until you update its setup.
               </div>
@@ -386,7 +387,7 @@ export function McpServerTab() {
             {canManage && (
               <AlertDialog>
                 <AlertDialogTrigger asChild>
-                  <Button variant="outline" size="sm" disabled={regenerate.isPending} data-testid="mcp-server-regenerate">
+                  <Button variant="soft" size="sm" disabled={regenerate.isPending} data-testid="mcp-server-regenerate">
                     <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
                     Regenerate
                   </Button>

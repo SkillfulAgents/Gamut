@@ -221,15 +221,14 @@ export function UsersTab({ platformControlled = false, platformInviteHref }: Use
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-2">
         <div className="min-w-0">
-          <span className="text-sm font-medium">Users</span>
           {platformControlled ? (
-            <p className="text-xs text-muted-foreground mt-0.5">
+            <p className="text-xs text-muted-foreground">
               Invite members on Platform. They join with their Platform role; role, ban, and remove stay here.
             </p>
           ) : null}
         </div>
         <Button
-          variant="outline"
+          variant="soft"
           size="sm"
           data-testid="users-invite-button"
           disabled={platformControlled && !platformInviteHref}
@@ -458,7 +457,7 @@ export function UsersTab({ platformControlled = false, platformInviteHref }: Use
           {totalPages > 1 && (
             <div className="flex items-center gap-2">
               <Button
-                variant="outline"
+                variant="soft"
                 size="sm"
                 className="h-7 w-7 p-0"
                 disabled={page === 0}
@@ -470,7 +469,7 @@ export function UsersTab({ platformControlled = false, platformInviteHref }: Use
                 Page {page + 1} of {totalPages}
               </span>
               <Button
-                variant="outline"
+                variant="soft"
                 size="sm"
                 className="h-7 w-7 p-0"
                 disabled={page >= totalPages - 1}

@@ -275,7 +275,7 @@ export function ToolPolicyEditorBody({
           )}
           <Button data-testid="tool-policy-save" size="sm" onClick={handleSave} disabled={saving || !canSave}>
             {saving && <Loader2 className="h-4 w-4 animate-spin mr-1" />}
-            Save Policies
+            Save policies
           </Button>
         </div>
       )}

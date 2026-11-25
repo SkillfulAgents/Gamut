@@ -20,6 +20,7 @@ import { useOAuthReconnect } from '@renderer/hooks/use-oauth-reconnect'
 import { useConnectionArrival } from '@renderer/hooks/use-connection-arrival'
 import { useConnectionActivityStats } from '@renderer/hooks/use-activity-stats'
 import { ActivitySparkChart, ActivitySparkChartSkeleton } from '@renderer/components/activity/activity-spark-chart'
+import { SETTINGS_CARD_CLASS, SETTINGS_SECTION_HEADING, SettingRow } from './setting-row'
 
 export function ConnectionsTab() {
   useConnectionArrival()
@@ -153,44 +154,40 @@ export function ConnectionsTab() {
   return (
     <div className="space-y-6">
       <div className="space-y-2">
-        <h3 className="text-xs font-normal text-muted-foreground">Default Policies</h3>
-        <div className="rounded-card border bg-background divide-y divide-border/50 overflow-hidden">
-          <div data-testid="default-policy-api" className="py-3 px-4 flex items-center gap-3">
-            <div className="min-w-0 flex-1">
-              <div className="text-xs font-medium">Default API Request Policy</div>
-              <div className="text-[11px] text-muted-foreground mt-0.5">
-                Used for connections that don&apos;t have an explicit API request policy set.
-              </div>
-            </div>
-            <div className="shrink-0">
-              <PolicyDecisionDropdown
-                value={apiPolicy}
-                includeDefault={false}
-                onChange={(value) => {
-                  if (value === 'default') return
-                  updateSettings.mutate({ defaultApiPolicy: value })
-                }}
-              />
-            </div>
+        <h3 className={SETTINGS_SECTION_HEADING}>Default policies</h3>
+        <div className={SETTINGS_CARD_CLASS}>
+          <div data-testid="default-policy-api">
+            <SettingRow
+              name="Default API request policy"
+              help="Applies to any connection that doesn't set its own API request policy."
+              right={
+                <PolicyDecisionDropdown
+                  value={apiPolicy}
+                  includeDefault={false}
+                  onChange={(value) => {
+                    if (value === 'default') return
+                    updateSettings.mutate({ defaultApiPolicy: value })
+                  }}
+                />
+              }
+            />
           </div>
 
-          <div data-testid="default-policy-mcp" className="py-3 px-4 flex items-center gap-3">
-            <div className="min-w-0 flex-1">
-              <div className="text-xs font-medium">Default MCP Tool Policy</div>
-              <div className="text-[11px] text-muted-foreground mt-0.5">
-                Used for connections that don&apos;t have an explicit MCP tool policy set.
-              </div>
-            </div>
-            <div className="shrink-0">
-              <PolicyDecisionDropdown
-                value={mcpPolicy}
-                includeDefault={false}
-                onChange={(value) => {
-                  if (value === 'default') return
-                  updateSettings.mutate({ defaultMcpPolicy: value })
-                }}
-              />
-            </div>
+          <div data-testid="default-policy-mcp">
+            <SettingRow
+              name="Default MCP tool policy"
+              help="Applies to any connection that doesn't set its own MCP tool policy."
+              right={
+                <PolicyDecisionDropdown
+                  value={mcpPolicy}
+                  includeDefault={false}
+                  onChange={(value) => {
+                    if (value === 'default') return
+                    updateSettings.mutate({ defaultMcpPolicy: value })
+                  }}
+                />
+              }
+            />
           </div>
         </div>
       </div>

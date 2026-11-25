@@ -22,8 +22,9 @@ import type {
 } from '@shared/lib/team-directory/view-schema'
 import { SetupPanel, SetupSteps } from './setup-steps'
 import { useUser } from '@renderer/context/user-context'
+import { SETTINGS_SECTION_HEADING } from './setting-row'
 
-const SECTION_HEADING = 'text-xs font-medium text-muted-foreground px-1'
+const SECTION_HEADING = SETTINGS_SECTION_HEADING
 
 function StatusBadge({ directory }: { directory: TeamDirectoryView }) {
   if (directory.status === 'active') {
@@ -311,7 +312,7 @@ function ConnectForm({ provider, onBack }: { provider: DirectoryProviderInfo; on
           </div>
         )}
         <div className="flex gap-2">
-          <Button type="button" variant="outline" size="sm" disabled={!complete || busy} onClick={() => void runTest()}>
+          <Button type="button" variant="soft" size="sm" disabled={!complete || busy} onClick={() => void runTest()}>
             {test.isPending && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
             Test
           </Button>
@@ -417,7 +418,7 @@ function ProvisioningPanel({ directory, provider }: { directory: TeamDirectoryVi
       )}
       {status === 'active' && !editing ? (
         <div className="flex gap-2">
-          <Button type="button" variant="outline" size="sm" onClick={() => setEditing(true)}>Replace token</Button>
+          <Button type="button" variant="soft" size="sm" onClick={() => setEditing(true)}>Replace token</Button>
           <Button type="button" variant="ghost" size="sm" disabled={disconnect.isPending} onClick={() => void stop()}>Stop creating apps</Button>
         </div>
       ) : (
