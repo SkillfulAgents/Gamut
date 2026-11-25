@@ -56,6 +56,8 @@ vi.mock('drizzle-orm', () => ({
 // Mock policy enforcement
 const mockResolveMcpPolicy = vi.fn()
 const mockRequestReview = vi.fn()
+// "Allow for this session": whether the calling session's grants cover the call.
+const mockSessionAllows = vi.fn(async (..._args: unknown[]): Promise<boolean> => false)
 const mockRequestMcpReauth = vi.fn()
 
 vi.mock('@shared/lib/proxy/policy-resolver', () => ({
@@ -69,6 +71,7 @@ vi.mock('@shared/lib/proxy/agent-reviews', async (importOriginal) => {
     request: (details, options) => mockRequestReview({ ...details, agentSlug }, options),
     withdraw: vi.fn(),
     takeDecisionDetail: vi.fn(async () => ({})),
+    sessionAllows: (check) => mockSessionAllows(agentSlug, check),
   }))
 })
 
@@ -2357,6 +2360,59 @@ describe('mcp-proxy route', () => {
         expect.objectContaining({ reviewType: 'mcp', callerSessionId: 'session-a' }),
         expect.anything(),
       )
+    })
+
+    describe('allow for this session', () => {
+      beforeEach(() => {
+        setupSuccessPath()
+        mockSessionAllows.mockReset()
+        mockSessionAllows.mockResolvedValue(false)
+        mockRequestReview.mockReset()
+        mockRequestReview.mockResolvedValue('allow')
+        mockResolveMcpPolicy.mockResolvedValue({
+          decision: 'review',
+          matchedScopes: ['search'],
+          scopeDescriptions: {},
+          resolvedFrom: 'scope_policy',
+        })
+      })
+
+      it('lets a tool call its session was granted through without a card', async () => {
+        mockSessionAllows.mockResolvedValue(true)
+
+        const res = await toolCall({ 'X-Superagent-Session-Id': 'session-a' })
+
+        expect(res.status).toBe(200)
+        expect(mockRequestReview).not.toHaveBeenCalled()
+        expect(mockSessionAllows).toHaveBeenCalledWith('my-agent', {
+          callerSessionId: 'session-a', kind: 'mcp', targetId: 'mcp-1', scopes: ['search'],
+        })
+        expect(mockInsertValues.mock.calls.map(([entry]) => (entry as { policyDecision?: string }).policyDecision))
+          .toContain('allowed_for_session')
+      })
+
+      it('raises the card when the session holds no grant for the tool', async () => {
+        const res = await toolCall({ 'X-Superagent-Session-Id': 'session-a' })
+
+        expect(res.status).toBe(200)
+        expect(mockRequestReview).toHaveBeenCalledOnce()
+      })
+
+      it('leaves the call to its card when the grant check fails', async () => {
+        mockSessionAllows.mockRejectedValue(new Error('AppState is down'))
+
+        const res = await toolCall({ 'X-Superagent-Session-Id': 'session-a' })
+
+        expect(res.status).toBe(200)
+        expect(mockRequestReview).toHaveBeenCalledOnce()
+      })
+
+      it('asks about no grant for a call that names no session', async () => {
+        await toolCall({})
+
+        expect(mockSessionAllows).not.toHaveBeenCalled()
+        expect(mockRequestReview).toHaveBeenCalledOnce()
+      })
     })
 
     it('does not forward the header to the upstream server', async () => {

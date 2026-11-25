@@ -213,6 +213,7 @@ The following APIs are automatically available in all dashboards (injected by th
 
 - **Keep dependencies minimal** — fewer deps means faster installs and starts
 - **Always use `process.env.DASHBOARD_PORT`** — never hardcode ports
+- **Read `PROXY_BASE_URL` and `PROXY_TOKEN` from `process.env` when the server calls a connected account** — never paste their values into the code. Your shell's `PROXY_BASE_URL` belongs to your current session; the dashboard server is given its own
 - **Use the dashboard URL helper** — `window.__GAMUT_DASHBOARD__.url(...)` keeps URLs inside the mount
 - **Use Bun APIs** — `Bun.serve()`, `Bun.file()`, etc. are fast and built-in
 - **Check logs on errors** — use `get_dashboard_logs` to debug crashes
