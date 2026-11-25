@@ -8,7 +8,7 @@ import { openExternalUrl } from '@renderer/lib/open-external'
 import { useAnalyticsTracking } from '@renderer/context/analytics-context'
 import { Button, buttonVariants } from '@renderer/components/ui/button'
 import { cn } from '@shared/lib/utils'
-import { Label } from '@renderer/components/ui/label'
+import { SETTINGS_CARD_CLASS, SETTINGS_SECTION_HEADING, SettingRow } from './setting-row'
 import { Alert, AlertDescription } from '@renderer/components/ui/alert'
 
 interface PairingToken {
@@ -48,7 +48,8 @@ function AppStoreButton() {
   const { track } = useAnalyticsTracking()
   return (
     <Button
-      variant="outline"
+      variant="soft"
+      size="sm"
       onClick={() => {
         track('app_store_link_clicked', { surface: 'settings_mobile' })
         void openExternalUrl(APP_STORE_URL)
@@ -108,48 +109,49 @@ function PairingQrCard() {
   const deepLink = pairing ? buildDeepLink(pairing) : null
 
   return (
-    <div className="space-y-3">
-      <p className="text-sm text-muted-foreground">
-        Scan the QR code with the Gamut mobile app to connect it to this workspace. Codes are
-        single-use and expire after a few minutes.
-      </p>
-
+    <SettingRow
+      name="Scan a pairing code with the Gamut mobile app"
+      help="Connects the app to this workspace. Codes are single-use and expire after a few minutes."
+      right={
+        <>
+          {!pairing && (
+            <Button size="sm" onClick={() => void mint()} disabled={minting} data-testid="mobile-pairing-mint">
+              {minting ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <QrCode className="h-4 w-4 mr-2" />
+              )}
+              Show pairing code
+            </Button>
+          )}
+          <AppStoreButton />
+        </>
+      }
+    >
       {error && (
-        <Alert variant="destructive">
+        <Alert variant="destructive" className="mt-2">
           <AlertDescription>{error}</AlertDescription>
         </Alert>
       )}
 
-      {!pairing ? (
-        <div className="flex flex-wrap gap-2">
-          <Button onClick={() => void mint()} disabled={minting} data-testid="mobile-pairing-mint">
-            {minting ? (
-              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-            ) : (
-              <QrCode className="h-4 w-4 mr-2" />
-            )}
-            Show pairing code
-          </Button>
-          <AppStoreButton />
-        </div>
-      ) : (
-        <div className="space-y-3">
+      {pairing && (
+        <div className="mt-3 space-y-3">
           <div className="inline-flex flex-col items-center gap-2 rounded-card border p-4 bg-white">
             {deepLink && <QRCode value={deepLink} size={192} />}
           </div>
-          <p className="text-xs text-muted-foreground">
+          <p className="text-[11px] text-muted-foreground">
             Code refreshes automatically — expires in {secondsLeft}s
           </p>
           {/* The raw deep link, for copying into the app manually (and E2E). */}
           <p
-            className="text-xs font-mono break-all text-muted-foreground select-all"
+            className="text-[11px] font-mono break-all text-muted-foreground select-all"
             data-testid="mobile-pairing-deeplink"
           >
             {deepLink}
           </p>
         </div>
       )}
-    </div>
+    </SettingRow>
   )
 }
 
@@ -177,33 +179,34 @@ function ConnectAppButton() {
   }
 
   return (
-    <div className="space-y-2">
-      <p className="text-sm text-muted-foreground">
-        On this device already? Open the app directly.
-      </p>
-      {/* A real anchor (deep links belong on links), styled as an outline
-          button. Not `Button asChild`: this repo's Button always renders a
-          conditional loading child, which breaks Radix Slot's single-child
-          requirement. */}
-      <a
-        href="gamut://connect"
-        onClick={handleClick}
-        data-testid="mobile-connect-app-button"
-        className={cn(buttonVariants({ variant: 'outline' }), minting && 'pointer-events-none opacity-50')}
-      >
-        {minting ? (
-          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-        ) : (
-          <Smartphone className="h-4 w-4 mr-2" />
-        )}
-        Connect app on this device
-      </a>
+    <SettingRow
+      name="Already on this device? Open the app directly"
+      right={
+        /* A real anchor (deep links belong on links), styled as an outline
+           button. Not `Button asChild`: this repo's Button always renders a
+           conditional loading child, which breaks Radix Slot's single-child
+           requirement. */
+        <a
+          href="gamut://connect"
+          onClick={handleClick}
+          data-testid="mobile-connect-app-button"
+          className={cn(buttonVariants({ variant: 'soft', size: 'sm' }), minting && 'pointer-events-none opacity-50')}
+        >
+          {minting ? (
+            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+          ) : (
+            <Smartphone className="h-4 w-4 mr-2" />
+          )}
+          Connect app on this device
+        </a>
+      }
+    >
       {error && (
-        <Alert variant="destructive">
+        <Alert variant="destructive" className="mt-2">
           <AlertDescription>{error}</AlertDescription>
         </Alert>
       )}
-    </div>
+    </SettingRow>
   )
 }
 
@@ -219,24 +222,25 @@ function ConnectAppButton() {
 function PairInBrowserCard() {
   const deploymentUrl = getRemoteDeploymentUrl()
   return (
-    <div className="space-y-3">
-      <p className="text-sm text-muted-foreground">
-        Pairing a phone needs you to sign in to the cloud workspace directly. Open it in your
-        browser and pair from Settings → Mobile there.
-      </p>
-      <div className="flex flex-wrap gap-2">
-        {deploymentUrl && (
-          <Button
-            onClick={() => void openExternalUrl(`${deploymentUrl}/settings/mobile`)}
-            data-testid="mobile-pairing-open-browser"
-          >
-            <ExternalLink className="h-4 w-4 mr-2" />
-            Open in browser
-          </Button>
-        )}
-        <AppStoreButton />
-      </div>
-    </div>
+    <SettingRow
+      name="Pair a phone from the cloud workspace in your browser"
+      help="Pairing needs you to sign in to the cloud workspace directly. Open it in your browser and pair from Settings → Mobile there."
+      right={
+        <>
+          {deploymentUrl && (
+            <Button
+              size="sm"
+              onClick={() => void openExternalUrl(`${deploymentUrl}/settings/mobile`)}
+              data-testid="mobile-pairing-open-browser"
+            >
+              <ExternalLink className="h-4 w-4 mr-2" />
+              Open in browser
+            </Button>
+          )}
+          <AppStoreButton />
+        </>
+      }
+    />
   )
 }
 
@@ -281,8 +285,8 @@ function PairedDevicesList() {
 
   if (isLoading) {
     return (
-      <div className="flex items-center gap-2 text-sm text-muted-foreground">
-        <Loader2 className="h-4 w-4 animate-spin" />
+      <div className={cn(SETTINGS_CARD_CLASS, 'flex items-center gap-2 py-3 px-4 text-[11px] text-muted-foreground')}>
+        <Loader2 className="h-3.5 w-3.5 animate-spin" />
         Loading devices…
       </div>
     )
@@ -298,9 +302,9 @@ function PairedDevicesList() {
 
   if (devices.length === 0) {
     return (
-      <p className="text-sm text-muted-foreground" data-testid="mobile-devices-empty">
+      <div className={cn(SETTINGS_CARD_CLASS, 'py-3 px-4 text-[11px] text-muted-foreground')} data-testid="mobile-devices-empty">
         No paired devices yet.
-      </p>
+      </div>
     )
   }
 
@@ -311,50 +315,29 @@ function PairedDevicesList() {
           <AlertDescription>{revokeError}</AlertDescription>
         </Alert>
       )}
-      <div className="rounded-card border overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b bg-muted/50 text-left text-xs text-muted-foreground">
-              <th className="px-3 py-2 font-medium">Device</th>
-              <th className="px-3 py-2 font-medium">Paired</th>
-              <th className="px-3 py-2 font-medium">Last renewed</th>
-              <th className="px-3 py-2 font-medium">Expires</th>
-              <th className="px-3 py-2" />
-            </tr>
-          </thead>
-          <tbody data-testid="mobile-devices-list">
-            {devices.map((device) => (
-              <tr key={device.id} className="border-b last:border-b-0" data-testid={`mobile-device-row-${device.id}`}>
-                <td className="px-3 py-2">
-                  <span className="flex items-center gap-2">
-                    <Smartphone className="h-4 w-4 text-muted-foreground" />
-                    {device.deviceName || 'Mobile device'}
-                    {device.isCurrent && (
-                      <span className="rounded-item bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">
-                        current
-                      </span>
-                    )}
-                  </span>
-                </td>
-                <td className="px-3 py-2 text-muted-foreground">{formatDate(device.createdAt)}</td>
-                <td className="px-3 py-2 text-muted-foreground">{formatDate(device.updatedAt)}</td>
-                <td className="px-3 py-2 text-muted-foreground">{formatDate(device.expiresAt)}</td>
-                <td className="px-3 py-2 text-right">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => revokeMutation.mutate(device.id)}
-                    disabled={revokeMutation.isPending}
-                    data-testid={`mobile-device-revoke-${device.id}`}
-                    aria-label="Revoke device"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      <div className={SETTINGS_CARD_CLASS} data-testid="mobile-devices-list">
+        {devices.map((device) => (
+          <div key={device.id} data-testid={`mobile-device-row-${device.id}`}>
+            <SettingRow
+              name={`${device.deviceName || 'Mobile device'}${device.isCurrent ? ' (current)' : ''}`}
+              // When it was paired and how long its access lasts: data, not a description.
+              status={`Paired ${formatDate(device.createdAt)} · last renewed ${formatDate(device.updatedAt)} · expires ${formatDate(device.expiresAt)}`}
+              right={
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8"
+                  onClick={() => revokeMutation.mutate(device.id)}
+                  disabled={revokeMutation.isPending}
+                  data-testid={`mobile-device-revoke-${device.id}`}
+                  aria-label="Revoke device"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              }
+            />
+          </div>
+        ))}
       </div>
     </div>
   )
@@ -365,21 +348,23 @@ function PairedDevicesList() {
 export function MobileTab() {
   return (
     <div className="space-y-6">
-      <div className="space-y-4">
-        <Label className="text-base">Pair the mobile app</Label>
-        {targetIsRemote() ? (
-          <PairInBrowserCard />
-        ) : (
-          <>
-            <PairingQrCard />
-            <ConnectAppButton />
-          </>
-        )}
+      <div className="space-y-2">
+        <h3 className={SETTINGS_SECTION_HEADING}>Pair the mobile app</h3>
+        <div className={SETTINGS_CARD_CLASS}>
+          {targetIsRemote() ? (
+            <PairInBrowserCard />
+          ) : (
+            <>
+              <PairingQrCard />
+              <ConnectAppButton />
+            </>
+          )}
+        </div>
       </div>
 
-      <div className="pt-4 border-t space-y-4">
+      <div className="space-y-2">
         <div className="flex items-center justify-between">
-          <Label className="text-base">Paired devices</Label>
+          <h3 className={SETTINGS_SECTION_HEADING}>Paired devices</h3>
           <RefreshDevicesButton />
         </div>
         <PairedDevicesList />
@@ -393,7 +378,8 @@ function RefreshDevicesButton() {
   return (
     <Button
       variant="ghost"
-      size="sm"
+      size="icon"
+      className="h-7 w-7"
       onClick={() => queryClient.invalidateQueries({ queryKey: ['mobile-devices'] })}
       aria-label="Refresh devices"
     >
