@@ -97,7 +97,7 @@ The database is migrated when the server starts. Configuration such as `ANTHROPI
 | `npm run build:electron` | Build the Electron app |
 | `npm run build:container` | Build the agent container image locally (`superagent-container`) |
 | `npm run dist:mac` / `dist:win` | Package the desktop app for macOS / Windows |
-| `npm run typecheck` | TypeScript type check |
+| `npm run typecheck` | TypeScript type check, with TypeScript 7 (the `typescript-native` alias); `typescript` 5 stays installed for typescript-eslint and tsup, which need its JavaScript API |
 | `npm run lint` | ESLint |
 | `npm test` / `npm run test:run` | Unit tests (watch / once); `test:coverage` adds coverage |
 | `npm run test:e2e` | Playwright end-to-end tests against mocks |

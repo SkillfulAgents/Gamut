@@ -39,7 +39,7 @@ Review the guide diff as an agent would read it: new commands to map in the head
 ## 4. Verify
 
 ```bash
-npx tsc --noEmit
+npm run typecheck
 npm run lint
 npx vitest run src/shared/lib/computer-use scripts/generate-computer-use-docs.test.ts src/main/agent-desktop-resources.test.ts src/main/mas-build-config.test.ts
 npm --prefix agent-container test -- computer-use system-prompt-vars
