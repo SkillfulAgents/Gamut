@@ -25,7 +25,8 @@ import {
   validateToolPattern,
   type ParsedApiPattern,
 } from './patterns'
-import { checkRuleSyntax, runRule, runRuleOnJson, serializeRuleInput, type RuleOutcome } from './sandbox'
+import { checkRuleSyntax, runRule, runRuleOnJson, serializeRuleInput } from './sandbox'
+import type { RuleOutcome } from './rule-program'
 import type { ApiRuleInput, McpRuleInput, RuleInput } from './input'
 
 export type RuleKind = 'api' | 'mcp'
@@ -328,7 +329,7 @@ export async function validateRuleDraft(
     }
   }
 
-  const syntaxError = checkRuleSyntax(draft.code)
+  const syntaxError = await checkRuleSyntax(draft.code)
   if (syntaxError) errors.push(`Code does not compile: ${syntaxError}`)
 
   // Coverage: which known endpoints / tools the patterns reach.
