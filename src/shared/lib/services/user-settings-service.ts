@@ -402,6 +402,9 @@ function mergeSettings(current: UserSettingsData, partial: UserSettingsWrite): U
 
 const MAX_UPDATE_ATTEMPTS = 5
 
+/** A partial update, or one computed from the stored settings when the write runs. */
+export type UserSettingsUpdate = UserSettingsWrite | ((current: UserSettingsData) => UserSettingsWrite)
+
 /**
  * Update user settings with a partial update: merge into the stored document,
  * validate, and write it back. One writer per user at a time in this process;
@@ -410,9 +413,9 @@ const MAX_UPDATE_ATTEMPTS = 5
  */
 export function updateUserSettings(
   userId: string,
-  partial: UserSettingsWrite
+  update: UserSettingsUpdate
 ): Promise<UserSettingsData> {
-  return serializeByKey(`user-settings:${userId}`, () => compareAndSetUserSettings(userId, partial))
+  return serializeByKey(`user-settings:${userId}`, () => compareAndSetUserSettings(userId, update))
 }
 
 /**
@@ -424,7 +427,7 @@ export function updateUserSettings(
  */
 async function compareAndSetUserSettings(
   userId: string,
-  partial: UserSettingsWrite
+  update: UserSettingsUpdate
 ): Promise<UserSettingsData> {
   for (let attempt = 0; attempt < MAX_UPDATE_ATTEMPTS; attempt++) {
     const row = await db
@@ -433,7 +436,7 @@ async function compareAndSetUserSettings(
       .where(eq(userSettings.userId, userId))
       .get()
     const current = (row && parseStoredSettings(row.settings)) ?? (await initialUserSettings(userId))
-    const validated = mergeSettings(current, partial)
+    const validated = mergeSettings(current, typeof update === 'function' ? update(current) : update)
     const json = JSON.stringify(validated)
     const now = new Date()
     const result = row

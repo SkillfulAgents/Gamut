@@ -26,7 +26,7 @@ import { createUserInputMcpServer, createBrowserMcpServer, createComputerUseMcpS
 import { createBrowserTools } from './tools/browser';
 import { renameBrowserSession } from './browser-state';
 import { COMPUTER_USE_SERVER, COMPUTER_USE_TOOL_PREFIX, computerUseTools } from './tools/computer-use';
-import { fileHooks, mountIndexCommandHint, resolveToolFilePath } from './file-hooks';
+import { editedFile, fileHooks, mountIndexCommandHint, resolveToolFilePath } from './file-hooks';
 import { elapsedTimeNote } from './elapsed-time-note';
 import { builtinHints, createHintHookMatchers } from './hints';
 import { promptDate } from './prompt-date';
@@ -1645,8 +1645,33 @@ export class ClaudeCodeProcess extends EventEmitter {
             matcher: 'Write|Edit',
             hooks: [
               async (input, toolUseId) => {
+                const toolInput = (input as any).tool_input as Record<string, unknown>;
+                const filePath = resolveToolFilePath(toolInput, this.workingDirectory);
+                if (!filePath) return {};
+                // A Write a hook refuses never lands, so nothing waits on its change.
+                const content = toolInput.content;
+                if (typeof content === 'string' && fileHooks.some((hook) => hook.matches(filePath) && hook.onWrite(filePath, content).error)) return {};
+                await this.snapshotForChangeHooks(toolUseId, filePath);
+                return {};
+              },
+            ],
+          },
+          {
+            // A file that is a copy of state kept elsewhere is written fresh
+            // first. The host may wait on a review card, hence the long timeout.
+            matcher: 'Read',
+            timeout: CAPABILITY_REVIEW_HOOK_TIMEOUT_S,
+            hooks: [
+              async (input) => {
                 const filePath = resolveToolFilePath((input as any).tool_input as Record<string, unknown>, this.workingDirectory);
-                if (filePath) await this.snapshotForChangeHooks(toolUseId, filePath);
+                if (!filePath) return {};
+                for (const hook of fileHooks) {
+                  if (!hook.beforeRead || !hook.matches(filePath)) continue;
+                  const { error } = await hook.beforeRead(filePath, { sessionId: this.sessionId });
+                  if (error) {
+                    return { hookSpecificOutput: { hookEventName: 'PreToolUse' as const, permissionDecision: 'deny' as const, permissionDecisionReason: error } };
+                  }
+                }
                 return {};
               },
             ],
@@ -1724,7 +1749,7 @@ export class ClaudeCodeProcess extends EventEmitter {
               async (input, toolUseId) => {
                 const filePath = resolveToolFilePath((input as any).tool_input as Record<string, unknown>, this.workingDirectory);
                 if (!filePath) return {};
-                const warnings = await this.runChangeHooks(toolUseId, filePath);
+                const warnings = await this.runChangeHooks(toolUseId, filePath, input);
                 if (warnings.length === 0) return {};
                 return { hookSpecificOutput: { hookEventName: 'PostToolUse' as const, additionalContext: warnings.join('\n\n') } };
               },
@@ -1749,17 +1774,25 @@ export class ClaudeCodeProcess extends EventEmitter {
     this.fileChangeSnapshots.set(toolUseId, await fs.promises.readFile(filePath, 'utf-8').catch(() => null));
   }
 
-  /** After a Write/Edit landed: run the change hooks against the snapshot, returning their warnings. */
-  private async runChangeHooks(toolUseId: string | undefined, filePath: string): Promise<string[]> {
+  /**
+   * After a Write/Edit landed: run the change hooks against the snapshot, returning their warnings.
+   * The content is what this call wrote, so another session rewriting the file meanwhile cannot stand in for it.
+   */
+  private async runChangeHooks(toolUseId: string | undefined, filePath: string, input: unknown): Promise<string[]> {
     if (!toolUseId || !this.fileChangeSnapshots.has(toolUseId)) return [];
     const before = this.fileChangeSnapshots.get(toolUseId) ?? null;
     this.fileChangeSnapshots.delete(toolUseId);
-    const after = await fs.promises.readFile(filePath, 'utf-8').catch(() => null);
+    const call = input as { tool_name?: string; tool_input?: { content?: unknown }; tool_response?: unknown };
+    // An Edit that created the file has no original to rebuild from: read it back, as for a reply with none.
+    const replied = call.tool_name === 'Edit' ? editedFile(call.tool_response) : null;
+    const edit = replied?.before ? replied : null;
+    const written = call.tool_name === 'Write' && typeof call.tool_input?.content === 'string' ? call.tool_input.content : edit?.after;
+    const after = written ?? await fs.promises.readFile(filePath, 'utf-8').catch(() => null);
     if (after === null) return [];
     const warnings: string[] = [];
     for (const hook of fileHooks) {
       if (!hook.onChange || !hook.matches(filePath)) continue;
-      const { warning } = hook.onChange(filePath, before, after);
+      const { warning } = await hook.onChange(filePath, edit?.before ?? before, after, { sessionId: this.sessionId });
       if (warning) warnings.push(warning);
     }
     return warnings;

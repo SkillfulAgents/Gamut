@@ -106,6 +106,7 @@ const TEMPLATE_EXCLUDE = new Set([
   '.skillset-agent-metadata.json',
   'bookmarks.json',
   'agent-preferences.json',
+  'sidebar.json',
 ])
 
 /** Whether a file or directory of this name is left out of templates, at any level. */
@@ -360,6 +361,8 @@ async function walkFullExportFiles(
     for (const entry of entries) {
       if (signal?.aborted) return
       if (FULL_EXPORT_EXCLUDE.has(entry.name)) continue
+      // The workspace's sidebar.json is a copy of one person's sidebar, written fresh on every read.
+      if (dir === '' && entry.name === 'sidebar.json') continue
 
       if (entry.kind === 'directory') {
         await walk(entry.path)

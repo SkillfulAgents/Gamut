@@ -56,6 +56,11 @@ export const ROOT_FOLDER_NAME = 'Your Agents'
 
 export const DEFAULT_FOLDER_NAME = 'New Section'
 
+/** A folder name as one line: inner whitespace collapsed, ends trimmed. */
+export function folderHeading(name: string): string {
+  return name.replace(/\s+/g, ' ').trim()
+}
+
 /**
  * Ids for a folder's two drag roles. The `::` separator cannot occur in an
  * agent slug (they are filesystem directory names), so neither can ever

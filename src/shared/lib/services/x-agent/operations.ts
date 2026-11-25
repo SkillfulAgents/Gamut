@@ -19,7 +19,7 @@ import { isHiddenAutomatedSession } from '@shared/lib/services/session-visibilit
 import { getUserSettings, getUserSettingsForUsers, type UserSettingsData } from '@shared/lib/services/user-settings-service'
 import { getUserSummaries } from '@shared/lib/services/user-profile-service'
 import { applyAgentOrder } from '@shared/lib/utils/agent-order'
-import { buildFolderSections } from '@shared/lib/utils/agent-folders'
+import { buildFolderSections, folderHeading } from '@shared/lib/utils/agent-folders'
 import { displaySlug } from '@shared/lib/utils/file-storage'
 import { agentCatalog, agentRegistry } from '@shared/lib/agent-actor'
 import {
@@ -146,23 +146,29 @@ async function sidebarOf(caller: XAgentCaller): Promise<PersonSidebar | undefine
   }
 }
 
-/** The sidebar's own steps (app-sidebar's orderedAgents, then its sections), over the listed agents. */
 export function toListedSections(records: AgentRecord[], listedSlugs: string[], { name, settings }: PersonSidebar): ListedSections {
+  return { personName: name, sections: sectionsWithIds(records, listedSlugs, settings).map(({ name: heading, agents }) => ({ name: heading, agents })) }
+}
+
+/** The sidebar's own steps (app-sidebar's orderedAgents, then its sections), over the listed agents, each section with its stored id. */
+export function sectionsWithIds(
+  records: Pick<AgentRecord, 'slug' | 'createdAt'>[],
+  listedSlugs: string[],
+  settings: UserSettingsData,
+): { id: string; name: string; agents: string[] }[] {
   // Sections key on the stored slug; the list shows the display slug.
   const listed = records.map((r, i) => ({ slug: r.slug, createdAt: r.createdAt, listedSlug: listedSlugs[i] }))
-  return {
-    personName: name,
-    sections: buildFolderSections(
-      applyAgentOrder(listed, settings.agentOrder),
-      settings.agentFolders,
-      settings.agentFolderAssignments,
-      settings.agentListOrder,
-    ).map(({ folder, agents: members }) => ({
-      // One line per heading, whatever the stored name holds.
-      name: folder.name.replace(/\s+/g, ' ').trim(),
-      agents: members.map((m) => m.listedSlug),
-    })),
-  }
+  return buildFolderSections(
+    applyAgentOrder(listed, settings.agentOrder),
+    settings.agentFolders,
+    settings.agentFolderAssignments,
+    settings.agentListOrder,
+  ).map(({ folder, agents: members }) => ({
+    id: folder.id,
+    // One line per heading, whatever the stored name holds.
+    name: folderHeading(folder.name),
+    agents: members.map((m) => m.listedSlug),
+  }))
 }
 
 export function toListedAgent(

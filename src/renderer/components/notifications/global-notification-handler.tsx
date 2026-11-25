@@ -698,6 +698,11 @@ export function GlobalNotificationHandler() {
             queryClient.invalidateQueries({ queryKey: ['volume-agents'] })
             break
 
+          case 'user_settings_changed':
+            // An agent changed this person's sidebar sections.
+            queryClient.invalidateQueries({ queryKey: ['user-settings'] })
+            break
+
           case 'agent_created':
             // Agent-created child creation lands outside the human create mutation,
             // so refresh both caches the direct-create path invalidates together.

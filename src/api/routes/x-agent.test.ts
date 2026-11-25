@@ -682,6 +682,134 @@ describe('/list', () => {
 })
 
 // ============================================================================
+// /sidebar-sections
+// ============================================================================
+
+describe('/sidebar-sections', () => {
+  async function storedSettings(userId: string) {
+    const row = await testDb.select().from(schema.userSettings).where(eq(schema.userSettings.userId, userId)).get()
+    return row ? JSON.parse(row.settings) : undefined
+  }
+
+  beforeEach(async () => {
+    authModeEnabled = true
+    await seedAgentRows(['agent-a', 'agent-b', 'other-private', 'k7x9m2ab3c'])
+    mockListAgents.mockResolvedValue([
+      { slug: 'k7x9m2ab3c', frontmatter: { name: 'Billing Ops' } },
+      { slug: 'agent-a', frontmatter: { name: 'Agent A' } },
+      { slug: 'agent-b', frontmatter: { name: 'Agent B' } },
+      { slug: 'other-private', frontmatter: { name: 'Other Private' } },
+      { slug: CALLER_SLUG, frontmatter: { name: 'Caller' } },
+    ])
+    // The caller's owner sees agent-a and agent-b; the person who writes in the session also has a private agent.
+    await testDb.insert(schema.agentAcl).values([
+      ...['agent-a', 'agent-b', 'k7x9m2ab3c'].map((agentSlug) => ({ id: randomUUID(), userId: OWNER_USER_ID, agentSlug, role: 'owner' as const, createdAt: new Date() })),
+      ...['agent-a', 'agent-b', 'k7x9m2ab3c', 'other-private', CALLER_SLUG].map((agentSlug) => ({ id: randomUUID(), userId: OTHER_USER_ID, agentSlug, role: 'user' as const, createdAt: new Date() })),
+    ])
+    await testDb.insert(schema.messageAuthor).values([
+      { id: 'other-message', sessionId: 'shared-session', agentSlug: CALLER_SLUG, userId: OTHER_USER_ID, createdAt: new Date() },
+      { id: 'old-message', sessionId: 'old-session', agentSlug: CALLER_SLUG, userId: OWNER_USER_ID, createdAt: new Date() },
+    ])
+    mockActiveIds.mockImplementation((agentSlug?: string) => (agentSlug === CALLER_SLUG ? ['shared-session', 'scheduled-run'] : []))
+  })
+
+  const call = (body: object, sessionId = 'shared-session') => authedFetch('/x-agent/sidebar-sections', { ...body, _callerSessionId: sessionId })
+  async function allowListing() {
+    const { setPolicy } = await import('@shared/lib/services/x-agent-policy-service')
+    await setPolicy(CALLER_SLUG, 'list', null, 'allow')
+  }
+  async function readFile(sessionId = 'shared-session') {
+    return (await (await call({}, sessionId)).json()).sections as Array<{ id: string; name: string; agents: string[] }> | null
+  }
+  async function readRefusal(sessionId = 'shared-session') {
+    return (await call({}, sessionId)).json()
+  }
+
+  it('reads the sidebar of the person who wrote last, with the agents the caller can list and the caller itself', async () => {
+    await allowListing()
+    await testDb.insert(schema.userSettings).values({
+      userId: OTHER_USER_ID,
+      settings: JSON.stringify({ agentFolders: [{ id: 'f-mine', name: 'Mine' }], agentFolderAssignments: { 'other-private': 'f-mine' } }),
+      updatedAt: new Date(),
+    })
+    const sections = await readFile()
+    expect(sections?.map((s) => s.id)).toEqual(['root', 'f-mine'])
+    // A minted agent shows by its display slug; other-private is the person's, not the caller's to list.
+    expect(sections?.[0].agents).toEqual(expect.arrayContaining(['agent-a', 'agent-b', 'billing-ops-k7x9m2ab3c', expect.stringContaining('caller')]))
+    expect(sections?.[1]).toEqual({ id: 'f-mine', name: 'Mine', agents: [] })
+  })
+
+  it('reads no sidebar when no person wrote in the session, the session is not running, or listing is blocked', async () => {
+    await allowListing()
+    const noPerson = { sections: null, reason: expect.stringMatching(/could not identify a person/) }
+    expect(await readRefusal('scheduled-run')).toEqual(noPerson)
+    expect(await readRefusal('old-session')).toEqual(noPerson)
+    const { setPolicy } = await import('@shared/lib/services/x-agent-policy-service')
+    await setPolicy(CALLER_SLUG, 'list', null, 'block')
+    expect(await readRefusal()).toEqual({ sections: null, reason: expect.any(String) })
+  })
+
+  it('applies a change to the file it read, keeps agents the caller cannot list in place, and tells the person once', async () => {
+    await allowListing()
+    await testDb.insert(schema.userSettings).values({
+      userId: OTHER_USER_ID,
+      settings: JSON.stringify({ agentFolders: [{ id: 'f-mine', name: 'Mine' }], agentFolderAssignments: { 'other-private': 'f-mine' } }),
+      updatedAt: new Date(),
+    })
+    const sections = (await readFile())!
+    const before = JSON.stringify(sections)
+    const [root, mine] = sections
+    const after = JSON.stringify([
+      { ...root, agents: root.agents.filter((a) => a !== 'agent-a') },
+      { ...mine, name: 'Mine and A', agents: ['agent-a'] },
+      { id: 'sales-1', name: 'Sales', agents: [] },
+    ])
+    const applied = await call({ before, after })
+    expect(applied.status).toBe(200)
+    // What was applied comes back, so the copy can match it.
+    expect((await applied.json()).sections.map((s: { id: string }) => s.id)).toEqual(['root', 'f-mine', 'sales-1'])
+    const settings = await storedSettings(OTHER_USER_ID)
+    expect(settings.agentFolders).toEqual([{ id: 'f-mine', name: 'Mine and A' }, { id: 'sales-1', name: 'Sales' }])
+    expect(settings.agentFolderAssignments).toEqual({ 'other-private': 'f-mine', 'agent-a': 'f-mine' })
+    expect(mockPublishToUsers).toHaveBeenCalledWith([OTHER_USER_ID], { type: 'user_settings_changed' })
+    expect(await storedSettings(OWNER_USER_ID)).toBeUndefined()
+
+    // The same change again starts from a copy that is no longer current.
+    const stale = await call({ before, after })
+    expect(stale.status).toBe(409)
+    expect((await stale.json()).error).not.toContain('agent-a')
+    expect(mockPublishToUsers).toHaveBeenCalledTimes(1)
+  })
+
+  it('writes back a copy whose stored section has a name the app saved but a new file could not have', async () => {
+    await allowListing()
+    await testDb.insert(schema.userSettings).values({
+      userId: OTHER_USER_ID,
+      settings: JSON.stringify({ agentFolders: [{ id: 'f-blank', name: '  ' }] }),
+      updatedAt: new Date(),
+    })
+    let sections = (await readFile())!
+    // Left as it is while an agent moves into it, then renamed.
+    const moved = JSON.stringify([{ ...sections[0], agents: sections[0].agents.filter((a) => a !== 'agent-a') }, { ...sections[1], agents: ['agent-a'] }])
+    expect((await call({ before: JSON.stringify(sections), after: moved })).status).toBe(200)
+    sections = (await readFile())!
+    expect((await call({ before: JSON.stringify(sections), after: JSON.stringify([sections[0], { ...sections[1], name: 'x'.repeat(201) }]) })).status).toBe(400)
+    expect((await call({ before: JSON.stringify(sections), after: JSON.stringify([...sections, { id: 'new-1', name: '  ', agents: [] }]) })).status).toBe(400)
+    expect((await call({ before: JSON.stringify(sections), after: JSON.stringify([sections[0], { ...sections[1], name: 'Named now' }]) })).status).toBe(200)
+    expect((await storedSettings(OTHER_USER_ID)).agentFolders).toEqual([{ id: 'f-blank', name: 'Named now' }])
+  })
+
+  it('refuses a write with no person behind the session, or with listing blocked', async () => {
+    const after = JSON.stringify([{ id: 'root', name: 'Your Agents', agents: [] }])
+    expect((await call({ before: after, after }, 'scheduled-run')).status).toBe(409)
+    const { setPolicy } = await import('@shared/lib/services/x-agent-policy-service')
+    await setPolicy(CALLER_SLUG, 'list', null, 'block')
+    expect((await call({ before: after, after })).status).toBe(403)
+    expect(await storedSettings(OTHER_USER_ID)).toBeUndefined()
+  })
+})
+
+// ============================================================================
 // /members
 // ============================================================================
 

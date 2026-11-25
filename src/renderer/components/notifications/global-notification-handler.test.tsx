@@ -1400,6 +1400,13 @@ describe('GlobalNotificationHandler — pending-request SSE pathway', () => {
     for (const key of keys) expect(queryClient.getQueryState(key)?.isInvalidated).toBe(true)
   })
 
+  it('user_settings_changed refetches the person\'s settings', () => {
+    const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries')
+    render(<QueryClientProvider client={queryClient}><GlobalNotificationHandler /></QueryClientProvider>)
+    simulateSSEMessage(getLatestEventSource(), { type: 'user_settings_changed' })
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['user-settings'] })
+  })
+
   it('agent_created invalidates visible agents and personal roles together', () => {
     const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries')
 
