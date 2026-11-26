@@ -8,6 +8,7 @@ import { WorkerEntrypoint, type D1Database, type DurableObjectNamespace, type Ex
 import { captureException, flushErrorReporting } from '@shared/lib/error-reporting'
 import { declareServerCapabilities, getServerFacts, withServerFacts, withServerFactsRevision } from '@shared/lib/facts/server-facts'
 import { runWithBackground } from '@shared/lib/background'
+import { MCP_RESOURCE_PATH } from '@shared/lib/mcp-server/oauth/oauth-config'
 import type { AppStateDurableObject } from './objects/cloudflare-app-state'
 import { serveContainerCall, type AgentDurableObject } from './objects/cloudflare-agent'
 import { DeployStepNotReady, needsLiveConnections, prepareDeploy, serveInTaskManager, type TaskManagerDurableObject } from './objects/cloudflare-task-manager'
@@ -140,12 +141,13 @@ export default {
 } satisfies ExportedHandler<Env>
 
 /**
- * True for a path the API answers rather than the UI: everything under /api/, and the Platform
- * sign-in launcher the API mounts at /auth in auth mode (src/api/index.ts), which Platform's
- * "Open Cloud Agents" link targets.
+ * True for a path the API answers rather than the UI: everything under /api/, and what the API
+ * mounts outside it (src/api/index.ts): the Platform sign-in launcher at /auth in auth mode, which
+ * Platform's "Open Cloud Agents" link targets, the MCP server at /mcp, and the documents under
+ * /.well-known an MCP client reads before it signs in.
  */
 export function servedByApi(pathname: string): boolean {
-  return pathname.startsWith('/api/') || pathname.startsWith('/auth/')
+  return pathname.startsWith('/api/') || pathname.startsWith('/auth/') || pathname === MCP_RESOURCE_PATH || pathname.startsWith('/.well-known/')
 }
 
 /**
