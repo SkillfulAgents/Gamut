@@ -45,7 +45,8 @@
     // which Cloudflare serves itself with the cache headers build-worker.mjs writes (dist/renderer/_headers).
     "run_worker_first": ["/*", "!/assets/*", "!/model-icons/*", "!/provider-icons/*", "!/service-icons/*"]
   },
-  // No id and no bucket name: the first `wrangler deploy` creates them (wrangler 4.45 or later) and writes them back here.
+  // No id and no bucket name: the first `wrangler deploy` creates them (wrangler 4.45 or later), named after the Worker,
+  // and later deploys find them by those names. Nothing is written back here.
   "d1_databases": [{ "binding": "DB" }],
   "r2_buckets": [{ "binding": "HOST_FILES" }, { "binding": "WORKSPACES" }],
   // HEIC photos to JPEG and profile photos (cloudflare-image-service.ts).
