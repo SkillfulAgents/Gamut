@@ -8,6 +8,7 @@ import { WorkerEntrypoint, type D1Database, type DurableObjectNamespace, type Ex
 import { captureException, flushErrorReporting } from '@shared/lib/error-reporting'
 import { declareServerCapabilities, getServerFacts, withServerFacts, withServerFactsRevision } from '@shared/lib/facts/server-facts'
 import { runWithBackground } from '@shared/lib/background'
+import { CONSENT_PAGE_HEADERS, isConsentPagePath } from '@shared/lib/mcp-server/oauth/oauth-config'
 import type { AppStateDurableObject } from './objects/cloudflare-app-state'
 import { serveContainerCall, type AgentDurableObject } from './objects/cloudflare-agent'
 import { DeployStepNotReady, needsLiveConnections, prepareDeploy, serveInTaskManager, type TaskManagerDurableObject } from './objects/cloudflare-task-manager'
@@ -237,5 +238,9 @@ export async function serveAppShell(request: Request, assets: Fetcher): Promise<
   headers.delete('etag')
   // A reload always finds the latest bundles, and a deploy's service worker is picked up at once.
   headers.set('cache-control', 'no-cache')
+  // The MCP consent page grants a client access to the person's account: no other origin may frame it.
+  if (isConsentPagePath(pathname)) {
+    for (const [name, value] of Object.entries(CONSENT_PAGE_HEADERS)) headers.set(name, value)
+  }
   return new Response(body, { status: response.status, headers })
 }
