@@ -4,11 +4,13 @@ import { describe, expect, it, vi } from 'vitest'
 import { TextRenderer } from './text-renderer'
 
 const { file } = vi.hoisted(() => ({
-  file: { text: 'first line\nsecond line', comments: [] as { anchor: unknown }[] },
+  file: { text: 'first line\nsecond line', comments: [] as { anchor: unknown }[], error: null as Error | null },
 }))
 
 vi.mock('./use-file-content', () => ({
-  useFileContent: () => ({ data: { text: file.text, truncated: false }, isLoading: false, error: null }),
+  useFileContent: () => ({ data: { text: file.text, truncated: false }, isLoading: false, error: file.error }),
+  fileLoadErrorText: (error: Error) => error.message,
+  fileLoadErrorTone: () => 'text-muted-foreground',
 }))
 
 vi.mock('@renderer/context/file-preview-context', () => ({
@@ -21,6 +23,13 @@ vi.mock('@renderer/hooks/use-voice-input', () => ({
 vi.mock('@renderer/components/ui/voice-input-button', () => ({ VoiceInputButton: () => null, VoiceInputError: () => null }))
 
 describe('TextRenderer', () => {
+  it('says why a file did not load', () => {
+    file.error = new Error('File not found')
+    render(<TextRenderer url="/gone.txt" filePath="/gone.txt" agentSlug="test-agent" />)
+    expect(screen.getByText('File not found')).toBeVisible()
+    file.error = null
+  })
+
   it('makes file contents selectable without including line numbers', () => {
     render(<TextRenderer url="/file.txt" filePath="/file.txt" agentSlug="test-agent" />)
 

@@ -1,6 +1,6 @@
 import { useMutation, useMutationState, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
 import { apiFetch } from '@renderer/lib/api'
-import { HttpError } from '@renderer/lib/http-error'
+import { HttpError, readHttpError } from '@renderer/lib/http-error'
 import { handleMutationError } from '@renderer/lib/query-client'
 import type {
   AddSessionTodoInput,
@@ -25,18 +25,13 @@ import { TODOS_QUERY_KEY } from './todos-query-key'
 
 export { TODOS_QUERY_KEY }
 
-async function readError(res: Response, fallback: string): Promise<Error> {
-  const body = await res.json().catch(() => null) as { error?: string } | null
-  return new HttpError(res.status, body?.error || fallback)
-}
-
 async function send<T>(path: string, method: string, body: unknown, fallback: string): Promise<T> {
   const res = await apiFetch(path, {
     method,
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   })
-  if (!res.ok) throw await readError(res, fallback)
+  if (!res.ok) throw await readHttpError(res, fallback)
   return res.json() as Promise<T>
 }
 
@@ -72,7 +67,7 @@ export function useTodos() {
     queryKey: TODOS_QUERY_KEY,
     queryFn: async () => {
       const res = await apiFetch('/api/todos')
-      if (!res.ok) throw await readError(res, 'Failed to load todos')
+      if (!res.ok) throw await readHttpError(res, 'Failed to load todos')
       return ((await res.json()) as { todos: TodoView[] }).todos
     },
     enabled,
@@ -162,7 +157,7 @@ export function useDeleteTodo() {
   return useMutation({
     mutationFn: async (id: string) => {
       const res = await apiFetch(`/api/todos/${id}`, { method: 'DELETE' })
-      if (!res.ok) throw await readError(res, 'Failed to delete the draft')
+      if (!res.ok) throw await readHttpError(res, 'Failed to delete the draft')
       return id
     },
     onSuccess: (id) => {

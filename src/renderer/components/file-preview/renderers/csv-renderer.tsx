@@ -3,7 +3,7 @@ import { memo, useMemo, useRef, useState, useCallback } from 'react'
 import { cn } from '@shared/lib/utils/cn'
 import { parseCsv } from './csv-parse'
 import { TextRenderer } from './text-renderer'
-import { useFileContent } from './use-file-content'
+import { fileLoadErrorText, fileLoadErrorTone, useFileContent } from './use-file-content'
 import { useCommentBox } from '../comments/use-comment-box'
 import type { CellRef } from '../comments/kinds'
 
@@ -121,9 +121,9 @@ export function CsvRenderer({ url, filePath, agentSlug }: CsvRendererProps) {
 
   if (error) {
     return (
-      <div className="flex items-center gap-2 p-4 text-sm text-destructive">
+      <div className={`flex items-center gap-2 p-4 text-sm ${fileLoadErrorTone(error)}`}>
         <AlertCircle className="h-4 w-4 shrink-0" />
-        <span>Failed to load file</span>
+        <span>{fileLoadErrorText(error)}</span>
       </div>
     )
   }
