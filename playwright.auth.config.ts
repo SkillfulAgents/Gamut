@@ -81,6 +81,9 @@ const authProjects = [
     port: e2ePort + 9,
     dataDir: path.join(e2eDataDir, 'collaboration'),
     viteCacheDir: path.join(e2eDataDir, '.vite', 'collaboration'),
+    // Nine spec files on one server: no more of them at once than the two
+    // workers the whole suite had before CI raised its worker count.
+    workers: 2,
   },
   {
     // Its own server: connecting a directory takes an admin, the first user of a fresh data dir.
@@ -136,14 +139,24 @@ export default defineConfig({
   projects: authProjects.map((project) => ({
     name: project.name,
     testMatch: project.testMatch,
+    ...(project.workers ? { workers: project.workers } : {}),
     use: { ...devices['Desktop Chrome'], baseURL: project.baseURL },
   })),
 
-  webServer: activeProjects.map((project) => ({
-    command: buildAuthServerCommand(project.dataDir, project.port, project.viteCacheDir),
-    url: `${project.baseURL}/api/settings`,
+  // One launcher starts every server at once (e2e/auth/serve-all.mjs): as one
+  // webServer entry each, Playwright started them one after another.
+  webServer: {
+    command: 'node e2e/auth/serve-all.mjs',
+    env: {
+      AUTH_E2E_SERVERS: JSON.stringify(activeProjects.map((project) => ({
+        name: project.name,
+        command: buildAuthServerCommand(project.dataDir, project.port, project.viteCacheDir),
+        url: `${project.baseURL}/api/settings`,
+      }))),
+    },
+    wait: { stdout: /auth e2e servers ready/ },
     reuseExistingServer: false,
     timeout: 120000,
     stdout: 'pipe',
-  })),
+  },
 })
