@@ -134,6 +134,7 @@ export const apiKeySettingsPatchSchema = z.object({
   accountProviderUserId: z.string(),
   exaApiKey: z.string(),
   ydcApiKey: z.string(),
+  specstreamApiKey: z.string(),
 }).partial().strict()
 
 const modelSettingsPatchSchema = z.object({

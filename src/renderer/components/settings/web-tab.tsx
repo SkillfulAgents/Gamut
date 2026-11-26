@@ -39,6 +39,12 @@ const WEB_PROVIDERS: {
     docsUrl: 'https://you.com/docs/agents/mcp-server',
   },
   {
+    value: 'specstream',
+    label: 'SpecStream',
+    note: 'Web search and full page reading, including PDF, Word and Excel links. Works with every model. Bring your own SpecStream API key.',
+    docsUrl: 'https://specstream.ai/agents.md',
+  },
+  {
     value: 'native',
     label: 'Native',
     note: "Uses the model's built-in web tools. Nothing to set up, but not all models have them.",
@@ -219,6 +225,17 @@ export function WebTab() {
                     helpText="Saving a key runs one search to verify access."
                     placeholder="Enter your You.com API key"
                     showNotConfiguredAlert={false}
+                  />
+                ) : provider.value === 'specstream' ? (
+                  <ProviderApiKeyInput
+                    providerId="specstream"
+                    label="SpecStream API Key"
+                    apiKeySettingsField="specstreamApiKey"
+                    apiKeyStatusKey="specstream"
+                    validationEndpoint="/api/settings/validate-web-key"
+                    validationBody={(apiKey) => ({ provider: 'specstream', apiKey })}
+                    envVarName="SPECSTREAM_API_KEY"
+                    placeholder="Enter your SpecStream API key"
                   />
                 ) : null}
               </ProviderCard>

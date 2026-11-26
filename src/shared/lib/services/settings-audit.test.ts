@@ -65,6 +65,14 @@ describe('buildSettingsAuditDetails', () => {
     })
   })
 
+  it('records a SpecStream key change under Web Search and redacts the key', () => {
+    const updated = baseSettings()
+    updated.apiKeys = { specstreamApiKey: 'test-key' }
+    expect(buildSettingsAuditDetails(baseSettings(), updated)).toEqual({
+      sections: ['Web Search'], changes: { 'apiKeys.specstreamApiKey': 'set' },
+    })
+  })
+
   it('redacts custom env var values but keeps their names', () => {
     const current = baseSettings()
     current.customEnvVars = { MY_TOKEN: 'hunter2' }

@@ -4,6 +4,7 @@ import { ExaWebProvider } from './exa-web-provider'
 import { ParallelWebProvider } from './parallel-web-provider'
 import { YouComWebProvider } from './youcom-web-provider'
 import { PlatformWebProvider } from './platform-web-provider'
+import { SpecStreamWebProvider } from './specstream-web-provider'
 import type { WebProviderId } from './types'
 
 type WebVendorId = Exclude<WebProviderId, 'native'>
@@ -13,6 +14,7 @@ const WEB_PROVIDERS: Record<WebVendorId, BaseWebProvider> = {
   parallel: new ParallelWebProvider(),
   platform: new PlatformWebProvider(),
   youcom: new YouComWebProvider(),
+  specstream: new SpecStreamWebProvider(),
 }
 
 function isVendorId(id: string): id is WebVendorId {
@@ -30,7 +32,7 @@ export function findWebProvider(id: string): BaseWebProvider | null {
 
 /**
  * Sticky like LLM/STT: a stored pin is a contract (broken credential fails loud).
- * Unset → Platform if Gamut login, else native. Exa is never auto-selected.
+ * Unset → Platform if Gamut login, else native. Exa and SpecStream are never auto-selected.
  */
 export async function resolveEffectiveWebVendor(): Promise<WebProviderId> {
   return resolveEffectiveWebVendorFrom(await getSettings())

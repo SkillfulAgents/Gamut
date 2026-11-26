@@ -60,6 +60,7 @@ const SECTION_RULES: Array<[prefix: string, label: string]> = [
   ['apiKeys.openaiApiKey', 'Voice'],
   ['apiKeys.exaApiKey', 'Web Search'],
   ['apiKeys.ydcApiKey', 'Web Search'],
+  ['apiKeys.specstreamApiKey', 'Web Search'],
   ['apiKeys.', 'Model Provider'],
   ['llmProvider', 'Model Provider'],
   ['models', 'Model Provider'],
