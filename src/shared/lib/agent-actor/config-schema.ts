@@ -81,6 +81,13 @@ export function configDocSpec(id: ConfigDocId): ConfigDocSpec {
   return CONFIG_DOCS[id]
 }
 
+export const SECRETS_FILE_OWNER_ONLY = 'Only an owner of this agent can open its secrets file.'
+
+/** Whether a normalized workspace path names the secrets document; any case, as a case-folding disk opens `.ENV` as `.env`. */
+export function isSecretsDocumentPath(normalizedPath: string): boolean {
+  return normalizedPath.toLowerCase() === CONFIG_DOCS.secrets.path
+}
+
 /** The file mode a filesystem implementation applies to this document, if any. */
 export function configDocMode(id: ConfigDocId): number | undefined {
   const spec = configDocSpec(id)

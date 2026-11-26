@@ -9,6 +9,8 @@ import { z } from 'zod'
 import type { ToolAnnotations } from '@modelcontextprotocol/server'
 import { agentRegistry } from '@shared/lib/agent-actor'
 import { normalizeWorkspacePath, WorkspaceFileError } from '@shared/lib/agent-actor/workspace-path'
+import { isSecretsDocumentPath, SECRETS_FILE_OWNER_ONLY } from '@shared/lib/agent-actor/config-schema'
+import { callerHasRoleOnTarget } from '@shared/lib/services/x-agent/caller'
 import { openDeliveredFile } from '@shared/lib/services/x-agent/operations'
 import { mintSignedDownloadUrl, mintSignedUploadUrl, SIGNED_UPLOAD_RESULT_TTL_MS } from '@shared/lib/signed-file-urls/signed-file-urls'
 import { MAX_UPLOAD_REQUEST_SIZE } from '@shared/lib/utils/chunked-upload'
@@ -129,6 +131,9 @@ export const getFileDownload = defineTool({
       throw new McpToolError('Invalid path: give a path inside the agent\'s workspace, like "output/report.md", with no "..".')
     }
     if (!normalized) throw new McpToolError('That path is the workspace root, not a file.')
+    if (isSecretsDocumentPath(normalized) && !(await callerHasRoleOnTarget(xAgentCallerFor(ctx), target.slug, 'owner'))) {
+      throw new McpToolError(SECRETS_FILE_OWNER_ONLY)
+    }
     let file: { size: number; stream: ReadableStream<Uint8Array> }
     try {
       file = await agentRegistry.get(target.slug).files.readSized(normalized, { confined: true })
