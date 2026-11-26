@@ -69,12 +69,13 @@ vi.mock('./agent-actor/all-agents', async (importOriginal) => ({
 vi.mock('./container/container-host', async () => {
   const { hostFromManagerMock } = await import('@shared/lib/agent-actor/testing/host-from-manager-mock')
   return {
-    containerHost: hostFromManagerMock({
+    // Assigned onto the host, which shares `onBeforeContainerStop` with the mock.
+    containerHost: Object.assign(hostFromManagerMock({
       watchWebhookRelay: (relay: { snapshot(): { available: boolean } }) => watchWebhookRelay(relay),
       ensureImageReady: () => ensureImageReady(),
       onBeforeContainerStop: null,
       clearClients: vi.fn(),
-    }),
+    }), { deriveReadiness: vi.fn() }),
   }
 })
 vi.mock('./config/settings', () => ({
@@ -436,6 +437,32 @@ describe('initializeServices post-bind critical path', () => {
       await vi.waitFor(() => expect(triggerManagerStart).toHaveBeenCalledTimes(1))
       await shutdownServices()
       expect(released).toEqual(SHUTDOWN_ORDER)
+    })
+
+    it("leaves containers alone in a process whose agents run elsewhere: none read at startup, no image checked, none stopped at shutdown", async () => {
+      const { closeBackgroundWork, initializeBackgroundWork, serviceHost } = await import('./background-work')
+      const { LocalTaskManager } = await import('./background-work/local-task-manager')
+      // As an entry point that says so does, before anything else registers.
+      await closeBackgroundWork()
+      await initializeBackgroundWork(new LocalTaskManager())
+      released.length = 0
+      const { initializeServices, registerBackgroundWork, shutdownServices } = await import('./startup')
+      await recordAgentsAndWatcher()
+      registerBackgroundWork({ localContainers: false })
+
+      const registered = Object.keys(serviceHost().states())
+      for (const id of ['container-host', 'container-image', 'containers']) expect(registered).not.toContain(id)
+
+      await initializeServices()
+      await vi.waitFor(() => expect(triggerManagerStart).toHaveBeenCalledTimes(1))
+      await shutdownServices()
+
+      expect(wakeAgents).not.toHaveBeenCalled()
+      expect(ensureImageReady).not.toHaveBeenCalled()
+      // An agent's container outlives this process, and stopping it is not this
+      // process's to ask. What it holds of its agents it still lets go of.
+      expect(released).toEqual(SHUTDOWN_ORDER.filter((step) => step !== 'containers' && step !== 'relay-watcher'))
+      expect(released).toContain('agents')
     })
 
     it('has stopped dispatch before it releases anything', async () => {
