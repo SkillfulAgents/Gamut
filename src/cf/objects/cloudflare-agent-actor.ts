@@ -168,6 +168,7 @@ export class CloudflareAgentActor implements AgentActor {
     list: this.rpc('sessions.list'),
     listByIds: this.rpc('sessions.listByIds'),
     get: this.rpc('sessions.get'),
+    getWithMetadata: this.rpc('sessions.getWithMetadata'),
     summary: this.rpc('sessions.summary'),
     exists: this.rpc('sessions.exists'),
     isKnown: this.rpc('sessions.isKnown'),
@@ -259,6 +260,8 @@ export class CloudflareAgentActor implements AgentActor {
       resume: this.rpc('inputs.reviews.resume'),
       settle: this.rpc('inputs.reviews.settle'),
       takeDecisionDetail: this.rpc('inputs.reviews.takeDecisionDetail'),
+      allowForSession: this.rpc('inputs.reviews.allowForSession'),
+      sessionAllows: this.rpc('inputs.reviews.sessionAllows'),
     },
     computerUse: {
       releaseApp: this.rpc('inputs.computerUse.releaseApp'),
