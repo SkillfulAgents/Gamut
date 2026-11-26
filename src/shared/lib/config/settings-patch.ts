@@ -158,12 +158,25 @@ export const providerSettingsPatchSchema = z.object({
   modelPricing: globalModelPricingPatchSchema,
 }).partial().strict()
 
+// null clears a limit back to its default (JSON cannot carry undefined, so an absent key means "unchanged").
 const agentLimitsPatchSchema = z.object({
-  maxOutputTokens: z.number(),
-  maxThinkingTokens: z.number(),
-  maxTurns: z.number(),
-  maxBudgetUsd: z.number(),
+  maxOutputTokens: z.number().nullable(),
+  maxThinkingTokens: z.number().nullable(),
+  maxTurns: z.number().nullable(),
+  maxBudgetUsd: z.number().nullable(),
 }).partial().strict()
+
+function applyAgentLimitsPatch(
+  before: AppSettings['agentLimits'],
+  patch: z.infer<typeof agentLimitsPatchSchema>,
+): AppSettings['agentLimits'] {
+  const next: Record<string, number | undefined> = { ...before }
+  for (const [limit, value] of Object.entries(patch)) {
+    if (value === null) delete next[limit]
+    else if (value !== undefined) next[limit] = value
+  }
+  return next
+}
 
 const authSettingsPatchSchema = z.object({
   trustedOrigins: z.array(z.string()),
@@ -480,7 +493,7 @@ export const generalSettingsComponent = {
       ...before,
       agentLimits:
         patch.agentLimits !== undefined
-          ? { ...before.agentLimits, ...patch.agentLimits }
+          ? applyAgentLimitsPatch(before.agentLimits, patch.agentLimits)
           : before.agentLimits,
       customEnvVars:
         patch.customEnvVars !== undefined ? patch.customEnvVars : before.customEnvVars,
