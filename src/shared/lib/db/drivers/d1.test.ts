@@ -95,14 +95,43 @@ afterEach(async () => {
 })
 
 describe('the D1 driver', () => {
-  it('brings a new database to the bundled schema, one batch per migration', async () => {
+  it('brings a new database to the bundled schema in one batch', async () => {
     const { sqlite, binding } = memoryD1()
     const batch = vi.spyOn(binding, 'batch')
 
     await migrateD1(binding, migrationBundle)
 
-    expect(batch).toHaveBeenCalledTimes(migrationBundle.length)
+    expect(batch).toHaveBeenCalledTimes(1)
     expect(journalRows(sqlite)).toEqual({ n: migrationBundle.length })
+  })
+
+  it('leaves a new database new when one of its migrations fails', async () => {
+    const { sqlite, binding } = memoryD1()
+    const migrations: MigrationMeta[] = [
+      { sql: ['CREATE TABLE first_table (id INTEGER PRIMARY KEY)'], folderMillis: 1, hash: 'aa', bps: true },
+      { sql: ['CREATE TABLE second_table (id INTEGER PRIMARY KEY'], folderMillis: 2, hash: 'bb', bps: true },
+    ]
+
+    await expect(migrateD1(binding, migrations)).rejects.toThrow()
+
+    expect(sqlite.prepare("SELECT name FROM sqlite_master WHERE name = 'first_table'").all()).toEqual([])
+    expect(journalRows(sqlite)).toEqual({ n: 0 })
+  })
+
+  it('runs each migration a migrated database has not seen in a batch of its own', async () => {
+    const { sqlite, binding } = memoryD1()
+    const migrations: MigrationMeta[] = [
+      { sql: ['CREATE TABLE first_table (id INTEGER PRIMARY KEY)'], folderMillis: 1, hash: 'aa', bps: true },
+      { sql: ['CREATE TABLE second_table (id INTEGER PRIMARY KEY)'], folderMillis: 2, hash: 'bb', bps: true },
+      { sql: ['CREATE TABLE third_table (id INTEGER PRIMARY KEY)'], folderMillis: 3, hash: 'cc', bps: true },
+    ]
+    await migrateD1(binding, migrations.slice(0, 1))
+    const batch = vi.spyOn(binding, 'batch')
+
+    await migrateD1(binding, migrations)
+
+    expect(batch).toHaveBeenCalledTimes(2)
+    expect(journalRows(sqlite)).toEqual({ n: 3 })
   })
 
   it('opens a migrated database without migrating it again', async () => {
@@ -127,23 +156,25 @@ describe('the D1 driver', () => {
     expect(journalRows(sqlite)).toEqual({ n: migrationBundle.length })
   })
 
-  it('keeps the migrations before one that fails, and starts at the failed one next time', async () => {
+  it('on a migrated database, keeps the migrations before one that fails, and starts at the failed one next time', async () => {
     const { sqlite, binding } = memoryD1()
     const migrations: MigrationMeta[] = [
       { sql: ['CREATE TABLE first_table (id INTEGER PRIMARY KEY)'], folderMillis: 1, hash: 'aa', bps: true },
-      { sql: ['CREATE TABLE second_table (id INTEGER PRIMARY KEY'], folderMillis: 2, hash: 'bb', bps: true },
+      { sql: ['CREATE TABLE second_table (id INTEGER PRIMARY KEY)'], folderMillis: 2, hash: 'bb', bps: true },
+      { sql: ['CREATE TABLE third_table (id INTEGER PRIMARY KEY'], folderMillis: 3, hash: 'cc', bps: true },
     ]
+    await migrateD1(binding, migrations.slice(0, 1))
 
     await expect(migrateD1(binding, migrations)).rejects.toThrow()
 
-    expect(sqlite.prepare("SELECT name FROM sqlite_master WHERE name = 'first_table'").all()).toEqual([{ name: 'first_table' }])
-    expect(journalRows(sqlite)).toEqual({ n: 1 })
+    expect(sqlite.prepare("SELECT name FROM sqlite_master WHERE name = 'second_table'").all()).toEqual([{ name: 'second_table' }])
+    expect(journalRows(sqlite)).toEqual({ n: 2 })
 
     const batch = vi.spyOn(binding, 'batch')
-    migrations[1] = { ...migrations[1], sql: ['CREATE TABLE second_table (id INTEGER PRIMARY KEY)'] }
+    migrations[2] = { ...migrations[2], sql: ['CREATE TABLE third_table (id INTEGER PRIMARY KEY)'] }
     await migrateD1(binding, migrations)
     expect(batch).toHaveBeenCalledTimes(1)
-    expect(journalRows(sqlite)).toEqual({ n: 2 })
+    expect(journalRows(sqlite)).toEqual({ n: 3 })
   })
 })
 
