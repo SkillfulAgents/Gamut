@@ -1,7 +1,7 @@
 import path from 'node:path'
 import { z } from 'zod'
 import { BaseMountableVolume, type VolumeEntry, type VolumeFile } from './base-mountable-volume'
-import type { VolumeAttention } from '@shared/lib/types/mount'
+import type { VolumeAttention, VolumeSyncLimit } from '@shared/lib/types/mount'
 import { githubBrowseSchema, type GithubVolumeConfig } from './github-schema'
 import { githubBranches, githubCreateRepo, githubFolder, githubHead, githubRepo, githubRepos, requireGithubAccount } from './github-client'
 import { githubSync } from './github-sync'
@@ -46,7 +46,17 @@ export class GithubMountableVolume extends BaseMountableVolume<GithubVolumeConfi
 
   override get agentNote(): string {
     return 'GitHub drives commit and push changes straight to their branch. ' +
-      `Files over ${GITHUB_PUSH_BYTES / 1000} KB, empty folders, and the repository's .github/workflows/ stay local.`
+      "Empty folders and the repository's .github/workflows/ stay local."
+  }
+
+  override get syncLimit(): VolumeSyncLimit {
+    return {
+      bytes: GITHUB_PUSH_BYTES,
+      note: `is over the ${GITHUB_PUSH_BYTES / 1000} KB limit, so this GitHub drive will not push it to GitHub. ` +
+        "Tell the user in your reply, unless the repository's .gitignore excludes the file. " +
+        'If GitHub has an earlier version, GitHub keeps it: do not move or delete the file, since that pushes a delete. ' +
+        'If the file is new and does not need to be in the repository, you may move it out of /mounts (for example to /workspace) instead.',
+    }
   }
 
   async list(name: string): Promise<VolumeEntry[]> {

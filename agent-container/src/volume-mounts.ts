@@ -292,8 +292,40 @@ export async function unmountVolumes(deadline: number): Promise<void> {
   if (!result.drained) console.error('[volumes] Unfinished uploads preserved in the workspace:', result);
 }
 
-export function mountedDrives(): { name: string; path: string; readOnly: boolean; sourceLabel?: string; agentNote?: string }[] {
-  return mounted.map((m) => ({ name: m.volumeName ?? m.name, path: path.join(MOUNTS_DIR, m.name), readOnly: m.readOnly ?? false, sourceLabel: m.sourceLabel, agentNote: m.agentNote }));
+export function mountedDrives(): { name: string; path: string; readOnly: boolean; sourceLabel?: string; agentNote?: string; syncLimit?: ContainerMount['syncLimit'] }[] {
+  return mounted.map((m) => ({ name: m.volumeName ?? m.name, path: path.join(MOUNTS_DIR, m.name), readOnly: m.readOnly ?? false, sourceLabel: m.sourceLabel, agentNote: m.agentNote, syncLimit: m.syncLimit }));
+}
+
+function missing(error: unknown): boolean {
+  return error instanceof Error && 'code' in error && error.code === 'ENOENT';
+}
+
+// Files over each drive's sync limit, by mount path, with their size. They are read
+// from rclone's local copies: under --vfs-cache-mode writes a write lands there before it uploads and stays for an hour,
+// whatever program wrote it, and a read does not. Null when a cache cannot be read.
+export async function oversizedFiles(drives: Pick<(typeof mounted)[number], 'name' | 'cache' | 'syncLimit'>[] = mounted): Promise<Map<string, { size: number; note: string }> | null> {
+  const found = new Map<string, { size: number; note: string }>();
+  for (const { name, cache, syncLimit } of drives) {
+    if (!syncLimit) continue;
+    const vfs = path.join(cache, 'vfs');
+    // Nothing written yet: no vfs/. rclone keeps one folder per remote under it.
+    const remotes = await fs.promises.readdir(vfs).catch((error: unknown) => (missing(error) ? [] : null));
+    if (remotes === null) return null;
+    if (remotes.length === 0) continue;
+    const root = path.join(vfs, remotes[0]);
+    const entries = await fs.promises.readdir(root, { recursive: true, withFileTypes: true }).catch(() => null);
+    if (entries === null) return null;
+    // A file deleted mid-scan is gone. Any other failure is a failed scan, not an absent file.
+    const stats = await Promise.all(entries.filter((entry) => entry.isFile()).map(async (entry) => {
+      const file = path.join(entry.parentPath, entry.name);
+      return { file, stat: await fs.promises.lstat(file).catch((error: unknown) => (missing(error) ? undefined : null)) };
+    }));
+    for (const { file, stat } of stats) {
+      if (stat === null) return null;
+      if (stat && stat.size > syncLimit.bytes) found.set(path.join(MOUNTS_DIR, name, path.relative(root, file)), { size: stat.size, note: syncLimit.note });
+    }
+  }
+  return found;
 }
 
 export function mountedVolumeIndexes(): { path: string; index: VolumeIndex }[] {

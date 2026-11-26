@@ -104,6 +104,14 @@ export interface ContainerVolume {
   sourceLabel?: string
   /** The drive type's agent note. Read-only drives omit it. */
   agentNote?: string
+  /** Files over this size stay local, and the agent that wrote one is told. Read-only drives omit it. */
+  syncLimit?: VolumeSyncLimit
+}
+
+export interface VolumeSyncLimit {
+  bytes: number
+  /** Follows the file's path in what the agent is told. */
+  note: string
 }
 
 /** Why a volume is not in the container. */

@@ -27,6 +27,7 @@ import { createBrowserTools } from './tools/browser';
 import { renameBrowserSession } from './browser-state';
 import { COMPUTER_USE_SERVER, COMPUTER_USE_TOOL_PREFIX, computerUseTools } from './tools/computer-use';
 import { fileHooks, mountIndexCommandHint, resolveToolFilePath } from './file-hooks';
+import { syncLimitHooks } from './sync-limit-hook';
 import { elapsedTimeNote } from './elapsed-time-note';
 import { builtinHints, createHintHookMatchers } from './hints';
 import { promptDate } from './prompt-date';
@@ -657,6 +658,7 @@ export class ClaudeCodeProcess extends EventEmitter {
   private sessionCapabilityGrants: Set<Capability>;
   // Per process, so shown hints are tracked per session, not per container.
   private readonly hintHooks = createHintHookMatchers(builtinHints, () => this.userMessageCount);
+  private readonly syncLimitHooks = syncLimitHooks();
   // Kept so the system prompt can be regenerated when a capability block
   // boundary flips mid-session (the prompt gates delegation sections on it).
   private availableEnvVars: string[] | undefined;
@@ -1530,6 +1532,7 @@ export class ClaudeCodeProcess extends EventEmitter {
             ],
           },
           ...this.hintHooks.UserPromptSubmit,
+          ...this.syncLimitHooks.UserPromptSubmit,
         ],
         PreToolUse: [
           ...this.hintHooks.PreToolUse,
@@ -1665,6 +1668,7 @@ export class ClaudeCodeProcess extends EventEmitter {
         ],
         PostToolUse: [
           ...this.hintHooks.PostToolUse,
+          ...this.syncLimitHooks.PostToolUse,
           {
             matcher: 'Bash',
             hooks: [

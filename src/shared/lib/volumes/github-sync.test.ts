@@ -79,7 +79,8 @@ async function setup(files: Record<string, string | Buffer> = { 'notes.txt': 'ke
 
 it('tells the agent once what writing to a GitHub drive does', () => {
   expect(new GithubMountableVolume('volume', 'Project', config).agentNote).toBe('GitHub drives commit and push changes straight to their branch. ' +
-    "Files over 700 KB, empty folders, and the repository's .github/workflows/ stay local.")
+    "Empty folders and the repository's .github/workflows/ stay local.")
+  expect(new GithubMountableVolume('volume', 'Project', config).syncLimit).toEqual({ bytes: 700_000, note: expect.stringContaining('is over the 700 KB limit, so this GitHub drive will not push it to GitHub. Tell the user') })
 })
 
 it('copies the selected folder byte-exactly', async () => {

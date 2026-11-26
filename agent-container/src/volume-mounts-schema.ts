@@ -13,6 +13,7 @@ export const volumesEnvSchema = z.array(z.object({
   readOnly: z.boolean().optional(),
   sourceLabel: z.string().optional(),
   agentNote: z.string().optional(),
+  syncLimit: z.object({ bytes: z.number().int().positive(), note: z.string().min(1) }).optional(),
 }));
 
 export type ContainerMount = z.infer<typeof volumesEnvSchema>[number];
