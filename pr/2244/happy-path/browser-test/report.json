@@ -1,0 +1,23 @@
+{
+  "storyId": "browser-test",
+  "passed": true,
+  "reason": "Sent the \"Open a browser and go to https://example.com. Tell me the page title.\" prompt to agent QA-20261126-062041-zlyb and confirmed the reply names \"Example Domain\".",
+  "steps": [
+    "Navigated to http://localhost:47891 — the Gamut home page loaded with \"QA-20261126-062041-zlyb\" listed in \"Your Agents\" in the sidebar.",
+    "Clicked \"QA-20261126-062041-zlyb\" in the sidebar — the agent page opened at /agents/qa-20261126-062041-zlyb-23jkaz8lok with an empty message box and status \"idle\".",
+    "Typed the prompt into the message box and clicked Send — the message appeared in the session, the status changed to \"Working...\", and the session was titled \"Check Example.com Page Title\".",
+    "Waited up to 3 minutes for \"Example Domain\" — the text appeared after about 5 seconds of work (\"Worked for 5s · 3 tool calls\"), and the status returned to idle.",
+    "Verified the response and took a screenshot — the agent replied: \"The page title is \"Example Domain\". I've closed the browser.\" The reply mentions \"Example Domain\" as required."
+  ],
+  "bugs": [],
+  "durationMs": 74037,
+  "sessionId": "9448b760-246d-4ae0-a88e-57a7dcc7cf54",
+  "cost": {
+    "inputTokens": 8989,
+    "outputTokens": 6257,
+    "cacheCreationTokens": 97659,
+    "cacheReadTokens": 872375,
+    "model": "claude-haiku-5-5",
+    "totalCostUsd": 0.249585
+  }
+}
