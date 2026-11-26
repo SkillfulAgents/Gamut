@@ -76,6 +76,15 @@ describe('servedByApi', () => {
     expect(servedByApi('/authors')).toBe(false)
     expect(servedByApi('/')).toBe(false)
   })
+
+  it('sends the MCP server and the documents its clients read before sign-in to the API', () => {
+    expect(servedByApi('/mcp')).toBe(true)
+    expect(servedByApi('/.well-known/oauth-protected-resource/mcp')).toBe(true)
+    expect(servedByApi('/.well-known/oauth-authorization-server')).toBe(true)
+    // The UI's own pages whose paths only look alike.
+    expect(servedByApi('/mcp-server')).toBe(false)
+    expect(servedByApi('/settings/mcp-server')).toBe(false)
+  })
 })
 
 describe('serveAppShell', () => {
