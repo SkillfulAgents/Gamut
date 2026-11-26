@@ -30,7 +30,6 @@ import { useUser } from '@renderer/context/user-context'
 import { useUnreadNotificationCount } from '@renderer/hooks/use-notifications'
 import { usePlatformUnreadCount } from '@renderer/hooks/use-platform-notifications'
 import { useUserSettings } from '@renderer/hooks/use-user-settings'
-import { setMountWarning } from '@renderer/hooks/use-mount-warnings'
 import { WEBHOOK_RELAY_QUERY_KEY } from '@renderer/hooks/use-webhook-relay'
 import {
   agentDetailQueryKeys,
@@ -749,15 +748,6 @@ export function GlobalNotificationHandler() {
               queryClient.invalidateQueries({ queryKey: ['webhook-triggers', agentSlug] })
             }
             queryClient.invalidateQueries({ queryKey: ['agents'] })
-            break
-          }
-
-          case 'mount_health_warning': {
-            // An empty list clears the banner.
-            setMountWarning(queryClient, {
-              agentSlug: data.agentSlug,
-              notMounted: data.notMounted,
-            })
             break
           }
 

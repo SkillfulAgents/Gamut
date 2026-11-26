@@ -37,6 +37,7 @@ import type {
   InterruptSessionResult,
   StopOptions,
 } from '@shared/lib/container/types'
+import type { NotMountedReason, NotMountedVolume } from '@shared/lib/types/mount'
 import type { RuntimeOptions } from '@shared/lib/container/runtime-options'
 import type { SessionModelRuntime } from './live/live-sessions'
 import type { SessionEvent, WireFrame } from './live/session-channel'
@@ -321,6 +322,8 @@ export interface ContainerOps {
    * `orStarting`, any start in flight counts too.
    */
   holdsDrives(options?: { orStarting?: boolean }): Promise<boolean>
+  /** A health read of a drive. True when it changed a drive this container started without (`AgentLiveSummary.container.missingDrives`). */
+  noteDriveHealth(driveId: string, reason: NotMountedReason | null): Promise<boolean>
   /** `client.getInfo` — queries the runtime; prefer `status()` unless freshness matters. */
   info(): Promise<ContainerInfo>
   /**
@@ -538,6 +541,8 @@ export interface AgentLiveSummary {
   /** The container's cached status: no runtime is queried. */
   container: ContainerInfo & {
     healthWarnings: HealthCheckResult[]
+    /** The drives this container started without, and why. */
+    missingDrives: NotMountedVolume[]
     /** Running on a container environment or drives that a change replaced (`invalidate`). */
     stale: boolean
     /**

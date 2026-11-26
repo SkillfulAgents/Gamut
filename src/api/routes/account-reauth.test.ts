@@ -34,6 +34,7 @@ vi.mock('@shared/lib/container/container-host', () => ({
       dispose: () => {},
       getCachedInfo: () => ({ status: 'running' }),
       getHealthWarnings: () => [],
+      getMissingDrives: () => [],
       isStale: () => false,
       idleSince: () => null,
       ensureRunning: async () => {},

@@ -491,10 +491,8 @@ describe('ContainerRuntime.ensureRunning — env var construction', () => {
 // ============================================================================
 
 describe('ContainerRuntime.ensureRunning — mount volumes', () => {
-  // The folder list of every mount banner broadcast, in order.
-  const mountWarnings = () => vi.mocked(globalFeed.publish).mock.calls
-    .filter(([msg]: any) => msg.type === 'mount_health_warning')
-    .map(([msg]: any) => msg.notMounted)
+  // The drives the agent's banner lists.
+  const mountWarnings = () => agents.runtime('test-agent').getMissingDrives()
 
   beforeEach(() => {
     vi.clearAllMocks()
@@ -521,7 +519,7 @@ describe('ContainerRuntime.ensureRunning — mount volumes', () => {
     await agents.runtime('test-agent').ensureRunning()
 
     expect(mockStart.mock.calls[0][0].volumes).toEqual([])
-    expect(mountWarnings()).toEqual([[]])
+    expect(mountWarnings()).toEqual([])
     expect(mockHealth).not.toHaveBeenCalled()
     mockStop.mockResolvedValueOnce({ forceStopUsed: false, stopped: true })
     await agents.runtime('test-agent').stopContainer()
@@ -542,38 +540,45 @@ describe('ContainerRuntime.ensureRunning — mount volumes', () => {
     expect(opts.volumes).toEqual([{ volumeId: 'm1', name: 'ok' }, { volumeId: 'm2', name: 'stuck' }])
     expect(opts.envVars).not.toHaveProperty('SUPERAGENT_VOLUMES')
     expect(mockHealth).toHaveBeenCalledWith(8080)
-    expect(mountWarnings()).toEqual([[{ name: 'gone', reason: 'not found' }, { name: 'stuck', reason: 'failed in the agent' }]])
+    expect(mountWarnings()).toEqual([{ name: 'gone', reason: 'not found' }, { name: 'stuck', reason: 'failed in the agent' }])
     expect(mockCaptureMessage).toHaveBeenCalledWith('Agent container could not mount folders', expect.objectContaining({ extra: { agentId: 'test-agent', count: 1 } }))
     // Its drives start with empty caches, so they forget what earlier mounts held.
     expect(mockRemounted).toHaveBeenCalledExactlyOnceWith('test-agent')
   })
 
-  it.each(['preparing', 'preparing: GitHub is busy'])('marks the agent stale once a drive that missed its start (%s) can mount', async (reason) => {
+  it.each(['preparing', 'preparing: GitHub is busy'])('reads the drives again once a drive that missed its start (%s) has its first copy', async (reason) => {
     let copied!: () => void
     mockFirstCopies.mockReturnValueOnce(new Promise<void>((resolve) => { copied = resolve }))
     mockListVolumes.mockResolvedValueOnce({ volumes: [], notMounted: [{ name: 'repo', reason }] })
-      .mockResolvedValueOnce({ volumes: [{ volumeId: 'm1', name: 'repo' }], notMounted: [] })
-    const runtime = agents.runtime('test-agent')
+    await agents.runtime('test-agent').ensureRunning()
+    expect(mockListVolumes).toHaveBeenCalledTimes(1)
 
-    await runtime.ensureRunning()
-    expect(mountWarnings()).toEqual([[{ name: 'repo', reason }]])
-    expect(runtime.isStale()).toBe(false)
     copied()
-
-    await vi.waitFor(() => expect(runtime.isStale()).toBe(true))
-    expect(globalFeed.publish).toHaveBeenCalledWith({ type: 'agent_updated', agentSlug: 'test-agent' })
+    await vi.waitFor(() => expect(mockListVolumes).toHaveBeenCalledTimes(2))
   })
 
-  it('leaves the agent as it is when a drive that missed its start fails its first copy', async () => {
-    mockFirstCopies.mockResolvedValueOnce(undefined)
-    mockListVolumes.mockResolvedValueOnce({ volumes: [], notMounted: [{ name: 'repo', reason: 'preparing' }] })
-      .mockResolvedValueOnce({ volumes: [], notMounted: [{ name: 'repo', reason: 'preparing: GitHub is busy' }] })
-    const runtime = agents.runtime('test-agent')
+  it('drops the drives a start went without when that start fails', async () => {
+    mockListVolumes.mockResolvedValueOnce({ volumes: [], notMounted: [{ name: 'gone', reason: 'not found', driveId: 'd1' }] })
+    mockStart.mockRejectedValueOnce(new Error('no runtime'))
 
+    await expect(agents.runtime('test-agent').ensureRunning()).rejects.toThrow('no runtime')
+    expect(mountWarnings()).toEqual([])
+  })
+
+  it('marks a drive the start went without as back, and the agent stale, when a health read finds it fine', async () => {
+    mockListVolumes.mockResolvedValueOnce({ volumes: [], notMounted: [{ name: 'team', reason: 'unreadable', driveId: 'd1' }, { name: 'gone', reason: 'not found' }] })
+    const runtime = agents.runtime('test-agent')
     await runtime.ensureRunning()
-    await vi.waitFor(() => expect(mockListVolumes).toHaveBeenCalledTimes(2))
-    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(runtime.noteDriveHealth('d1', 'unreadable')).toBe(false)
     expect(runtime.isStale()).toBe(false)
+    expect(runtime.noteDriveHealth('d1', null)).toBe(true)
+    expect(mountWarnings()).toEqual([{ name: 'team', reason: 'ready after a restart', driveId: 'd1' }, { name: 'gone', reason: 'not found' }])
+    expect(runtime.isStale()).toBe(true)
+
+    mockStop.mockResolvedValueOnce({ forceStopUsed: false, stopped: true })
+    await runtime.stopContainer()
+    expect(mountWarnings()).toEqual([])
   })
 
   it.each([
@@ -585,7 +590,7 @@ describe('ContainerRuntime.ensureRunning — mount volumes', () => {
 
     await agents.runtime('test-agent').ensureRunning()
 
-    expect(mountWarnings()).toEqual([[{ name: 'gone', reason: 'not found' }, { name: 'ok', reason: 'not confirmed' }]])
+    expect(mountWarnings()).toEqual([{ name: 'gone', reason: 'not found' }, { name: 'ok', reason: 'not confirmed' }])
   })
 
   // A stop, or a stop and a later start, during the report read own the agent now.
@@ -737,7 +742,8 @@ describe('ContainerRuntime.ensureRunning — mount volumes', () => {
 
   // A container already running got its volumes from an earlier start, not this list.
   it('reads no mount report when the container was already running', async () => {
-    mockListVolumes.mockResolvedValue({ volumes: [{ volumeId: 'm1', name: 'ok' }], notMounted: [] })
+    // Today's health says nothing about what that container mounted when it started.
+    mockListVolumes.mockResolvedValue({ volumes: [{ volumeId: 'm1', name: 'ok' }], notMounted: [{ name: 'gone', reason: 'not found', driveId: 'd1' }] })
     mockStart.mockImplementationOnce(async (options: { onAlreadyRunning?: () => void }) => {
       options.onAlreadyRunning?.()
       return { status: 'running', port: 3000 }
@@ -759,7 +765,7 @@ describe('ContainerRuntime.ensureRunning — mount volumes', () => {
 
     await agents.runtime('test-agent').ensureRunning()
 
-    expect(mountWarnings().at(-1)).toEqual([{ name: 'gone', reason: 'not found' }, { name: 'ok', reason: 'start failed with folders' }])
+    expect(mountWarnings()).toEqual([{ name: 'gone', reason: 'not found' }, { name: 'ok', reason: 'start failed with folders' }])
     expect(mockHealth).not.toHaveBeenCalled()
   })
 
@@ -771,7 +777,7 @@ describe('ContainerRuntime.ensureRunning — mount volumes', () => {
     await agents.runtime('test-agent').ensureRunning()
 
     expect(mockHealth).toHaveBeenCalled()
-    expect(mountWarnings()).toEqual([[]])
+    expect(mountWarnings()).toEqual([])
   })
 
   it('leaves every folder out on a runtime that cannot mount', async () => {
@@ -781,7 +787,7 @@ describe('ContainerRuntime.ensureRunning — mount volumes', () => {
     await agents.runtime('test-agent').ensureRunning()
 
     expect(mockStart.mock.calls[0][0].volumes).toEqual([])
-    expect(mountWarnings()).toEqual([[{ name: 'ok', reason: 'not supported here' }]])
+    expect(mountWarnings()).toEqual([{ name: 'ok', reason: 'not supported here' }])
   })
 })
 

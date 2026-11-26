@@ -157,6 +157,7 @@ export class CloudflareAgentActor implements AgentActor {
     status: this.rpc('container.status'),
     invalidate: this.rpc('container.invalidate'),
     holdsDrives: this.rpc('container.holdsDrives'),
+    noteDriveHealth: this.rpc('container.noteDriveHealth'),
     info: this.rpc('container.info'),
     syncConnectionEnvironment: this.rpc('container.syncConnectionEnvironment'),
     fetch: this.rpc('container.fetch'),

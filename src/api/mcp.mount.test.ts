@@ -32,7 +32,7 @@ vi.mock('@shared/lib/agent-actor/registry', () => ({
   agentRegistry: {
     get: (slug: string) => ({
       live: async () => ({
-        container: { status: slug === 'alpha' ? 'running' : 'stopped', port: null, healthWarnings: [], stale: false, idleSince: null },
+        container: { status: slug === 'alpha' ? 'running' : 'stopped', port: null, healthWarnings: [], missingDrives: [], stale: false, idleSince: null },
         activeSessionIds: [],
       }),
       sessions: {

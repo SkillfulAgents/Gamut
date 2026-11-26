@@ -48,7 +48,6 @@ vi.mock('@tanstack/react-router', async (importOriginal) => ({
   useNavigate: () => navigate,
 }))
 vi.mock('@renderer/hooks/use-user-settings', () => ({ useUserSettings: () => ({ data: undefined }) }))
-vi.mock('@renderer/hooks/use-mount-warnings', () => ({ setMountWarning: vi.fn() }))
 vi.mock('@renderer/hooks/use-agents', () => ({
   useAgents: () => ({ data: [] }),
   resolveRouteAgentId: (slug: string | undefined) => slug,

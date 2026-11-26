@@ -1,6 +1,6 @@
 import { agentsHoldingDrives } from '@shared/lib/agent-actor'
 import { agentRegistry } from '@shared/lib/agent-actor/registry'
-import { agentsWithVolume, getMounts } from '@shared/lib/services/mount-service'
+import { agentsWithVolume, getMounts, listVolumes } from '@shared/lib/services/mount-service'
 import { globalFeed } from '@shared/lib/notifications/global-feed'
 
 async function invalidate(agentSlug: string, restart?: boolean): Promise<void> {
@@ -32,6 +32,11 @@ export async function afterVolumeChange(volumeId: string): Promise<void> {
   } catch (error) {
     console.error('[volumes] Could not find the agents a drive change reached:', error)
   }
+}
+
+/** A reconnected account can bring back a drive a running agent started without. Reading the agents' drives again tells them. */
+export async function recheckAgentDrives(): Promise<void> {
+  await Promise.all((await agentsHoldingDrives()).map((slug) => listVolumes(slug)))
 }
 
 /** Each agent's drives, or null for one that could not be read, which is then left out rather than the rest. */

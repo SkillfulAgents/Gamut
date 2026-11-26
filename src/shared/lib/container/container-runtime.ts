@@ -108,14 +108,6 @@ function notMountedAll(volumes: ContainerVolume[], reason: NotMountedReason): No
   return volumes.map(({ name }) => ({ name, reason }))
 }
 
-// An empty list clears the banner.
-function showNotMounted(slug: string, notMounted: NotMountedVolume[]): void {
-  if (notMounted.length > 0) {
-    console.warn(`[ContainerRuntime] ${notMounted.length} volume(s) not mounted for ${slug}:`, notMounted.map((v) => `${v.name} (${v.reason})`))
-  }
-  globalFeed.publish({ type: 'mount_health_warning', agentSlug: slug, notMounted })
-}
-
 async function readUnmounted(client: ContainerClient, volumes: ContainerVolume[], port: number | null): Promise<NotMountedVolume[]> {
   const health = healthVolumesSchema.safeParse(await client.health(port ?? undefined).catch(() => null))
   // Without a report, nothing says the volumes mounted.
@@ -145,6 +137,8 @@ export class ContainerRuntime {
   private readonly activity = new ActivityClock()
   /** Cached health warnings */
   private healthWarnings: HealthCheckResult[] = []
+  /** The drives this start went without, and why. A stop or the next start clears them. */
+  private missingDrives: NotMountedVolume[] = []
   /** The fatal result a deferred recovery is to report, until it does. */
   private lastFatal: RuntimeFatalKind = null
   /** Being stopped — skip health checks, sync, and connection error recovery */
@@ -383,7 +377,10 @@ export class ContainerRuntime {
       await startPromise
     } catch (error) {
       // Nothing runs on the drives a failed start read, so a mark made during it means nothing.
-      if (this.starting === startPromise) this.stale = false
+      if (this.starting === startPromise) {
+        this.stale = false
+        this.missingDrives = []
+      }
       // A start that failed can still leave its container running: read it again.
       if (!this.disposed) this.watch()?.start()
       throw error
@@ -416,6 +413,7 @@ export class ContainerRuntime {
       this.watch()?.startHealth()
     } else {
       this.stale = false
+      this.missingDrives = []
       this.agent.containerWatch.stopHealth()
     }
   }
@@ -627,6 +625,23 @@ export class ContainerRuntime {
     return this.healthWarnings
   }
 
+  getMissingDrives(): NotMountedVolume[] {
+    return this.missingDrives
+  }
+
+  /** A health read of a drive. True when it changed the reason of a drive this start went without. One fine now mounts at the next start. */
+  noteDriveHealth(driveId: string, reason: NotMountedReason | null): boolean {
+    const now = reason ?? 'ready after a restart'
+    let changed = false
+    this.missingDrives = this.missingDrives.map((drive) => {
+      if (drive.driveId !== driveId || drive.reason === now) return drive
+      changed = true
+      return { ...drive, reason: now }
+    })
+    if (changed && reason === null) this.markStale()
+    return changed
+  }
+
   // Ensure the container is running, starting it with connected accounts if needed
   // Returns the container client
   //
@@ -684,6 +699,7 @@ export class ContainerRuntime {
     const lifecycle = ++this.lifecycle
     // A mark from an earlier start that failed does not carry into this one, which reads everything again.
     this.stale = false
+    this.missingDrives = []
     // Read once for this start, and handed to the client's start with the env:
     // the image, the resource limits, the provider env and the platform token
     // all come from it. The next start reads again.
@@ -803,6 +819,9 @@ export class ContainerRuntime {
     const canMount = listed.volumes.length > 0 && client.volumeRunFlags() !== null
     const notMounted = [...listed.notMounted, ...(canMount ? [] : notMountedAll(listed.volumes, 'not supported here'))]
     const volumes = canMount ? listed.volumes : []
+    // Set at the drive read, so a health read during the container start updates it.
+    this.assertCurrent(lifecycle)
+    this.missingDrives = notMounted
 
     // Start container (user secrets are in .env file in workspace).
     let volumesDropped = false
@@ -840,9 +859,12 @@ export class ContainerRuntime {
       status: info.status,
     })
 
-    // A container already running got its volumes, and its banner, from an earlier start.
+    // A container already running got its volumes from an earlier start: this read does not describe them.
     // A runtime replaced meanwhile (a runner change) no longer owns the banner.
-    if (alreadyRunning || this.disposed) return client
+    if (alreadyRunning || this.disposed) {
+      this.missingDrives = []
+      return client
+    }
     await remounted(slug)
     this.volumesPresent = !volumesDropped && volumes.length > 0
     let failed: NotMountedVolume[] = []
@@ -859,22 +881,17 @@ export class ContainerRuntime {
         extra: { agentId: slug, count: failed.length },
       })
     }
-    showNotMounted(slug, [...notMounted, ...failed])
+    this.missingDrives = [...this.missingDrives, ...failed]
+    if (this.missingDrives.length > 0) {
+      console.warn(`[ContainerRuntime] ${this.missingDrives.length} volume(s) not mounted for ${slug}:`, this.missingDrives.map((v) => `${v.name} (${v.reason})`))
+      globalFeed.publish({ type: 'agent_updated', agentSlug: slug })
+    }
     // A retry of a failed first copy still reports the old failure, so any preparing reason counts.
-    const preparing = notMounted.filter((volume) => volume.reason.startsWith('preparing')).map((volume) => volume.name)
-    if (preparing.length > 0) background(this.staleOnceCopied(lifecycle, preparing), { name: 'container-runtime.stale-after-first-copy' })
+    if (notMounted.some((volume) => volume.reason.startsWith('preparing'))) background(firstCopies(slug).then(() => listVolumes(slug)), { name: 'container-runtime.read-after-first-copy' })
 
     return client
   }
 
-  /** A drive still making its first copy missed this start: once it can mount, the agent is stale until it restarts. */
-  private async staleOnceCopied(lifecycle: number, preparing: string[]): Promise<void> {
-    await firstCopies(this.slug)
-    const { volumes } = await listVolumes(this.slug)
-    if (lifecycle !== this.lifecycle || this.cached?.status !== 'running' || !volumes.some((volume) => preparing.includes(volume.name))) return
-    this.markStale()
-    globalFeed.publish({ type: 'agent_updated', agentSlug: this.slug })
-  }
 
   // Record a keep-alive ping (e.g. from an open dashboard) to prevent auto-sleep
   keepAlive(): void {
@@ -971,6 +988,7 @@ export class ContainerRuntime {
     this.agent.idleAlarm.disarm()
     this.agent.containerWatch.stop()
     this.healthWarnings = []
+    this.missingDrives = []
     this.stopping = false
     this.starting = null
     this.stale = false

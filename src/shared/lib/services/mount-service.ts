@@ -226,7 +226,7 @@ export async function listVolumes(slug: string, beforeRead?: () => void): Promis
         ...(driver?.dirCacheSeconds ? { dirCacheSeconds: driver.dirCacheSeconds } : {}),
         ...(row.readOnly || driver?.readOnly ? { readOnly: true } : driver?.agentNote && driver.sourceLabel ? { sourceLabel: driver.sourceLabel, agentNote: driver.agentNote } : {}) }]
     }),
-    notMounted: judged.flatMap(({ row, reason }) => reason === null ? [] : [{ name: row.name, reason }]),
+    notMounted: judged.flatMap(({ row, reason }) => reason === null ? [] : [{ name: row.name, reason, driveId: row.volumeId }]),
   }
 }
 

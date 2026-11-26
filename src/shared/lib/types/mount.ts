@@ -120,9 +120,13 @@ export type NotMountedReason =
   | 'start failed with folders'
   | 'failed in the agent'
   | 'not confirmed'
+  /** Missed this start, and its health is fine now: the next start mounts it. */
+  | 'ready after a restart'
 
 /** A volume the container does not have, with why. */
 export interface NotMountedVolume {
   name: string
   reason: NotMountedReason
+  /** The drive, when the host judged it. Reasons from inside the container change only at a restart. */
+  driveId?: string
 }

@@ -44,6 +44,7 @@ vi.mock('@shared/lib/services/mount-service', async (original) => {
 // Agents as the container sees them: a running one is marked stale, a stopped one is left alone.
 const containers = vi.hoisted(() => ({ running: new Set<string>(), starting: new Set<string>(), stale: new Set<string>(), calls: [] as string[] }))
 vi.mock('@shared/lib/agent-actor/registry', () => ({
+  isAgentRegistryInitialized: () => false,
   agentRegistry: {
     get: (slug: string) => ({
       container: {

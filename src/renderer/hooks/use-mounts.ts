@@ -104,6 +104,24 @@ export function useSetMountReadOnly() {
   })
 }
 
+/** Stop, then start: a running container takes drive changes only at its start. */
+export function useRestartAgent() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    meta: { skipGlobalErrorToast: true },
+    mutationFn: async (slug: string) => {
+      const stopRes = await apiFetch(`/api/agents/${slug}/stop`, { method: 'POST' })
+      if (!stopRes.ok) throw new Error(await parseErrorMessage(stopRes, 'Failed to stop agent'))
+      const startRes = await apiFetch(`/api/agents/${slug}/start`, { method: 'POST' })
+      if (!startRes.ok) throw new Error(await parseErrorMessage(startRes, 'Failed to start agent'))
+    },
+    // The start read each drive again: its health may have changed.
+    // Bare prefix - see useAddMount.
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['mounts'] }),
+  })
+}
+
 export function useVolumesManager(agentSlug: string) {
   const { data: mountsData, isLoading, error: mountError, refetch } = useAgentMounts(agentSlug)
   const registry = useVolumeDefinitions()
@@ -123,7 +141,7 @@ export function useVolumesManager(agentSlug: string) {
   const addMount = useAddMount()
   const removeMount = useRemoveMount()
   const setMountReadOnly = useSetMountReadOnly()
-  const [isRestarting, setIsRestarting] = useState(false)
+  const restartAgent = useRestartAgent()
   const [operationError, setOperationError] = useState<string | null>(null)
 
   // The host marks a running agent stale on a drive change, and a stop clears it.
@@ -170,21 +188,14 @@ export function useVolumesManager(agentSlug: string) {
   }
 
   const handleRestart = async () => {
-    setIsRestarting(true)
     setOperationError(null)
     try {
-      const stopRes = await apiFetch(`/api/agents/${agentSlug}/stop`, { method: 'POST' })
-      if (!stopRes.ok) throw new Error(await parseErrorMessage(stopRes, 'Failed to stop agent'))
-      const startRes = await apiFetch(`/api/agents/${agentSlug}/start`, { method: 'POST' })
-      if (!startRes.ok) throw new Error(await parseErrorMessage(startRes, 'Failed to start agent'))
-      refetch()
+      await restartAgent.mutateAsync(agentSlug)
     } catch (error) {
       // Shown outside the prompt: a stop that went through has already hidden it.
       const message = error instanceof Error ? error.message : 'Failed to restart agent'
       console.error('Failed to restart agent:', error)
       setOperationError(message)
-    } finally {
-      setIsRestarting(false)
     }
   }
 
@@ -199,7 +210,7 @@ export function useVolumesManager(agentSlug: string) {
     canModifyMounts,
     canCreateMount,
     pendingRestart,
-    isRestarting,
+    isRestarting: restartAgent.isPending,
     isAddingMount: addMount.isPending,
     isRemovingMount: removeMount.isPending,
     isUpdatingMount: setMountReadOnly.isPending,

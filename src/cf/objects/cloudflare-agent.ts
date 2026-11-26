@@ -68,7 +68,7 @@ export function inactivityTimeoutMs(autoSleepMs: number): number {
 const AGENT_NAME_KEY = 'agent-name'
 // A sleeping agent as its actor reports it: a stopped container, and nothing running or waiting.
 const ASLEEP_LIVE: AgentLiveSummary = {
-  container: { status: 'stopped', port: null, healthWarnings: [], stale: false, idleSince: null },
+  container: { status: 'stopped', port: null, healthWarnings: [], missingDrives: [], stale: false, idleSince: null },
   activeSessionIds: [],
   awaitingSessionIds: [],
   openRequests: [],
