@@ -16,6 +16,9 @@ const platformBrowserProvider = new PlatformBrowserProvider()
 const steelProvider = new SteelProvider()
 const tabtenderProvider = new TabtenderProvider()
 
+/** The providers whose browsers run in someone's cloud, not on this machine. */
+const cloudProviders: HostBrowserProvider[] = [browserbaseProvider, platformBrowserProvider, steelProvider, tabtenderProvider]
+
 const providerMap: Record<string, HostBrowserProvider> = {
   chrome: chromeProvider,
   browserbase: browserbaseProvider,
@@ -55,15 +58,24 @@ export async function detectAllProviders(): Promise<HostBrowserProviderStatus[]>
  * running (e.g. Chrome launched, then the user switches to Browserbase), so
  * teardown keyed to getActiveProvider() would miss it. Used by agent deletion
  * before the profile directory is removed.
+ *
+ * A cloud provider is asked whatever it reports as running. Its browser runs
+ * outside this process, which may never have heard of it: another process
+ * opened it, or this one did before it started over. Its `stop` finds the
+ * agent's live browser itself. Chrome runs under this process, which knows
+ * whether it does, and a stop for one it is not running would drop the claim
+ * a launch under way holds on the profile.
  */
 export async function stopInstanceOnAllProviders(instanceId: string): Promise<void> {
-  await Promise.all(
-    Object.values(providerMap).map(async (provider) => {
-      if (provider.isRunning(instanceId)) {
-        await provider.stop(instanceId)
-      }
-    })
-  )
+  await Promise.all([
+    chromeProvider.isRunning(instanceId) ? chromeProvider.stop(instanceId) : undefined,
+    // One provider's failure must not keep the others from stopping theirs.
+    ...cloudProviders.map((provider) =>
+      provider.stop(instanceId).catch((error: unknown) => {
+        console.error(`[host-browser] Stopping the ${provider.name} browser of ${instanceId} failed:`, error)
+      }),
+    ),
+  ])
 }
 
 /**
