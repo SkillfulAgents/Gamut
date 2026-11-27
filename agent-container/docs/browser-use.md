@@ -230,8 +230,15 @@ successful sessions. Follow the system prompt's confirmation rules for
 submissions with financial, legal, destructive, or externally visible impact.
 
 The snapshot normally merges frames — payment frames included — with working
-refs. Use those refs; for keystroke-driven fields, click the ref and use `browser_type`. A frame
-the tree could not read is listed under the snapshot.
+refs, and a ref works without selecting its frame. Use those refs; for
+keystroke-driven fields, click the ref and use `browser_type`. A frame
+the tree could not read is listed under the snapshot. For what refs do not
+reach inside a frame — a script, a wait for a selector, the frame's text —
+`browser_frame` selects it by its `Iframe` ref or a CSS selector (cross-origin
+frames included): `browser_snapshot`, `browser_read`, `browser_eval` and
+`browser_wait` then act inside it, and their results start with a `[frame]`
+line. `browser_frame("main")` returns to the page; `browser_frame()` lists the
+page's frames.
 
 ## Uploads and Downloads
 
@@ -264,9 +271,8 @@ never copy secret values into source.
 
 ## JavaScript and Advanced Commands
 
-`browser_eval` runs in the top frame, or in the frame last selected with
-`browser_run(["frame", "<iframe selector or @ref>"])` (`frame main` returns to
-the top frame). Return `JSON.stringify(...)` for
+`browser_eval` runs in the page, or inside the frame selected with
+`browser_frame`. Return `JSON.stringify(...)` for
 structured output when needed. Prefer normal browser tools for interaction;
 evaluation is useful for page-owned data or state that is difficult to access
 semantically.

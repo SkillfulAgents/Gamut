@@ -24,6 +24,15 @@ export const browserReadDef: ToolDefinition = {
   },
 }
 
+export const browserFrameDef: ToolDefinition = {
+  displayName: 'Select Frame',
+  getSummary: (input) => {
+    const target = (input as { target?: string }).target?.trim()
+    if (!target) return 'list frames'
+    return target.length > 40 ? `${target.slice(0, 37)}...` : target
+  },
+}
+
 export const browserCaptureTrafficDef: ToolDefinition = {
   displayName: 'Capture Traffic',
   getSummary: (input) => (input as { action?: string }).action ?? null,
