@@ -1,0 +1,23 @@
+{
+  "storyId": "browser-test",
+  "passed": true,
+  "reason": "Ran the 5-step smoke test: open Gamut, open agent QA-20261127-231918-8kd2, send the \"Example Domain\" browser prompt, wait for the reply, verify it.",
+  "steps": [
+    "Step 1: Navigated to http://localhost:47891 — Gamut home loaded with the QA-20261127-231918-8kd2 and QA-20261127-231917-hsdi agents listed in the sidebar.",
+    "Step 2: Clicked QA-20261127-231918-8kd2 in the sidebar — agent page opened with an empty message input and the agent shown as idle.",
+    "Step 3: Typed \"Open a browser and go to https://example.com. Tell me the page title.\" and pressed Enter — the text stayed in the input and Enter added a blank line, so nothing was sent. Clicked the Send button — a session \"Browser Page Title Check\" started, the prompt appeared in the chat, and the agent went to \"working\". This is consistent with the input's \"Press cmd+enter to send\" hint, so I did not log it as a bug.",
+    "Step 4: Waited up to 3 minutes for \"Example Domain\" to appear — the reply appeared within seconds, the agent returned to idle, and the turn showed \"Worked for 4s · 3 tool calls\".",
+    "Step 5: Verified the response — it reads 'The page title is \"Example Domain\". The page loaded normally, and I closed the browser afterwards.' Took a screenshot showing the response in the chat."
+  ],
+  "bugs": [],
+  "durationMs": 77060,
+  "sessionId": "8be8d415-844e-43cc-ae45-5adb6a34e4a6",
+  "cost": {
+    "inputTokens": 8475,
+    "outputTokens": 8434,
+    "cacheCreationTokens": 151595,
+    "cacheReadTokens": 694816,
+    "model": "claude-haiku-5-5",
+    "totalCostUsd": 0.30962
+  }
+}
