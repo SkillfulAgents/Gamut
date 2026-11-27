@@ -128,7 +128,7 @@ function RetentionRow({
             type="button"
             variant={look.grouped ? 'row' : 'outline'}
             disabled={disabled}
-            className={look.grouped ? undefined : 'w-20 justify-between'}
+            className={look.grouped ? look.value : 'w-20 justify-between'}
             aria-label={`${label}: ${triggerLabel}. Click to change.`}
             data-testid={`${testId}-trigger`}
           >

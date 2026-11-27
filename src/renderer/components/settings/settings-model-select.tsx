@@ -64,6 +64,8 @@ interface ModelPickerPopoverProps {
    * Agent Home's side-panel rows, with no button frame or hover fill.
    */
   variant?: PickerVariant
+  /** Extra classes for the trigger, after its variant's own: the side panel's row text size. */
+  triggerClassName?: string
   /**
    * Render a footer inside the picker (per-agent default surfaces) with a
    * "Reset to Global Default" action — disabled while the host already follows
@@ -157,6 +159,7 @@ export function ModelPickerPopover({
   disabled,
   align = 'end',
   variant = 'outline',
+  triggerClassName,
   appDefault,
   modelLock,
 }: ModelPickerPopoverProps) {
@@ -195,6 +198,7 @@ export function ModelPickerPopover({
             type="button"
             variant={variant}
             disabled={disabled}
+            className={triggerClassName}
             aria-label={`Model: ${triggerLabel ?? 'select'}.${lockedReason ? ` ${lockedReason}` : ''} Click to change.`}
             data-testid="settings-model-trigger"
             data-locked={lockedSelection || undefined}

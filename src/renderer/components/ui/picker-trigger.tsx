@@ -26,9 +26,10 @@ export const PickerTrigger = React.forwardRef<HTMLButtonElement, PickerTriggerPr
     <Slot
       ref={ref}
       className={cn(
-        // The negative margin puts the chevron on the row's padding edge.
+        // The negative margin puts the chevron on the row's padding edge. The value takes a settings row label's size;
+        // the agent side panel, whose labels are a step larger, passes its own.
         row
-          ? '-mr-1 h-8 gap-1 px-1 text-[12px]/5 font-normal text-muted-foreground/70 hover:bg-transparent hover:text-muted-foreground/70'
+          ? '-mr-1 h-8 gap-1 px-1 text-xs font-normal text-muted-foreground/70 hover:bg-transparent hover:text-muted-foreground/70'
           : !asChild && outlineSize === 'sm' && 'h-[34px] gap-1.5 px-2 text-xs font-medium',
         className,
       )}

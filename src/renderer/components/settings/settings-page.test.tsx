@@ -63,10 +63,12 @@ vi.mock('@renderer/components/ui/app-link', () => ({
 
 vi.mock('@renderer/components/layout/settings-page', () => ({
   SettingsPageContainer: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
-  PageTitle: ({ title }: { title: string }) => <h1>{title}</h1>,
+  PageTitle: ({ title, actions }: { title: string; actions?: React.ReactNode }) => (
+    <div data-testid="page-title"><h1>{title}</h1>{actions}</div>
+  ),
 }))
 
-import { SettingsPage, type SettingsPageSection } from './settings-page'
+import { SettingsHeaderActions, SettingsPage, type SettingsPageSection } from './settings-page'
 
 function section(id: string, externalHref?: string): SettingsPageSection {
   return {
@@ -123,5 +125,39 @@ describe('SettingsPage external-section fallback', () => {
 
     expect(screen.getByTestId('general-content')).toBeInTheDocument()
     expect(onSectionChange).toHaveBeenCalledWith('general')
+  })
+})
+
+describe('SettingsHeaderActions', () => {
+  it('draws a section\'s own actions on the page title\'s row, not in the section', async () => {
+    const withAction: SettingsPageSection = {
+      id: 'notifications',
+      label: 'Notifications',
+      icon: null,
+      render: () => (
+        <div data-testid="notifications-content">
+          <SettingsHeaderActions>
+            <button type="button">On</button>
+          </SettingsHeaderActions>
+        </div>
+      ),
+    }
+    render(<SettingsPage groups={[{ sections: [withAction] }]} initialSection="notifications" onClose={() => {}} />)
+
+    const action = await screen.findByRole('button', { name: 'On' })
+    expect(screen.getByTestId('page-title').contains(action)).toBe(true)
+    expect(screen.getByTestId('notifications-content').contains(action)).toBe(false)
+  })
+
+  it('leaves the actions where they are written when there is no settings page around them', () => {
+    render(
+      <div data-testid="bare">
+        <SettingsHeaderActions>
+          <button type="button">On</button>
+        </SettingsHeaderActions>
+      </div>,
+    )
+
+    expect(screen.getByTestId('bare').contains(screen.getByRole('button', { name: 'On' }))).toBe(true)
   })
 })

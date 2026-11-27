@@ -18,6 +18,9 @@ const buttonVariants = cva(
           "border border-input bg-background shadow-sm hover:bg-accent hover:text-accent-foreground",
         secondary:
           "bg-secondary text-secondary-foreground shadow-sm hover:bg-secondary/80",
+        // A row's or a toolbar's ordinary action: the flat grey of a segmented control's pill, at body weight, so it
+        // sits in the row instead of standing off it. Settings uses it where it once used `outline`.
+        soft: "bg-muted font-normal text-foreground hover:bg-foreground/[0.08]",
         ghost: "hover:bg-accent hover:text-accent-foreground",
         link: "text-primary underline-offset-4 hover:underline",
       },
