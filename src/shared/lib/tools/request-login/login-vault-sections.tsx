@@ -1,13 +1,14 @@
-import { useState } from 'react'
-import { ChevronDown, ChevronRight, KeyRound, Loader2, UserPlus, Users } from 'lucide-react'
+import { useState, type ReactNode } from 'react'
+import { ChevronRight, Globe, KeyRound, Loader2, UserPlus, Users } from 'lucide-react'
 import { Button } from '@renderer/components/ui/button'
 import { Checkbox } from '@renderer/components/ui/checkbox'
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@renderer/components/ui/dropdown-menu'
 import { Input } from '@renderer/components/ui/input'
+import { Switch } from '@renderer/components/ui/switch'
 import { ServiceIcon } from '@renderer/components/ui/service-icon'
 import { cn } from '@shared/lib/utils/cn'
 import type { LoginVaultInfo, VaultOffer } from './login-request'
 import type { LoginViaProvider } from './use-login-request'
+import { LOGIN_PRIMARY_BUTTON, LoginActionRow, LoginStepBack } from './login-parts'
 
 /**
  * The sign-in form's vault parts: the choice among the user's saved accounts
@@ -86,7 +87,7 @@ export function AccountChooser({
             </span>
             {pendingId === offer.id
               ? <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground" aria-label="Signing in" />
-              : <span className="shrink-0 text-2xs font-medium text-blue-600 dark:text-blue-400">Use</span>}
+              : <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />}
           </button>
         ))}
         <button type="button" onClick={onDifferent} disabled={disabled} className={row} data-testid="login-different-account">
@@ -158,64 +159,77 @@ export function AddSignInMethodBox({
   )
 }
 
-/** "Save for later": the account goes to the user's vault, and this agent may use it. */
-export function SaveForLater({
-  checked,
-  onCheckedChange,
-  site,
-  username,
-  askUsername,
-  usernameValue,
-  onUsernameChange,
-  otherMembers,
-  disabled,
-}: {
+/**
+ * "Securely save in Gamut Vault": the account goes to the user's vault, and
+ * this agent may use it. One line, on the row with the card's buttons; what
+ * it does is its description.
+ */
+export function SaveToggle({ checked, onCheckedChange, site, username, disabled }: {
   checked: boolean
   onCheckedChange: (checked: boolean) => void
   site: string
   /** Whose account it is, when already known. */
   username: string | null
+  disabled: boolean
+}) {
+  return (
+    <label className="flex min-w-0 items-center gap-2.5 text-xs text-muted-foreground" data-testid="login-save-section">
+      <Switch
+        checked={checked}
+        onCheckedChange={onCheckedChange}
+        disabled={disabled}
+        // On, it takes Submit's blue: the two go together.
+        className="data-[state=checked]:bg-blue-600"
+        data-testid="login-save"
+        aria-describedby="login-save-hint"
+      />
+      Securely save in Gamut Vault
+      <span id="login-save-hint" className="sr-only">
+        Saves {username ?? 'this account'} to your vault for {site}, so this agent can sign in again without asking you.
+      </span>
+    </label>
+  )
+}
+
+/**
+ * What saving asks or says besides the toggle: the username to save under,
+ * when the page shows none, and who else can use the agent. Above the
+ * buttons' row, so the row keeps its height.
+ */
+export function SaveDetails({ askUsername, usernameValue, onUsernameChange, usernameMissing = false, otherMembers, site, disabled }: {
   /** The page shows no username field and none is known: ask for it to save. */
   askUsername: boolean
   usernameValue: string
   onUsernameChange: (value: string) => void
+  /** Sign in was clicked without the username to save under. */
+  usernameMissing?: boolean
   otherMembers: number
+  site: string
   disabled: boolean
 }) {
+  if (!askUsername && otherMembers === 0) return null
   return (
-    <div className="space-y-1.5 rounded-md border border-border bg-muted/30 p-2.5" data-testid="login-save-section">
-      <label className="flex items-start gap-2 text-xs text-foreground">
-        <Checkbox
-          checked={checked}
-          onCheckedChange={(value) => onCheckedChange(value === true)}
-          disabled={disabled}
-          className="mt-0.5"
-          data-testid="login-save"
-          aria-describedby="login-save-hint"
-        />
-        <span className="min-w-0">
-          <span className="block font-medium">Save for later</span>
-          <span id="login-save-hint" className="block text-2xs text-muted-foreground">
-            Saves {username ? <span className="break-all">{username}</span> : 'this account'} to your vault for {site}, so this agent can sign in again without asking you.
-          </span>
-        </span>
-      </label>
-      {checked && askUsername && (
-        <Input
-          value={usernameValue}
-          onChange={(event) => onUsernameChange(event.target.value)}
-          placeholder="Username or email of this account"
-          aria-label="Username or email of this account"
-          autoCapitalize="none"
-          autoCorrect="off"
-          spellCheck={false}
-          autoComplete="off"
-          disabled={disabled}
-          className="h-8 bg-background text-xs"
-          data-testid="login-save-username"
-        />
+    <div className="space-y-2" data-testid="login-save-details">
+      {askUsername && (
+        <div className="space-y-1">
+          <Input
+            value={usernameValue}
+            onChange={(event) => onUsernameChange(event.target.value)}
+            placeholder="Username or email of this account"
+            aria-label="Username or email of this account"
+            aria-invalid={usernameMissing || undefined}
+            autoCapitalize="none"
+            autoCorrect="off"
+            spellCheck={false}
+            autoComplete="off"
+            disabled={disabled}
+            className={cn('h-8 bg-background text-xs', usernameMissing && 'border-destructive')}
+            data-testid="login-save-username"
+          />
+          {usernameMissing && <p className="text-2xs text-destructive">Enter the username or email to save this account under</p>}
+        </div>
       )}
-      {checked && <SharedNotice otherMembers={otherMembers} site={site} />}
+      <SharedNotice otherMembers={otherMembers} site={site} />
     </div>
   )
 }
@@ -264,81 +278,93 @@ export function providerChoices(info: LoginVaultInfo, site: string, pageProvider
 /** Picking one asks which account there (SignInViaPanel); null picks among the user's saved accounts on other sites. */
 type PickProvider = (providerId: string | null) => void
 
-function MoreProviders({ choices, onPick }: { choices: ProviderChoices; onPick: PickProvider }) {
+/** One way in, as a row: a tile, its name, a chevron. */
+function WayRow({ icon, title, subtitle, disabled, onClick, 'data-testid': testId }: {
+  icon: ReactNode
+  title: string
+  subtitle?: string
+  disabled: boolean
+  onClick: () => void
+  'data-testid'?: string
+}) {
   return (
-    <DropdownMenuContent align="start">
-      {choices.more.map((provider) => (
-        <DropdownMenuItem key={provider.id} className="text-xs" onSelect={() => onPick(provider.id)} data-testid={`login-via-provider-${provider.id}`}>
-          <ProviderIcon providerId={provider.id} className="h-3.5 w-3.5" />
-          {provider.name}
-        </DropdownMenuItem>
-      ))}
-      {choices.otherSaved && choices.more.length > 0 && <DropdownMenuSeparator />}
-      {choices.otherSaved && (
-        <DropdownMenuItem className="text-xs" onSelect={() => onPick(null)} data-testid="login-via-saved">
-          <KeyRound className="text-muted-foreground" />
-          Another saved account
-        </DropdownMenuItem>
-      )}
-    </DropdownMenuContent>
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className="flex w-full items-center gap-3 px-2.5 py-2 text-left hover:bg-muted disabled:opacity-50"
+      data-testid={testId}
+    >
+      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-border bg-background">{icon}</span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-xs text-foreground">{title}</span>
+        {subtitle && <span className="block truncate text-2xs text-muted-foreground">{subtitle}</span>}
+      </span>
+      <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+    </button>
   )
 }
 
-/** "Or sign in with" the page's own buttons; the other providers under More. */
-export function SignInWithProviders({ choices, lead, disabled, onPick }: { choices: ProviderChoices; lead: string; disabled: boolean; onPick: PickProvider }) {
+const WAY_GROUP = 'divide-y divide-border overflow-hidden rounded-md border border-border bg-background'
+
+/**
+ * Every way in but the form, a step away from it: the page itself first,
+ * then the password manager, then the providers (the page's own buttons
+ * first) and the user's saved accounts on other sites.
+ */
+export function LoginWayList({ onPage, passwordManager, choices, disabled, onPick }: {
+  /** Null on this app's own sign-in page: nothing may be typed there by hand. */
+  onPage: (() => void) | null
+  /** The connected password manager's logins for the page, when it fits. */
+  passwordManager: ReactNode
+  choices: ProviderChoices | null
+  disabled: boolean
+  onPick: PickProvider
+}) {
+  const providers = choices ? [...choices.shown, ...choices.more] : []
+  const otherSaved = choices?.otherSaved === true
   return (
-    <div className="flex flex-wrap items-center gap-1.5" data-testid="login-via-providers">
-      <span className="mr-1 text-xs text-muted-foreground">{lead}</span>
-      {choices.shown.map((provider) => (
-        <Button
-          key={provider.id}
-          type="button"
-          variant="outline"
-          size="xs"
-          className="gap-1.5 px-2 font-normal"
-          onClick={() => onPick(provider.id)}
-          disabled={disabled}
-          data-testid={`login-via-provider-${provider.id}`}
-        >
-          <ProviderIcon providerId={provider.id} className="h-3.5 w-3.5" />
-          {provider.name}
-        </Button>
-      ))}
-      {(choices.more.length > 0 || choices.otherSaved) && (
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button type="button" variant="ghost" size="xs" className="gap-1 px-2 font-normal text-muted-foreground" disabled={disabled} data-testid="login-via-more">
-              More
-              <ChevronDown className="h-3 w-3" />
-            </Button>
-          </DropdownMenuTrigger>
-          <MoreProviders choices={choices} onPick={onPick} />
-        </DropdownMenu>
+    <div className="space-y-3" data-testid="login-ways-group">
+      {onPage && (
+        <div className={WAY_GROUP}>
+          <WayRow
+            icon={<Globe className="h-3.5 w-3.5 text-muted-foreground" />}
+            title="Sign in on the page instead"
+            subtitle="Type it yourself in the browser view"
+            disabled={disabled}
+            onClick={onPage}
+            data-testid="login-take-over"
+          />
+        </div>
+      )}
+      {passwordManager}
+      {(providers.length > 0 || otherSaved) && (
+        <div className="space-y-1.5" data-testid="login-via-providers">
+          <p className="text-xs text-muted-foreground">Sign in with</p>
+          <div className={WAY_GROUP}>
+            {providers.map((provider) => (
+              <WayRow
+                key={provider.id}
+                icon={<ProviderIcon providerId={provider.id} className="h-3.5 w-3.5" />}
+                title={provider.name}
+                disabled={disabled}
+                onClick={() => onPick(provider.id)}
+                data-testid={`login-via-provider-${provider.id}`}
+              />
+            ))}
+            {otherSaved && (
+              <WayRow
+                icon={<KeyRound className="h-3.5 w-3.5 text-muted-foreground" />}
+                title="Another saved account"
+                disabled={disabled}
+                onClick={() => onPick(null)}
+                data-testid="login-via-saved"
+              />
+            )}
+          </div>
+        </div>
       )}
     </div>
-  )
-}
-
-/** For a page that shows no such buttons: every provider, out of the way. */
-export function OtherWaysToSignIn({ choices, disabled, onPick }: { choices: ProviderChoices; disabled: boolean; onPick: PickProvider }) {
-  if (choices.more.length === 0 && !choices.otherSaved) return null
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button
-          type="button"
-          variant="link"
-          size="xs"
-          className="h-auto gap-1 px-0 text-xs text-muted-foreground"
-          disabled={disabled}
-          data-testid="login-via-more"
-        >
-          Other ways to sign in
-          <ChevronDown className="h-3 w-3" />
-        </Button>
-      </DropdownMenuTrigger>
-      <MoreProviders choices={choices} onPick={onPick} />
-    </DropdownMenu>
   )
 }
 
@@ -368,13 +394,9 @@ export function SignInViaPanel({
   const [username, setUsername] = useState('')
   const provider = info?.providers.find((candidate) => candidate.id === providerId)
   const saved = !info ? [] : provider ? info.providerAccounts.filter((account) => account.providerId === provider.id) : otherSavedAccounts(info)
-  const back = (
-    <Button type="button" variant="ghost" size="xs" onClick={onBack} disabled={busy} data-testid="login-via-back">
-      Back to the form
-    </Button>
-  )
   return (
     <div className="space-y-3 pt-4" data-testid="login-via">
+      <LoginStepBack onClick={onBack} disabled={busy} data-testid="login-via-back" />
       <p className="flex items-center gap-2 text-sm text-foreground">
         {provider && <ProviderIcon providerId={provider.id} className="h-4 w-4 shrink-0" />}
         {provider ? `Which ${provider.name} account do you sign in to ${site} with?` : `Which account do you sign in to ${site} with?`}
@@ -395,7 +417,7 @@ export function SignInViaPanel({
                 <span className="block truncate text-xs font-medium text-foreground">{account.username}</span>
                 {!provider && <span className="block truncate text-2xs text-muted-foreground">{account.providerName}</span>}
               </span>
-              <span className="shrink-0 text-2xs font-medium text-blue-600 dark:text-blue-400">Use</span>
+              <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
             </button>
           ))}
         </div>
@@ -427,25 +449,23 @@ export function SignInViaPanel({
             Saved to your vault for {site}. The agent clicks the site&apos;s {provider.name.replace(/ \(.*\)$/, '')} button and picks only this account.
           </p>
           {error && <p className="text-xs text-destructive" role="alert">{error}</p>}
-          <div className="flex items-center justify-between gap-2">
-            {back}
+          <LoginActionRow>
             <Button
               type="submit"
-              size="xs"
-              className="min-w-24 bg-blue-600 text-white hover:bg-blue-700"
+              size="sm"
+              className={LOGIN_PRIMARY_BUTTON}
               loading={busy}
               disabled={busy || !username.trim()}
               data-testid="login-via-submit"
             >
               Continue
             </Button>
-          </div>
+          </LoginActionRow>
         </form>
       ) : (
         <>
           <SharedNotice otherMembers={info?.otherMembers ?? 0} site={site} />
           {error && <p className="text-xs text-destructive" role="alert">{error}</p>}
-          <div className="flex items-center gap-2">{back}</div>
         </>
       )}
     </div>

@@ -73,8 +73,10 @@ test.describe('Sign-in requests', () => {
     await expect(secret).toHaveAttribute('type', 'text')
     await expect(secret).toHaveCSS('-webkit-text-security', 'disc')
     await expect(secret).toHaveAttribute('data-1p-ignore', 'true')
-    await expect(card.getByTestId('login-privacy')).toHaveText('What you enter goes straight into example.com. The agent never sees the password; it can see the username.')
-    await expect(card.getByTestId('login-submit')).toBeDisabled()
+    await expect(card.getByTestId('login-privacy')).toHaveText('The agent never sees the password. Only filled on example.com.')
+    // Never greyed out: clicked empty, it sends nothing and the empty fields say what they need.
+    await card.getByTestId('login-submit').click()
+    await expect(card.getByTestId('login-field-missing-1')).toHaveText('Enter your password')
 
     await email.fill('person@example.com')
     await secret.fill(password)
@@ -103,6 +105,7 @@ test.describe('Sign-in requests', () => {
     await expect(card).toBeVisible({ timeout: 15000 })
     await toFields(card)
 
+    await card.getByTestId('login-other-ways').click()
     await card.getByTestId('login-take-over').click()
     await expect(card.getByTestId('login-manual')).toContainText('Sign in directly in the browser view on example.com')
     await card.getByTestId('login-manual-done').click()
@@ -158,6 +161,8 @@ test.describe('Sign-in requests', () => {
     await sessionPage.sendMessage('ask login')
     const card = page.getByTestId('login-request')
     await expect(card).toBeVisible({ timeout: 15000 })
+    // The header's X declines, in place of stopping the session.
+    await expect(card.getByTestId('request-stop-session')).toHaveCount(0)
     await card.getByTestId('login-decline').click()
     await expect(page.getByTestId('login-request')).toHaveCount(0, { timeout: 10000 })
     await sessionPage.waitForInputEnabled(15000)

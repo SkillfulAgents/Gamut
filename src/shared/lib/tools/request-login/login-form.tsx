@@ -1,10 +1,9 @@
 import { forwardRef, useEffect, useId, useRef, useState, type ComponentProps } from 'react'
-import { ChevronLeft, Eye, EyeOff, KeyRound, Lock, LockOpen, MousePointerClick } from 'lucide-react'
+import { Eye, EyeOff, KeyRound, MousePointerClick, ShieldCheck, TriangleAlert } from 'lucide-react'
 import { Button } from '@renderer/components/ui/button'
 import { Input } from '@renderer/components/ui/input'
 import { isElectron } from '@renderer/lib/env'
 import { cn } from '@shared/lib/utils/cn'
-import { DeclineButton } from '../requests/decline-button'
 import { BrowserCredentialPicker } from '../request-browser-input/browser-credential-picker'
 import { partKeyOf } from '@shared/lib/browser-vault/vault-schemas'
 import {
@@ -20,7 +19,8 @@ import {
   type VaultOffer,
 } from './login-request'
 import { loginRequestKey, recallLoginValues, setLoginRequestState } from './login-request-store'
-import { AccountChooser, AddSignInMethodBox, OtherWaysToSignIn, providerChoices, SaveForLater, SignInViaPanel, SignInWithProviders } from './login-vault-sections'
+import { AccountChooser, AddSignInMethodBox, LoginWayList, providerChoices, SaveDetails, SaveToggle, SignInViaPanel } from './login-vault-sections'
+import { LOGIN_PRIMARY_BUTTON, LoginActionRow, LoginStepBack, OtherWaysLink } from './login-parts'
 import { interruptedFillState, LoginContextUnavailable, useLoginContext, useLoginRequestActions, useLoginVaultInfo } from './use-login-request'
 
 interface LoginFormProps {
@@ -34,8 +34,8 @@ interface LoginFormProps {
   autoFocus?: boolean
 }
 
-/** What each kind is, in the app's words: the page's label is the agent's to choose. */
-const KIND_CHIPS: Record<LoginFieldKind, string> = {
+/** What each kind is, in the app's words, for a field whose label the agent chose. */
+const KIND_WORDS: Record<LoginFieldKind, string> = {
   username: 'username',
   password: 'password',
   otp: 'code',
@@ -107,42 +107,57 @@ const SecretInput = forwardRef<HTMLInputElement, ComponentProps<typeof Input> & 
   )
 })
 
-/** What the agent can see of the values, said exactly. */
-function privacyNote(site: string, kinds: LoginFieldKind[]): string {
+/** What the agent can see of the values, and where they go: two short lines. */
+function privacyNote(site: string, kinds: LoginFieldKind[]): [string, string] {
   const hidden = [
     kinds.includes('password') && 'password',
     kinds.includes('otp') && 'code',
     kinds.includes('text') && 'other fields',
   ].filter(Boolean) as string[]
-  const list = hidden.length > 1 ? `${hidden.slice(0, -1).join(', ')} or ${hidden[hidden.length - 1]}` : hidden[0]
-  if (!kinds.includes('username')) return `What you enter goes straight into ${site}. The agent never sees it.`
-  if (!hidden.length) return `What you enter goes straight into ${site}. The agent can see the username.`
-  return `What you enter goes straight into ${site}. The agent never sees the ${list}; it can see the username.`
+  const list = hidden.length > 1 ? `${hidden.slice(0, -1).join(', ')} and ${hidden[hidden.length - 1]}` : hidden[0]
+  return [hidden.length ? `The agent never sees the ${list}.` : 'The agent can see the username.', `Only filled on ${site}.`]
 }
 
 /**
- * The site the values go to, as the browser reported it. The card's title
- * already names the host, so only the full origin is added. Hosts wrap rather
- * than truncate: the end of a hostname is the part that names the site.
+ * What goes in a field, in the app's words for the common kinds: the page's
+ * label is the agent's to choose, so it names only the kinds the app cannot.
+ */
+function fieldLabel(field: Pick<LoginContextField, 'kind' | 'label'> & { inputType?: string }): string {
+  if (field.kind === 'username') return field.inputType === 'tel' ? 'Phone number' : 'Email or username'
+  if (field.kind === 'password') return 'Password'
+  return field.label
+}
+
+/** What an empty field says once Sign in is clicked. */
+function missingText(field: Pick<LoginContextField, 'kind' | 'label'> & { inputType?: string }): string {
+  if (field.kind === 'username') return field.inputType === 'tel' ? 'Enter your phone number' : 'Enter your email or username'
+  if (field.kind === 'password') return 'Enter your password'
+  return `Enter ${field.label.toLowerCase()}`
+}
+
+/**
+ * The site the values go to, as the browser reported it: the card's
+ * subtitle, under the title that names the host. A warning only when there is
+ * one (plain HTTP, a frame). Spans only: it sits in the shell's subtitle line.
+ * Hosts wrap rather than truncate: the end of a hostname names the site.
  */
 export function LoginSiteHeading({ context, className }: { context: Pick<LoginContext, 'origin' | 'topOrigin'> | null; className?: string }) {
   const origin = context?.origin ?? null
   const insecure = origin !== null && isInsecureOrigin(origin)
-  const Icon = insecure ? LockOpen : Lock
   const framed = context && context.topOrigin !== context.origin
   return (
-    <div className={cn('flex items-start gap-1.5 min-w-0 text-xs text-muted-foreground', className)} data-testid="login-site">
-      <Icon className={cn('mt-0.5 h-3.5 w-3.5 shrink-0', insecure && 'text-amber-600')} />
+    <span className={cn('flex min-w-0 items-start gap-1 text-xs text-muted-foreground', className)} data-testid="login-site">
+      {insecure && <TriangleAlert className="mt-0.5 h-3 w-3 shrink-0 text-amber-600" aria-hidden />}
       {origin ? (
-        <div className="min-w-0 break-all">
+        <span className="min-w-0 break-all">
           <span data-testid="login-origin">{origin}</span>
           {insecure && <span className="block text-amber-700 dark:text-amber-400" data-testid="login-insecure">Not encrypted (http): what you enter can be read on the network.</span>}
           {framed && <span className="block" data-testid="login-framed">In a frame on {siteLabel(context.topOrigin)}</span>}
-        </div>
+        </span>
       ) : (
         <span>Locating the sign-in form on the page…</span>
       )}
-    </div>
+    </span>
   )
 }
 
@@ -181,7 +196,6 @@ export function SignInOnPage({
   error,
   busy,
   finishing,
-  back,
   onBack,
   onDone,
 }: {
@@ -189,13 +203,13 @@ export function SignInOnPage({
   error?: string
   busy: boolean
   finishing: boolean
-  back: string
   onBack: () => void
   onDone: () => void
 }) {
   return (
     <>
-      <div className="flex items-start gap-2 rounded-md border border-border bg-muted/40 p-3 text-sm text-foreground">
+      <LoginStepBack onClick={onBack} disabled={busy} data-testid="login-back-to-form" />
+      <div className="flex items-start gap-2 rounded-md bg-muted/50 p-3 text-sm text-foreground">
         <MousePointerClick className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
         <span>
           Sign in directly in the browser view{origin ? ` on ${siteLabel(origin)}` : ''}, then click Done.
@@ -203,13 +217,10 @@ export function SignInOnPage({
         </span>
       </div>
       {error && <p className="text-xs text-destructive" role="alert">{error}</p>}
-      <div className="flex flex-wrap items-center justify-end gap-2">
-        <Button variant="ghost" size="xs" onClick={onBack} disabled={busy} data-testid="login-back-to-form">
-          {back}
-        </Button>
+      <LoginActionRow>
         <Button
-          size="xs"
-          className="min-w-24 bg-blue-600 text-white hover:bg-blue-700"
+          size="sm"
+          className={LOGIN_PRIMARY_BUTTON}
           onClick={onDone}
           loading={finishing}
           disabled={busy}
@@ -217,7 +228,7 @@ export function SignInOnPage({
         >
           Done
         </Button>
-      </div>
+      </LoginActionRow>
     </>
   )
 }
@@ -240,8 +251,12 @@ export function LoginForm({
   const formId = useId()
   const errorId = `${formId}-error`
   const context = useLoginContext(agentSlug, sessionId, toolUseId)
-  const { state, fill, signInVia, requestMethod, completeManually, decline } = useLoginRequestActions({ agentSlug, sessionId, toolUseId })
-  const [mode, setMode] = useState<'form' | 'manual' | 'via'>('form')
+  const { state, fill, signInVia, requestMethod, completeManually } = useLoginRequestActions({ agentSlug, sessionId, toolUseId })
+  // The form, or a step a click away from it: the other ways in, signing in
+  // on the page, or through another account.
+  const [mode, setMode] = useState<'form' | 'ways' | 'manual' | 'via'>('form')
+  // Sign in was clicked with something missing: each empty field says so until it has a value.
+  const [showMissing, setShowMissing] = useState(false)
   // The provider picked under "Or sign in with"; null for a saved account on another site.
   const [viaProvider, setViaProvider] = useState<string | null>(null)
   const [values, setValues] = useState<string[]>([])
@@ -368,9 +383,15 @@ export function LoginForm({
     ...(otherMembers > 0 && ((canSave && save) || granting) ? { sharedAgentAcknowledged: true } : {}),
   })
 
+  // Sign in is never greyed out for what is missing: the empty fields say what they need, and the first takes focus.
   const submit = () => {
-    if (!located || !complete || busy) return
-    if (canSave && save && askUsername && !saveUsername.trim()) return
+    if (!located || busy) return
+    if (!complete || (canSave && save && askUsername && !saveUsername.trim())) {
+      setShowMissing(true)
+      const firstEmpty = shown.find(({ index }) => !(values[index] ?? '').length)
+      if (firstEmpty) rootRef.current?.querySelector<HTMLInputElement>(`[data-testid="login-field-${firstEmpty.index}"]`)?.focus()
+      return
+    }
     const sent = located.fields.map((_, index) => (fillsField(index) ? '' : values[index] ?? ''))
     void fill(located, sent, fillOptions(account?.id, picked !== null && !picked.granted))
   }
@@ -402,6 +423,56 @@ export function LoginForm({
     setValues(located.fields.map((field, index) => (field.kind === 'username' ? offer.username : covered.has(index) ? '' : values[index] ?? '')))
   }
 
+  const pickWay = (providerId: string | null) => {
+    setShowMissing(false)
+    pickProvider(providerId)
+  }
+  // Every way in but the form. Not the page for this app's own sign-in:
+  // typing the app's password there by hand would sign the agent's browser in to it.
+  const onPage = unavailable?.forThisApp ? null : () => setMode('manual')
+  const passwordManager = savedLoginFits ? (
+    <BrowserCredentialPicker
+      agentSlug={agentSlug}
+      sessionId={sessionId}
+      toolUseId={toolUseId}
+      kind="login"
+      disabled={busy}
+      // "Save" covers a login from the password manager too: the whole login goes to the vault.
+      loginOptions={canSave && save
+        ? { save: true, ...(otherMembers > 0 ? { sharedAgentAcknowledged: true } : {}) }
+        : undefined}
+      onFilled={(body) => {
+        const key = loginRequestKey(agentSlug, sessionId, toolUseId)
+        // Answered in another window first: nothing was filled from here.
+        if ((body as { alreadySettled?: unknown } | null)?.alreadySettled === true) {
+          setLoginRequestState(key, { status: 'settled' })
+          return
+        }
+        const interrupted = interruptedFillState(body)
+        if (interrupted) {
+          setLoginRequestState(key, interrupted)
+          return
+        }
+        const parsed = loginFillResultSchema.safeParse(body)
+        setLoginRequestState(key, parsed.success
+          ? { status: 'filled', result: parsed.data }
+          : { status: 'idle', error: 'The saved login was sent, but the answer could not be read. Check the browser view.' })
+      }}
+    />
+  ) : null
+  const wayList = (
+    <LoginWayList
+      onPage={onPage}
+      passwordManager={passwordManager}
+      choices={choices}
+      disabled={busy}
+      onPick={pickWay}
+    />
+  )
+  const hasOtherWays = onPage !== null || passwordManager !== null ||
+    (choices !== null && (choices.shown.length > 0 || choices.more.length > 0 || choices.otherSaved))
+  const otherWays = hasOtherWays && <OtherWaysLink onClick={() => { setShowMissing(false); setMode('ways') }} disabled={busy} />
+
   if (mode === 'manual') {
     return (
       <div ref={rootRef} className="space-y-3 pt-4" data-testid="login-manual">
@@ -410,7 +481,6 @@ export function LoginForm({
           error={error}
           busy={busy}
           finishing={running === 'manual'}
-          back="Back to the form"
           onBack={() => setMode('form')}
           onDone={() => void completeManually()}
         />
@@ -428,35 +498,33 @@ export function LoginForm({
           busy={busy}
           error={error}
           onSignInVia={(provider) => void signInVia(located, provider, otherMembers > 0)}
-          onBack={() => setMode('form')}
+          onBack={() => setMode('ways')}
         />
       </div>
     )
   }
 
+  if (mode === 'ways') {
+    return (
+      <div ref={rootRef} className="space-y-3 pt-4" data-testid="login-ways-list">
+        <LoginStepBack onClick={() => setMode('form')} disabled={busy} data-testid="login-ways-back" />
+        {wayList}
+        {error && <p className="text-xs text-destructive" role="alert" data-testid="login-error">{error}</p>}
+      </div>
+    )
+  }
+
   const retryBlock = retry && (
-    <p className="rounded-md border border-amber-500/40 bg-amber-500/10 px-2.5 py-2 text-xs text-foreground" data-testid="login-retry-note">
+    <p className="rounded-md bg-amber-500/10 px-2.5 py-2 text-xs text-foreground" data-testid="login-retry-note">
       {retry.text}
       {retry.agentSays && <span className="mt-0.5 block break-words italic text-muted-foreground">{retry.agentSays}</span>}
     </p>
-  )
-  const declineButton = (
-    <DeclineButton
-      onDecline={(reason) => void decline(reason)}
-      disabled={busy}
-      label="Decline"
-      showIcon={false}
-      size="xs"
-      className="border-border text-foreground hover:bg-muted"
-      data-testid="login-decline"
-    />
   )
 
   // Waiting for the browser and the vault, or the choice among the user's saved accounts.
   if (!fieldsStep) {
     return (
       <div ref={rootRef} className="space-y-3 pt-4">
-        <LoginSiteHeading context={located ?? null} />
         {retryBlock}
         {loading ? (
           <div className="h-[4.5rem] animate-pulse rounded-md bg-muted/50" data-testid="login-loading" />
@@ -482,32 +550,32 @@ export function LoginForm({
           </p>
         )}
         {error && <p className="text-xs text-destructive" role="alert" data-testid="login-error">{error}</p>}
-        <div className="flex justify-end">{declineButton}</div>
+        {!loading && otherWays && <LoginActionRow>{otherWays}</LoginActionRow>}
       </div>
     )
   }
 
+  // A page that offers only "Continue with …": its ways are the step.
+  const noFields = located !== undefined && located.fields.length === 0
+
   return (
     <div ref={rootRef} className="space-y-3 pt-4">
-      <LoginSiteHeading context={located ?? null} />
-
       {differentAccount && offers.length > 0 && (
-        <button
-          type="button"
-          onClick={() => setDifferentAccount(false)}
+        <LoginStepBack
+          onClick={() => {
+            setShowMissing(false)
+            setDifferentAccount(false)
+          }}
           disabled={busy}
-          className="-mt-1 flex items-center gap-0.5 text-2xs text-muted-foreground hover:text-foreground disabled:opacity-50"
+          label="Saved accounts"
           data-testid="login-back-to-accounts"
-        >
-          <ChevronLeft className="h-3 w-3" />
-          Saved accounts
-        </button>
+        />
       )}
 
       {retryBlock}
 
       {account?.username && (
-        <div className="flex items-start gap-2 rounded-md border border-border bg-muted/30 px-2.5 py-2 text-xs text-foreground" data-testid="login-vault-account">
+        <div className="flex items-start gap-2 rounded-md bg-muted/50 px-2.5 py-2 text-xs text-foreground" data-testid="login-vault-account">
           <KeyRound className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
           <span className="min-w-0 flex-1">
             Signing in as <span className="break-all font-medium">{account.username}</span>
@@ -532,40 +600,9 @@ export function LoginForm({
         </div>
       )}
 
-      {/* Only the fields sit inside the <form>: the picker and Decline render
-          plain <button>s, and inside it the first would be the default button
+      {/* Only the fields sit inside the <form>: the other controls are plain
+          <button>s, and inside it the first would be the default button
           Enter presses. */}
-      {savedLoginFits && (
-        <BrowserCredentialPicker
-          agentSlug={agentSlug}
-          sessionId={sessionId}
-          toolUseId={toolUseId}
-          kind="login"
-          disabled={busy}
-          // "Save for later" covers a login from the password manager too: the whole login goes to the vault.
-          loginOptions={canSave && save
-            ? { save: true, ...(otherMembers > 0 ? { sharedAgentAcknowledged: true } : {}) }
-            : undefined}
-          onFilled={(body) => {
-            const key = loginRequestKey(agentSlug, sessionId, toolUseId)
-            // Answered in another window first: nothing was filled from here.
-            if ((body as { alreadySettled?: unknown } | null)?.alreadySettled === true) {
-              setLoginRequestState(key, { status: 'settled' })
-              return
-            }
-            const interrupted = interruptedFillState(body)
-            if (interrupted) {
-              setLoginRequestState(key, interrupted)
-              return
-            }
-            const parsed = loginFillResultSchema.safeParse(body)
-            setLoginRequestState(key, parsed.success
-              ? { status: 'filled', result: parsed.data }
-              : { status: 'idle', error: 'The saved login was sent, but the answer could not be read. Check the browser view.' })
-          }}
-        />
-      )}
-
       <form
         id={formId}
         className="space-y-3"
@@ -577,7 +614,7 @@ export function LoginForm({
         data-testid="login-form"
       >
         {unavailable ? (
-          <div className="rounded-md border border-border bg-muted/40 p-3 text-xs text-foreground" data-testid="login-unavailable">
+          <div className="rounded-md bg-muted/50 p-3 text-xs text-foreground" data-testid="login-unavailable">
             <p>The fields the agent picked could not be used, so nothing will be sent from this form.</p>
             {unavailable.problems.length > 0 && (
               <ul className="mt-1 list-disc pl-4 text-muted-foreground">
@@ -589,7 +626,10 @@ export function LoginForm({
           <div className="space-y-2.5">
             {shown.map(({ field, index }) => {
               const inputId = `${formId}-field-${index}`
+              const missingId = `${inputId}-missing`
+              const missing = showMissing && !(values[index] ?? '').length
               const attributes = inputAttributes({ kind: field.kind, inputType: field.inputType ?? '', inputMode: field.inputMode ?? '' })
+              const label = fieldLabel(field)
               const common = {
                 ...attributes,
                 id: inputId,
@@ -600,7 +640,8 @@ export function LoginForm({
                 // A code's limit applies once its separators are gone: a pasted
                 // "123 456" would otherwise lose its last digit to a limit of 6.
                 maxLength: field.kind !== 'otp' && field.maxLength && field.maxLength > 1 ? field.maxLength : undefined,
-                'aria-describedby': error ? errorId : undefined,
+                'aria-invalid': missing || undefined,
+                'aria-describedby': [missing && missingId, error && errorId].filter(Boolean).join(' ') || undefined,
                 onChange: (event: React.ChangeEvent<HTMLInputElement>) => {
                   const typed = event.target.value
                   const next = field.kind === 'otp'
@@ -612,30 +653,34 @@ export function LoginForm({
                     return copy
                   })
                 },
-                className: 'bg-background',
+                className: cn('bg-background', missing && 'border-destructive'),
                 'data-testid': `login-field-${index}`,
                 'data-kind': field.kind,
               }
               return (
                 <div key={index} className="space-y-1">
                   <div className="flex items-baseline justify-between gap-2">
-                    <label htmlFor={inputId} className="block min-w-0 truncate text-xs font-medium text-foreground">{field.label}</label>
-                    <span className="shrink-0 text-2xs text-muted-foreground" data-testid={`login-field-kind-${index}`}>{KIND_CHIPS[field.kind]}</span>
+                    <label htmlFor={inputId} className="block min-w-0 truncate text-xs text-muted-foreground">{label}</label>
+                    {/* Under a label the agent chose, what kind it is, so it cannot pass for another. */}
+                    {(field.kind === 'otp' || field.kind === 'text') && (
+                      <span className="shrink-0 text-2xs text-muted-foreground/70" data-testid={`login-field-kind-${index}`}>{KIND_WORDS[field.kind]}</span>
+                    )}
                   </div>
-                  {field.kind === 'password' || field.kind === 'text' ? <SecretInput {...common} label={field.label} /> : <Input {...common} />}
+                  {field.kind === 'password' || field.kind === 'text' ? <SecretInput {...common} label={label} /> : <Input {...common} />}
+                  {missing && <p id={missingId} className="text-2xs text-destructive" data-testid={`login-field-missing-${index}`}>{missingText(field)}</p>}
                 </div>
               )
             })}
             {held.length > 0 && (
-              <div className="space-y-2.5 border-t border-border/60 pt-2.5" data-testid="login-held">
+              <div className="space-y-2.5 pt-1" data-testid="login-held">
                 <p className="text-2xs text-muted-foreground">For the next step: filled when {site} asks for it. Optional.</p>
                 {held.map((field, index) => {
                   const inputId = `${formId}-held-${index}`
                   return (
                     <div key={index} className="space-y-1">
                       <div className="flex items-baseline justify-between gap-2">
-                        <label htmlFor={inputId} className="block min-w-0 truncate text-xs font-medium text-foreground">{field.label}</label>
-                        <span className="shrink-0 text-2xs text-muted-foreground">{KIND_CHIPS[field.kind]}, next step</span>
+                        <label htmlFor={inputId} className="block min-w-0 truncate text-xs text-muted-foreground">{field.label}</label>
+                        <span className="shrink-0 text-2xs text-muted-foreground/70">{KIND_WORDS[field.kind]}, next step</span>
                       </div>
                       <SecretInput
                         {...inputAttributes({ kind: field.kind, inputType: '', inputMode: '' })}
@@ -664,76 +709,52 @@ export function LoginForm({
         )}
 
         {error && <p id={errorId} className="text-xs text-destructive" role="alert" data-testid="login-error">{error}</p>}
-
-        {located && !unavailable && located.fields.length > 0 && (
-          <p className="text-2xs text-muted-foreground" data-testid="login-privacy">
-            {privacyNote(siteLabel(located.origin), [...located.fields, ...held].map((field) => field.kind))}
-          </p>
-        )}
       </form>
 
-      {canSave && (
-        <SaveForLater
-          checked={save}
-          onCheckedChange={setSaveChoice}
-          site={site}
-          username={identity}
-          askUsername={askUsername}
-          usernameValue={saveUsername}
-          onUsernameChange={setSaveUsername}
-          otherMembers={otherMembers}
-          disabled={busy}
-        />
+      {/* Under the fields: it speaks for them. */}
+      {located && !unavailable && located.fields.length > 0 && (
+        <p className="flex items-start gap-1.5 text-2xs text-muted-foreground" data-testid="login-privacy">
+          <ShieldCheck className="mt-px h-3.5 w-3.5 shrink-0" aria-hidden />
+          <span>{privacyNote(siteLabel(located.origin), [...located.fields, ...held].map((field) => field.kind)).join(' ')}</span>
+        </p>
       )}
 
       {/* A code is a step of two-step verification: the moment to offer an app that makes the next one. */}
       {codeStep && info?.addMethod && <AddSignInMethodBox addMethod={info.addMethod} onRequest={requestMethod} disabled={busy} />}
 
-      {choices && choices.shown.length > 0 && (
-        <SignInWithProviders
-          choices={choices}
-          lead={located?.fields.length ? 'Or sign in with' : 'Sign in with'}
+      {canSave && save && (
+        <SaveDetails
+          askUsername={askUsername}
+          usernameValue={saveUsername}
+          onUsernameChange={setSaveUsername}
+          usernameMissing={showMissing && !saveUsername.trim()}
+          otherMembers={otherMembers}
+          site={site}
           disabled={busy}
-          onPick={pickProvider}
         />
       )}
 
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        {/* Not for this app's own page: typing the app's password there by hand
-            would sign the agent's browser in to it. */}
-        {unavailable?.forThisApp ? <span /> : (
-          <div className="flex flex-wrap items-center gap-x-3">
-            <Button
-              type="button"
-              variant="link"
-              size="xs"
-              className="h-auto px-0 text-xs text-muted-foreground"
-              onClick={() => setMode('manual')}
-              disabled={busy}
-              data-testid="login-take-over"
-            >
-              Sign in on the page instead
-            </Button>
-            {choices && choices.shown.length === 0 && <OtherWaysToSignIn choices={choices} disabled={busy} onPick={pickProvider} />}
-          </div>
-        )}
-        <div className="flex items-center gap-2">
-          {declineButton}
-          {(!located || located.fields.length > 0) && (
-            <Button
-              type="submit"
-              form={formId}
-              size="xs"
-              className="min-w-24 bg-blue-600 text-white hover:bg-blue-700"
-              loading={running === 'fill'}
-              disabled={!complete || busy || !!unavailable || (canSave && save && askUsername && !saveUsername.trim())}
-              data-testid="login-submit"
-            >
-              {secret ? 'Sign in' : 'Continue'}
-            </Button>
+      {noFields ? wayList : (
+        // Saving on the left; the other ways, then Sign in, on the right.
+        <LoginActionRow
+          start={canSave && (
+            <SaveToggle checked={save} onCheckedChange={setSaveChoice} site={site} username={identity} disabled={busy} />
           )}
-        </div>
-      </div>
+        >
+          {otherWays}
+          <Button
+            type="submit"
+            form={formId}
+            size="sm"
+            className={LOGIN_PRIMARY_BUTTON}
+            loading={running === 'fill'}
+            disabled={busy || !located || !!unavailable}
+            data-testid="login-submit"
+          >
+            {secret ? 'Submit' : 'Continue'}
+          </Button>
+        </LoginActionRow>
+      )}
     </div>
   )
 }

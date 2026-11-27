@@ -186,7 +186,7 @@ describe('the sign-in form with the vault', () => {
     await choosing()
     const chooser = screen.getByTestId('login-vault-accounts')
     expect(within(chooser).getAllByRole('button').map((button) => button.textContent)).toEqual([
-      'octocatSaved: passwordUse', 'hubotSaved: passwordUse', 'Use a different account',
+      'octocatSaved: password', 'hubotSaved: password', 'Use a different account',
     ])
     // Nothing else until the user goes on: no fields, saving, providers or other ways in.
     for (const id of ['login-form', 'login-save-section', 'login-via-providers', 'login-take-over', 'login-submit']) {
@@ -198,7 +198,9 @@ describe('the sign-in form with the vault', () => {
     expect(screen.queryByTestId('login-vault-accounts')).toBeNull()
     await waitFor(() => expect(screen.getByTestId('login-field-0')).toHaveFocus())
     expect(screen.getByTestId('login-save-section')).toBeInTheDocument()
-    expect(screen.getByTestId('login-via-providers')).toBeInTheDocument()
+    // The providers wait a step away, under the other ways.
+    expect(screen.queryByTestId('login-via-providers')).toBeNull()
+    expect(screen.getByTestId('login-other-ways')).toBeInTheDocument()
     await user.type(screen.getByTestId('login-field-0'), 'monalisa')
 
     // Back to the saved accounts, and on again: what was typed is still there.
@@ -430,7 +432,7 @@ describe('the sign-in form with the vault', () => {
     await ready()
     expect(screen.getByTestId('login-held')).toHaveTextContent('For the next step')
     // The next step's password is as hidden from the agent as one on this page.
-    expect(screen.getByTestId('login-privacy')).toHaveTextContent('The agent never sees the password; it can see the username.')
+    expect(screen.getByTestId('login-privacy')).toHaveTextContent('The agent never sees the password. Only filled on github.com.')
     await user.type(screen.getByTestId('login-field-0'), 'octocat')
     await user.type(screen.getByTestId('login-held-field-0'), 'next-pw')
     expect(screen.getByTestId('login-submit')).toHaveTextContent('Continue')
@@ -445,7 +447,10 @@ describe('the sign-in form with the vault', () => {
     renderCard()
     await ready()
     await user.type(screen.getByTestId('login-field-0'), 'hunter2')
-    expect(screen.getByTestId('login-submit')).toBeDisabled()
+    // Clicked without the username to save under: nothing is sent, and the box says what it needs.
+    await user.click(screen.getByTestId('login-submit'))
+    expect(posted('/fill-login')).toEqual([])
+    expect(screen.getByTestId('login-save-username')).toHaveAttribute('aria-invalid', 'true')
     await user.type(screen.getByTestId('login-save-username'), 'octocat')
     await user.click(screen.getByTestId('login-submit'))
     await waitFor(() => expect(posted('/fill-login')).toHaveLength(1))
@@ -467,6 +472,7 @@ describe('the sign-in form with the vault', () => {
     info = { ...INFO, providerAccounts: [{ ...offer({ id: 'acc-g', username: 'me@gmail.com', parts: [] }), site: 'accounts.google.com', providerName: 'Google', providerId: 'google' }] }
     renderCard()
     await ready()
+    await user.click(screen.getByTestId('login-other-ways'))
     await user.click(screen.getByTestId('login-via-provider-google'))
     expect(screen.getByTestId('login-via')).toHaveTextContent('Which Google account do you sign in to github.com with?')
     await user.click(screen.getByTestId('login-via-account-acc-g'))
@@ -480,6 +486,7 @@ describe('the sign-in form with the vault', () => {
     context = { ...CONTEXT, providers: ['google'] }
     renderCard()
     await ready()
+    await user.click(screen.getByTestId('login-other-ways'))
     await user.click(screen.getByTestId('login-via-provider-google'))
     expect(screen.getByTestId('login-via-submit')).toBeDisabled()
     await user.type(screen.getByTestId('login-via-username'), 'me@gmail.com')
@@ -492,7 +499,7 @@ describe('the sign-in form with the vault', () => {
   const PROVIDERS = [provider('google', 'Google', 'google.com'), provider('microsoft', 'Microsoft', 'live.com'), provider('apple', 'Apple', 'apple.com'),
     provider('github', 'GitHub', 'github.com'), provider('facebook', 'Facebook', 'facebook.com'), provider('slack', 'Slack', 'slack.com')]
 
-  it("shows the page's own provider buttons in its order, the rest under More", async () => {
+  it("lists the page's own providers first, in its order, then the rest, under the other ways", async () => {
     const user = userEvent.setup()
     // GitHub is the site itself; "okta" is no provider the form knows.
     context = { ...CONTEXT, providers: ['slack', 'github', 'okta', 'google'] }
@@ -506,12 +513,12 @@ describe('the sign-in form with the vault', () => {
     }
     renderCard()
     await ready()
-    const row = screen.getByTestId('login-via-providers')
-    expect(row).toHaveTextContent('Or sign in with')
-    expect(within(row).getAllByRole('button').map((button) => button.textContent)).toEqual(['Slack', 'Google', 'More'])
-    await user.click(screen.getByTestId('login-via-more'))
-    expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Microsoft', 'Apple', 'Facebook', 'Another saved account'])
-    await user.click(screen.getByRole('menuitem', { name: 'Another saved account' }))
+    expect(screen.queryByTestId('login-via-providers')).toBeNull()
+    await user.click(screen.getByTestId('login-other-ways'))
+    const group = screen.getByTestId('login-via-providers')
+    expect(group).toHaveTextContent(/^Sign in with/)
+    expect(within(group).getAllByRole('button').map((button) => button.textContent)).toEqual(['Slack', 'Google', 'Microsoft', 'Apple', 'Facebook', 'Another saved account'])
+    await user.click(screen.getByTestId('login-via-saved'))
     expect(screen.getByTestId('login-via')).toHaveTextContent('Which account do you sign in to github.com with?')
     expect(screen.queryByTestId('login-via-account-acc-s')).toBeNull()
     expect(screen.queryByTestId('login-via-username')).toBeNull()
@@ -526,10 +533,12 @@ describe('the sign-in form with the vault', () => {
     renderCard()
     await ready()
     expect(screen.queryByTestId('login-via-providers')).toBeNull()
-    expect(screen.getByTestId('login-via-more')).toHaveTextContent('Other ways to sign in')
-    await user.click(screen.getByTestId('login-via-more'))
-    expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Google', 'Microsoft', 'Apple', 'Facebook', 'Slack'])
-    await user.click(screen.getByRole('menuitem', { name: 'Google' }))
+    expect(screen.getByTestId('login-other-ways')).toHaveTextContent('Other ways to sign in')
+    await user.click(screen.getByTestId('login-other-ways'))
+    // The page first, then every provider but the site itself.
+    expect(screen.getByTestId('login-take-over')).toHaveTextContent('Sign in on the page instead')
+    expect(within(screen.getByTestId('login-via-providers')).getAllByRole('button').map((button) => button.textContent)).toEqual(['Google', 'Microsoft', 'Apple', 'Facebook', 'Slack'])
+    await user.click(screen.getByTestId('login-via-provider-google'))
     expect(screen.getByTestId('login-via')).toHaveTextContent('Which Google account do you sign in to github.com with?')
   })
 

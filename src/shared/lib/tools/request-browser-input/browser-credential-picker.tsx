@@ -237,6 +237,8 @@ export function BrowserCredentialPicker({
   if (!canUsePasswordManagers) return null
   if (!loading && data?.status === 'ready' && data.suggestions.length === 0 && !error) return null
   if (!loading && data?.status === 'unconfigured' && !data.installable) return null
+  // A sign-in card is no place to set one up: that is Settings' job.
+  if (!loading && data?.status === 'unconfigured' && kind === 'login') return null
   if (loading) {
     return (
       <div className="mt-3 flex items-center gap-2 text-xs text-muted-foreground" data-testid="credential-picker-loading">

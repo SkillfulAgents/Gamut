@@ -116,24 +116,27 @@ describe('LoginRequestItem', () => {
   it('titles the card with the site the browser reported, not the agent\'s words', async () => {
     render(<LoginRequestItem {...props()} />)
     expect(await screen.findByText('Sign in to github.com')).toBeInTheDocument()
+    // The address the values go to is the subtitle; the agent's words are not on the card.
     expect(screen.getByTestId('login-origin')).toHaveTextContent('https://github.com')
-    expect(screen.getByText(/totally-not-github\.example/)).toBeInTheDocument()
+    expect(screen.queryByText(/totally-not-github\.example/)).toBeNull()
   })
 
   it('says exactly what the agent can see: the username, never the password or code', async () => {
     render(<LoginRequestItem {...props()} />)
     await ready()
     expect(screen.getByTestId('login-privacy')).toHaveTextContent(
-      'What you enter goes straight into github.com. The agent never sees the password or code; it can see the username.',
+      'The agent never sees the password and code. Only filled on github.com.',
     )
   })
 
-  it('shows each field\'s kind in the app\'s words beside the page\'s label', async () => {
+  it('labels fields in the app\'s words, and says the kind beside a label the agent chose', async () => {
     contextIs({ fields: [...CONTEXT.fields, { kind: 'text', label: 'Password', inputType: 'text', inputMode: '', autocomplete: '', maxLength: -1 }] })
     render(<LoginRequestItem {...props({ fields: [...props().fields, { kind: 'text', label: 'Password' }] })} />)
     await ready()
-    expect(screen.getByTestId('login-field-kind-0')).toHaveTextContent('username')
-    expect(screen.getByTestId('login-field-kind-1')).toHaveTextContent('password')
+    expect(screen.getByTestId('login-field-0')).toHaveAccessibleName('Email or username')
+    expect(screen.getByTestId('login-field-1')).toHaveAccessibleName('Password')
+    expect(screen.queryByTestId('login-field-kind-0')).toBeNull()
+    expect(screen.queryByTestId('login-field-kind-1')).toBeNull()
     expect(screen.getByTestId('login-field-kind-2')).toHaveTextContent('code')
     // A label the agent chose cannot pass for another kind.
     expect(screen.getByTestId('login-field-kind-3')).toHaveTextContent('other')
@@ -238,7 +241,7 @@ describe('LoginRequestItem', () => {
     routes[`${BASE}/fill-login`] = () => json(502, { error: 'The browser is unavailable' })
     render(<LoginRequestItem {...props()} />)
     await ready()
-    await user.type(screen.getByLabelText('Username or email address'), 'octocat')
+    await user.type(screen.getByLabelText('Email or username'), 'octocat')
     await user.type(screen.getByLabelText('Password'), 'pw-1')
     await user.type(screen.getByLabelText('Authentication code'), '123456')
     await user.click(screen.getByTestId('login-submit'))
@@ -251,9 +254,15 @@ describe('LoginRequestItem', () => {
     const onComplete = vi.fn()
     render(<LoginRequestItem {...props({ onComplete })} />)
     const username = await ready()
-    expect(screen.getByTestId('login-submit')).toBeDisabled()
+    // Never greyed out: clicked with nothing entered, each empty field says what it needs and the first takes focus.
+    await user.click(screen.getByTestId('login-submit'))
+    expect(posted('/fill-login')).toEqual([])
+    expect(screen.getByTestId('login-field-missing-0')).toHaveTextContent('Enter your email or username')
+    expect(screen.getByTestId('login-field-missing-1')).toHaveTextContent('Enter your password')
+    expect(username).toHaveFocus()
 
     await user.type(username, '+1 555 0100')
+    expect(screen.queryByTestId('login-field-missing-0')).toBeNull()
     await user.type(screen.getByLabelText('Password'), 'hunter2-hunter2')
     await user.type(screen.getByLabelText('Authentication code'), '482913')
     await user.click(screen.getByTestId('login-submit'))
@@ -464,6 +473,7 @@ describe('LoginRequestItem', () => {
     render(<LoginRequestItem {...props()} />)
     expect(await screen.findByTestId('login-unavailable')).toHaveTextContent('@e6 is <input type=email>')
     expect(screen.getByTestId('login-submit')).toBeDisabled()
+    await userEvent.setup().click(screen.getByTestId('login-other-ways'))
     expect(screen.getByTestId('login-take-over')).not.toBeDisabled()
   })
 
@@ -476,6 +486,7 @@ describe('LoginRequestItem', () => {
     render(<LoginRequestItem {...props()} />)
     expect(await screen.findByTestId('login-unavailable')).toHaveTextContent('this app\'s own address')
     expect(screen.queryByTestId('login-take-over')).toBeNull()
+    expect(screen.queryByTestId('login-other-ways')).toBeNull()
     expect(screen.getByTestId('login-submit')).toBeDisabled()
     expect(screen.getByTestId('login-decline')).not.toBeDisabled()
   })
@@ -484,7 +495,8 @@ describe('LoginRequestItem', () => {
     const user = userEvent.setup()
     const onComplete = vi.fn()
     render(<LoginRequestItem {...props({ onComplete })} />)
-    await screen.findByText('Sign in to github.com')
+    await ready()
+    await user.click(screen.getByTestId('login-other-ways'))
     await user.click(screen.getByTestId('login-take-over'))
     expect(screen.getByTestId('login-manual')).toHaveTextContent('Sign in directly in the browser view on github.com')
     expect(screen.getByTestId('login-manual')).toHaveTextContent('not hidden from the agent')
@@ -494,16 +506,16 @@ describe('LoginRequestItem', () => {
     expect(posted('/fill-login')).toEqual([])
   })
 
-  it('declines, and sends the reason given to the agent as a message', async () => {
+  it('declines in one click on the header\'s X, in place of stopping the session', async () => {
     const user = userEvent.setup()
     const onComplete = vi.fn()
     render(<LoginRequestItem {...props({ onComplete })} />)
     await screen.findByText('Sign in to github.com')
-    await user.click(screen.getByTestId('login-decline-chevron'))
-    await user.type(await screen.findByPlaceholderText('Reason for declining...'), 'Use my work account instead{Enter}')
+    expect(screen.queryByTestId('request-stop-session')).toBeNull()
+    await user.click(screen.getByTestId('login-decline'))
     await waitFor(() => expect(onComplete).toHaveBeenCalled())
     expect(posted('/complete-login')).toEqual([{ toolUseId: 'tu-1', action: 'decline' }])
-    expect(posted('/messages')).toEqual([{ content: 'Use my work account instead' }])
+    expect(posted('/messages')).toEqual([])
     expect(screen.getByTestId('login-request-completed')).toHaveAttribute('data-status', 'declined')
   })
 
@@ -512,18 +524,22 @@ describe('LoginRequestItem', () => {
     routes[`${BASE}/complete-login`] = () => json(200, { success: true, alreadySettled: true })
     const onComplete = vi.fn()
     render(<LoginRequestItem {...props({ onComplete })} />)
-    await screen.findByText('Sign in to github.com')
+    await ready()
+    await user.click(screen.getByTestId('login-other-ways'))
     await user.click(screen.getByTestId('login-take-over'))
     await user.click(screen.getByTestId('login-manual-done'))
     await waitFor(() => expect(onComplete).toHaveBeenCalled())
     expect(screen.getByTestId('login-request-completed')).toHaveAttribute('data-status', 'settled')
   })
 
-  it('offers a saved login only when the page asks for nothing else, and settles the request when one is filled', async () => {
+  it('offers a saved login under the other ways when the page asks for nothing else, and settles the request when one is filled', async () => {
     const user = userEvent.setup()
     const onComplete = vi.fn()
     contextIs({ fields: CONTEXT.fields.slice(0, 2) })
     render(<LoginRequestItem {...props({ onComplete, fields: props().fields.slice(0, 2) })} />)
+    await ready()
+    expect(screen.queryByTestId('credential-picker')).toBeNull()
+    await user.click(screen.getByTestId('login-other-ways'))
     const picker = await screen.findByTestId('credential-picker')
     expect(picker).toHaveAttribute('data-kind', 'login')
     await user.click(picker)
@@ -531,14 +547,18 @@ describe('LoginRequestItem', () => {
     expect(posted('/fill-login')).toEqual([])
   })
 
-  it('saves a login picked from the password manager when "Save for later" is on, and not once it is off', async () => {
+  it('saves a login picked from the password manager when saving is on, and not once it is off', async () => {
     const user = userEvent.setup()
     contextIs({ fields: CONTEXT.fields.slice(0, 2) })
     render(<LoginRequestItem {...props({ fields: props().fields.slice(0, 2) })} />)
-    const picker = await screen.findByTestId('credential-picker')
-    await waitFor(() => expect(JSON.parse(picker.getAttribute('data-login-options')!)).toEqual({ save: true }))
+    await ready()
+    await screen.findByTestId('login-save-section')
+    await user.click(screen.getByTestId('login-other-ways'))
+    expect(JSON.parse((await screen.findByTestId('credential-picker')).getAttribute('data-login-options')!)).toEqual({ save: true })
+    await user.click(screen.getByTestId('login-ways-back'))
     await user.click(screen.getByTestId('login-save'))
-    expect(JSON.parse(picker.getAttribute('data-login-options')!)).toBeNull()
+    await user.click(screen.getByTestId('login-other-ways'))
+    expect(JSON.parse((await screen.findByTestId('credential-picker')).getAttribute('data-login-options')!)).toBeNull()
   })
 
   it('shows a saved login sent after the request was answered elsewhere as already answered, not as a failed fill', async () => {
@@ -547,6 +567,8 @@ describe('LoginRequestItem', () => {
     const onComplete = vi.fn()
     contextIs({ fields: CONTEXT.fields.slice(0, 2) })
     render(<LoginRequestItem {...props({ onComplete, fields: props().fields.slice(0, 2) })} />)
+    await ready()
+    await user.click(screen.getByTestId('login-other-ways'))
     await user.click(await screen.findByTestId('credential-picker'))
     await waitFor(() => expect(onComplete).toHaveBeenCalled())
     expect(screen.getByTestId('login-request-completed')).toHaveAttribute('data-status', 'settled')
@@ -556,6 +578,7 @@ describe('LoginRequestItem', () => {
   it('offers no saved login when the page also asks for a code', async () => {
     render(<LoginRequestItem {...props()} />)
     await ready()
+    await userEvent.setup().click(screen.getByTestId('login-other-ways'))
     expect(screen.queryByTestId('credential-picker')).not.toBeInTheDocument()
   })
 

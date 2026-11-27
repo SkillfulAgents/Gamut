@@ -53,6 +53,9 @@ interface RequestItemShellProps {
    *  header pagination/right area that interrupts the session. */
   sessionId?: string
   agentSlug?: string
+  /** The card's own X, in place of the one that stops the session: a card
+   *  whose decline already ends the turn says so in one click. */
+  close?: ReactNode
 
   'data-testid'?: string
   'data-status'?: string
@@ -72,6 +75,7 @@ export function RequestItemShell({
   error,
   sessionId,
   agentSlug,
+  close,
   ...dataAttrs
 }: RequestItemShellProps) {
   const themeClasses = THEME_CLASSES[theme]
@@ -168,7 +172,7 @@ export function RequestItemShell({
   ) : null
 
   const headerRightContent = paginationControls ?? headerRight
-  const showStopButton = !!(sessionId && agentSlug)
+  const closeButton = close ?? (sessionId && agentSlug ? <StopSessionButton sessionId={sessionId} agentSlug={agentSlug} /> : null)
 
   // Action rows used to be sticky children of this scroll container. Safari
   // can fail to paint that combination when the whole request card lives in
@@ -199,15 +203,15 @@ export function RequestItemShell({
         <div className="flex-1 min-w-0">
           <div className={HEADER_ROW_CLASS}>
             {titleNode}
-            {(headerRightContent || showStopButton) && (
+            {(headerRightContent || closeButton) && (
               <div className="ml-auto flex items-center shrink-0">
                 {headerRightContent}
-                {showStopButton && (
+                {closeButton && (
                   <>
                     {headerRightContent && (
                       <div className="ml-[5px] mr-[9px] h-4 w-px bg-border" aria-hidden />
                     )}
-                    <StopSessionButton sessionId={sessionId!} agentSlug={agentSlug!} />
+                    {closeButton}
                   </>
                 )}
               </div>
