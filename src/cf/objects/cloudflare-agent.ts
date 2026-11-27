@@ -190,6 +190,8 @@ export class AgentDurableObject extends DurableObject<Env> {
   private idleCheckFailures = 0
   /** When this instance last set the object's alarm for; null when it set none, or it went off. */
   private idleCheckAt: number | null = null
+  /** True from the start of an instance that found its container running until its actor follows the container's running sessions again. */
+  private adoptedContainer = false
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, nearStorage(env))
@@ -198,7 +200,10 @@ export class AgentDurableObject extends DurableObject<Env> {
     // Held bytes a stopped object left behind go to R2 now.
     if (this.workspace.hasHeldBytes()) this.settleLater([])
     // The container outlives this object's memory: a restarted object routes its calls and watches it again.
-    if (ctx.container?.running) void ctx.blockConcurrencyWhile(() => this.adoptContainer())
+    if (ctx.container?.running) {
+      this.adoptedContainer = true
+      void ctx.blockConcurrencyWhile(() => this.adoptContainer())
+    }
   }
 
   // Only startAgent may start the container: anything else reaching a stopped one would start it
@@ -324,13 +329,49 @@ export class AgentDurableObject extends DurableObject<Env> {
   private syncStatus(actor: CloudflareAgentActorDO): Promise<void> {
     // Reads now whether the container runs: it outlives the object's memory, and its exits are not polled.
     if (this.statusSynced?.actor === actor) return this.statusSynced.done
-    const done: Promise<void> = actor.state.runtime().syncAgentStatus().then(() => {}).catch((error: unknown) => {
+    const done: Promise<void> = actor.state.runtime().syncAgentStatus().then((info) => this.followRunningSessions(actor, info.status === 'running')).catch((error: unknown) => {
       if (this.statusSynced?.done === done) this.statusSynced = undefined
       console.error(`[AgentDurableObject ${actor.slug}] syncing the container status failed:`, error)
       captureException(error, { tags: { component: 'agent-object', operation: 'sync-status' }, extra: { agent: actor.slug } })
     })
     this.statusSynced = { actor, done }
     return done
+  }
+
+  /**
+   * A deploy replaces this object while its container runs on, and the new instance's actor knows
+   * no session. A turn still running in the container then read as idle: nothing recorded its end,
+   * an ask the transcript shows was not parked again, and the idle check could stop the container
+   * under it. So the first actor of an instance that adopted a running container marks the
+   * sessions mid-turn in it active and follows their streams again, before it runs a call. A
+   * session that cannot be followed is reported, and the others are still followed.
+   */
+  private async followRunningSessions(actor: CloudflareAgentActorDO, running: boolean): Promise<void> {
+    if (!this.adoptedContainer) return
+    this.adoptedContainer = false
+    if (!running) return
+    const failed = (error: unknown, sessionId?: string) => {
+      console.error(`[AgentDurableObject ${actor.slug}] following ${sessionId ? `session ${sessionId}` : 'the running sessions'} of the adopted container failed:`, error)
+      captureException(error, { tags: { component: 'agent-object', operation: 'follow-running-sessions' }, extra: { agent: actor.slug, sessionId } })
+    }
+    try {
+      const client = await actor.state.runtime().getClient()
+      const response = await client.fetch('/sessions')
+      if (!response.ok) throw new Error(`The container's session list returned ${response.status}`)
+      const sessions = (await response.json()) as Array<{ id: string }>
+      await Promise.all(sessions.map(async ({ id }) => {
+        try {
+          if (!(await client.getSession(id))?.isRunning) return
+          await actor.sessions.markActive(id)
+          await actor.sessions.attach(id)
+          console.log(`[AgentDurableObject ${actor.slug}] following session ${id} again: it runs in the adopted container`)
+        } catch (error) {
+          failed(error, id)
+        }
+      }))
+    } catch (error) {
+      failed(error)
+    }
   }
 
   private onContainerExit(outcome: string): void {

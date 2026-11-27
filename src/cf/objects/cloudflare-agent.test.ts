@@ -13,7 +13,7 @@ import { sleepingStoreOn } from '../cloudflare-container-control'
 
 vi.mock('@shared/lib/error-reporting', () => ({ captureException: vi.fn() }))
 // The app must not boot to list a sleeping agent: its session index is in the object's own SQLite.
-const { boot, syncContainerStatus, actors } = vi.hoisted(() => ({ boot: vi.fn(), syncContainerStatus: vi.fn(async () => {}), actors: new WeakMap<object, unknown>() }))
+const { boot, syncContainerStatus, actors } = vi.hoisted(() => ({ boot: vi.fn(), syncContainerStatus: vi.fn(async () => ({ status: 'stopped', port: null })), actors: new WeakMap<object, unknown>() }))
 vi.mock('../boot', () => ({
   boot,
   // One actor for each object, as the object holds it; a test drops it from `actors` to stand for a release.
@@ -799,6 +799,71 @@ describe('AgentDurableObject listing its agent', () => {
     actors.delete(object)
     await object.actorCall('live', [])
     expect(syncContainerStatus).toHaveBeenCalledTimes(2)
+  })
+
+  /** An instance that started over a running container, whose sessions the container reports as `sessions`. */
+  function adoptedAgent(sessions: Record<string, { isRunning: boolean } | Error>) {
+    const { object, ctx } = sleepingAgent()
+    Object.assign(ctx, { container: { running: true } })
+    Object.assign(object, { adoptedContainer: true })
+    const client = {
+      fetch: vi.fn(async () => Response.json(Object.keys(sessions).map((id) => ({ id })))),
+      getSession: vi.fn(async (id: string) => {
+        const session = sessions[id]
+        if (session instanceof Error) throw session
+        return { id, ...session }
+      }),
+    }
+    const actor = {
+      slug: 'sales agent',
+      live: vi.fn(async () => 'from the actor'),
+      state: { runtime: () => ({ syncAgentStatus: async () => ({ status: 'running', port: null }), getClient: async () => client }) },
+      sessions: { markActive: vi.fn(async (_sessionId: string) => {}), attach: vi.fn(async (_sessionId: string) => {}) },
+    }
+    actors.set(object, actor)
+    return { object, actor, client }
+  }
+
+  it('follows again the sessions mid-turn in a container it adopted, before its actor runs a call, and only once', async () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {})
+    const { object, actor, client } = adoptedAgent({ 'weekly-report': { isRunning: true }, 'old-chat': { isRunning: false } })
+
+    await object.actorCall('live', [])
+
+    expect(actor.sessions.markActive.mock.calls).toEqual([['weekly-report']])
+    expect(actor.sessions.attach.mock.calls).toEqual([['weekly-report']])
+    expect(actor.sessions.markActive.mock.invocationCallOrder[0]).toBeLessThan(actor.sessions.attach.mock.invocationCallOrder[0])
+    expect(actor.sessions.attach.mock.invocationCallOrder[0]).toBeLessThan(actor.live.mock.invocationCallOrder[0])
+
+    // The object's next actor: this instance already followed what it adopted.
+    actors.set(object, { ...actor, slug: 'sales agent' })
+    await object.actorCall('live', [])
+    expect(client.fetch).toHaveBeenCalledTimes(1)
+    log.mockRestore()
+  })
+
+  it('still follows the other sessions when one cannot be read, and reports that one', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {})
+    vi.mocked(captureException).mockClear()
+    const { object, actor } = adoptedAgent({ 'lead-research': new Error('Network connection lost.'), 'weekly-report': { isRunning: true } })
+
+    expect(await object.actorCall('live', [])).toEqual({ value: 'from the actor' })
+
+    expect(actor.sessions.attach.mock.calls).toEqual([['weekly-report']])
+    expect(captureException).toHaveBeenCalledExactlyOnceWith(expect.any(Error), expect.objectContaining({ extra: { agent: 'sales agent', sessionId: 'lead-research' } }))
+    error.mockRestore()
+    log.mockRestore()
+  })
+
+  it('asks nothing of a container this instance started itself: its actor knows those sessions', async () => {
+    const { object, actor, client } = adoptedAgent({ 'weekly-report': { isRunning: true } })
+    Object.assign(object, { adoptedContainer: false })
+
+    await object.actorCall('live', [])
+
+    expect(client.fetch).not.toHaveBeenCalled()
+    expect(actor.sessions.markActive).not.toHaveBeenCalled()
   })
 
   it('lets its actor go when its agent is deleted, with its saved files and its session index', async () => {
