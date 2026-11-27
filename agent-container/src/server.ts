@@ -38,6 +38,7 @@ import { closesTabs, labelTabList, ownTabCount, popupsOf, tabAfterClose, tabClos
 import { startTabPolling, stopTabPolling } from './tab-poll';
 import { runBrowserUpload } from './browser-upload';
 import { runBrowserDownload } from './browser-download';
+import { DownloadWatcher, hostDownloads, type DownloadReport } from './download-watcher';
 import { updateEnvFileEntry, healEnvFilePermissions } from './env-file-store';
 import { isAgentIdentityEnvKey } from './attribution-headers';
 import {
@@ -839,32 +840,6 @@ import { parseNetworkActivity, type NetworkActivity } from './network-activity';
 import { harSchema, redactHar, summarizeEndpoints, formatCaptureSummary, captureFileName, bodyFileName, requestFileName, readableBody } from './traffic-capture';
 import { type UrlDigest, type ScrollInfo, parseScrollInfo } from './browser-digest';
 
-// Ensure Chrome download preferences are set in the browser profile directory.
-// Merges with existing preferences to avoid overwriting other settings.
-async function ensureBrowserDownloadPreferences(profileDir: string, downloadDir: string): Promise<void> {
-  const prefsDir = path.join(profileDir, 'Default');
-  const prefsPath = path.join(prefsDir, 'Preferences');
-
-  await fs.promises.mkdir(prefsDir, { recursive: true });
-  await fs.promises.mkdir(downloadDir, { recursive: true });
-
-  let prefs: Record<string, any> = {};
-  try {
-    const existing = await fs.promises.readFile(prefsPath, 'utf-8');
-    prefs = JSON.parse(existing);
-  } catch {
-    // No existing preferences file
-  }
-
-  prefs.download = {
-    ...prefs.download,
-    default_directory: downloadDir,
-    prompt_for_download: false,
-  };
-
-  await fs.promises.writeFile(prefsPath, JSON.stringify(prefs, null, 2));
-}
-
 import { readChromeDebugPort } from './chrome-debug-port';
 
 /**
@@ -1053,8 +1028,9 @@ async function runWithEffect(
   s: BrowserSession,
   action: (before: PageObservation | null) => Promise<{ exitCode: number; stdout: string }>,
   policy: ActionPolicy,
-  opts: { excludeRefs?: string[]; excludeSubtrees?: string[] } = {},
-): Promise<{ result: { exitCode: number; stdout: string }; digest: UrlDigest | null; effect: ActionEffect | null; settleMs: number; treeDiff: EffectTreeDiff | null; docStart: number }> {
+  opts: { excludeRefs?: string[]; excludeSubtrees?: string[]; reportDownloads?: boolean } = {},
+): Promise<{ result: { exitCode: number; stdout: string }; digest: UrlDigest | null; effect: ActionEffect | null; settleMs: number; treeDiff: EffectTreeDiff | null; docStart: number; downloads: DownloadReport[] | null }> {
+  const startedAt = await downloadsWatched();
   const settled = await observeAction({
     exec: action,
     isFailure: r => r.exitCode !== 0,
@@ -1064,7 +1040,7 @@ async function runWithEffect(
   });
   noteChallenge(settled.before);
   noteChallenge(settled.after);
-  if (settled.result.exitCode !== 0) return { result: settled.result, digest: null, effect: null, settleMs: 0, treeDiff: null, docStart: 0 };
+  if (settled.result.exitCode !== 0) return { result: settled.result, digest: null, effect: null, settleMs: 0, treeDiff: null, docStart: 0, downloads: null };
   const lastReported = s.urls.last();
   const recorded = settled.after?.url ? s.urls.observe(await addressBarUrl(s, settled.after.url)) : await observeUrlDigest(s);
   // With both reads in hand, the action navigated when the URL differs
@@ -1085,7 +1061,35 @@ async function runWithEffect(
   const treeDiff = effect && digest && effectWantsTree(effect, policy.verb)
     ? await readTreeDiff(s, digest.url, { refs: opts.excludeRefs, subtrees: opts.excludeSubtrees, overlayOpened: effect.opened.length > 0 }, docStart)
     : null;
-  return { result: settled.result, digest, effect, settleMs: settled.waitedMs, treeDiff, docStart };
+  const downloads = opts.reportDownloads === false ? null : await downloadsSince(s, startedAt);
+  return { result: settled.result, digest, effect, settleMs: settled.waitedMs, treeDiff, docStart, downloads };
+}
+
+/** How long an action waits for a download it started to reach the workspace. */
+const ACTION_DOWNLOAD_WAIT_MS = 20_000;
+
+/**
+ * Before an action that may start a download: the download watcher must be on
+ * (it reconnects here if its socket went). Answers the action's start.
+ */
+async function downloadsWatched(): Promise<number> {
+  await downloadWatcher?.ensure().catch((err) => console.error('[Browser] Download watcher:', err instanceof Error ? err.message : err));
+  return Date.now();
+}
+
+/**
+ * After the action: the downloads its result names (null: none). One it
+ * started lands in the workspace first, so the file is there when the agent
+ * looks. Another session's tab's downloads are that session's to hear about.
+ */
+async function downloadsSince(s: BrowserSession, startedAt: number): Promise<DownloadReport[] | null> {
+  const watcher = downloadWatcher;
+  if (!watcher) return null;
+  const reports = await watcher.report(startedAt, ACTION_DOWNLOAD_WAIT_MS, (frameId) => {
+    const opener = frameId ? openerOf(frameId) : undefined;
+    return !opener || opener === s;
+  });
+  return reports.length > 0 ? reports : null;
 }
 
 /**
@@ -1158,6 +1162,8 @@ function resetPerBrowserState(): void {
   closePreparedLogins();
   forgetInjectedSecrets();
   void passkeyKeeper.disarm();
+  void downloadWatcher?.close();
+  downloadWatcher = null;
 }
 
 /**
@@ -1196,8 +1202,15 @@ const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 interface HostBrowserInfo {
   cdpUrl: string;
-  /** Host-filesystem path where Chrome should save downloads */
-  hostDownloadDir: string;
+  /**
+   * A cloud browser (Browserbase, Steel, ...): it saves downloads on the
+   * provider's machine, and the download watcher fetches them. Chrome on the
+   * host saves into the agent's workspace itself: its profile's preferences
+   * name the host side of /workspace/downloads (chrome-provider.ts).
+   */
+  remote: boolean;
+  /** The provider's id for a cloud browser's session: the host's downloads routes take it. */
+  sessionId?: string;
 }
 
 // Relay a container-side browser-launch failure to the host for Sentry.
@@ -1220,7 +1233,7 @@ function reportHostBrowserLaunchError(
 }
 
 // Launch the host browser via CDP when this open request resolved to the host.
-// Returns the CDP WebSocket URL and host download dir, or undefined if not using host browser.
+// Returns the CDP WebSocket URL and whether it is a cloud browser, or undefined if not using host browser.
 // Throws if the request resolves to the host but that browser fails to launch.
 async function launchHostBrowserIfNeeded(location: BrowserRuntimeLocation): Promise<HostBrowserInfo | undefined> {
   if (location !== 'host') {
@@ -1266,11 +1279,11 @@ async function launchHostBrowserIfNeeded(location: BrowserRuntimeLocation): Prom
     throw new Error(`Failed to launch host browser: ${body}`);
   }
 
-  const data = await response.json() as { port?: number; cdpUrl?: string; downloadDir?: string };
+  const data = await response.json() as { port?: number; cdpUrl?: string; sessionId?: string };
 
   // Remote providers (e.g. Browserbase) return a CDP URL directly
   if (data.cdpUrl) {
-    return { cdpUrl: data.cdpUrl, hostDownloadDir: data.downloadDir || '' };
+    return { cdpUrl: data.cdpUrl, remote: true, ...(typeof data.sessionId === 'string' && data.sessionId ? { sessionId: data.sessionId } : {}) };
   }
 
   // Local providers (e.g. Chrome) return a port — resolve to CDP URL
@@ -1327,64 +1340,18 @@ async function launchHostBrowserIfNeeded(location: BrowserRuntimeLocation): Prom
     /^ws:\/\/[^/]+/,
     `ws://${cdpHost}`
   );
-  return { cdpUrl: debuggerUrl, hostDownloadDir: data.downloadDir || '' };
+  return { cdpUrl: debuggerUrl, remote: false };
 }
 
-// Use CDP to tell Chrome where to save downloads. This must be called AFTER
-// agent-browser has connected (via --cdp) so our call is the last to set
-// the download behavior, overriding Playwright's internal interception.
-async function setDownloadBehaviorViaCDP(cdpUrl: string, downloadPath: string): Promise<void> {
-  if (!downloadPath) return;
+// The open browser's downloads (download-watcher.ts): none for Chrome on the host.
+let downloadWatcher: DownloadWatcher | null = null;
 
-  return new Promise<void>((resolve, reject) => {
-    const ws = new WebSocket(cdpUrl);
-    const timeout = setTimeout(() => {
-      ws.close();
-      reject(new Error('CDP setDownloadBehavior timed out'));
-    }, 5000);
-
-    ws.on('open', () => {
-      ws.send(JSON.stringify({
-        id: 1,
-        method: 'Browser.setDownloadBehavior',
-        params: {
-          behavior: 'allowAndName',
-          downloadPath,
-          eventsEnabled: false,
-        },
-      }));
-    });
-
-    ws.on('message', (data) => {
-      const msg = JSON.parse(data.toString());
-      if (msg.id === 1) {
-        clearTimeout(timeout);
-        ws.close();
-        if (msg.error) {
-          reject(new Error(`CDP error: ${msg.error.message}`));
-        } else {
-          resolve();
-        }
-      }
-    });
-
-    ws.on('error', (err) => {
-      clearTimeout(timeout);
-      reject(err);
-    });
-  });
-}
-
-// The CDP download path applied for the current browser (host path in host
-// mode, /workspace/downloads locally). Playwright connections made mid-session
-// (browser_upload/browser_download) can clobber Browser.setDownloadBehavior,
-// so we remember what we applied and re-apply it after those calls.
-let appliedCdpDownloadPath: string | null = null;
-
+// Playwright connections made mid-session (browser_upload/browser_download)
+// reset Browser.setDownloadBehavior when they leave: the download watcher sets
+// it again (without, the container's Chrome refuses every download after).
 async function reapplyDownloadBehavior(): Promise<void> {
-  if (!browserState.cdpUrl || !appliedCdpDownloadPath) return;
   try {
-    await setDownloadBehaviorViaCDP(browserState.cdpUrl, appliedCdpDownloadPath);
+    await downloadWatcher?.reapply();
   } catch (err) {
     console.error('[Browser] Failed to re-apply download behavior via CDP:', err);
   }
@@ -1503,11 +1470,14 @@ async function launchBrowser(location: BrowserRuntimeLocation): Promise<{ closeL
   const hostBrowser = await launchHostBrowserIfNeeded(location);
   const profile = process.env.AGENT_BROWSER_PROFILE || '/workspace/.browser-profile';
 
-  // Create /workspace/downloads and name it in the profile's preferences. The
-  // headless shell does not read those preferences: the Chrome agent-browser
-  // launches saves there because of AGENT_BROWSER_DOWNLOAD_PATH (Dockerfile),
-  // and a host browser because of setDownloadBehaviorViaCDP below.
-  await ensureBrowserDownloadPreferences(profile, WORKSPACE_DOWNLOADS_DIR);
+  // Every browser's downloads end up in /workspace/downloads. The Chrome
+  // agent-browser launches here (the headless shell, which reads no profile
+  // preferences) saves there because of AGENT_BROWSER_DOWNLOAD_PATH
+  // (Dockerfile), kept so by the download watcher below; Chrome on the host
+  // saves into the host side of the same folder (its profile's preferences,
+  // chrome-provider.ts); a cloud browser saves on the provider's machine,
+  // from where the download watcher fetches it.
+  await fs.promises.mkdir(WORKSPACE_DOWNLOADS_DIR, { recursive: true });
 
   // Clear leftover instances first. While a browser is active they hold the
   // container's Chrome, so this cleanup (which pkills agent-browser and
@@ -1532,16 +1502,27 @@ async function launchBrowser(location: BrowserRuntimeLocation): Promise<{ closeL
     cdpUrl = endpoint.stdout.trim();
   }
 
-  // Override Playwright's download interception via CDP so downloads go to workspace.
-  // For host browser: use the host-filesystem path (volume-mounted as /workspace).
-  appliedCdpDownloadPath = null;
-  if (hostBrowser) {
-    try {
-      await setDownloadBehaviorViaCDP(cdpUrl, hostBrowser.hostDownloadDir || WORKSPACE_DOWNLOADS_DIR);
-      appliedCdpDownloadPath = hostBrowser.hostDownloadDir || WORKSPACE_DOWNLOADS_DIR;
-    } catch (err) {
-      console.error('[Browser] Failed to set download behavior via CDP:', err);
-    }
+  // The downloads a page starts, seen through to /workspace/downloads
+  // (download-watcher.ts): a cloud browser's are fetched through the host; the
+  // container's own Chrome saves there itself, and the watcher keeps it able
+  // to. Chrome on the host saves there from its preferences, and needs none.
+  void downloadWatcher?.close();
+  downloadWatcher = null;
+  const browserUrl = cdpUrl;
+  const connectBrowser = () => CdpConnection.openBrowser(browserUrl, { callTimeoutMs: 10_000 });
+  if (hostBrowser?.remote && hostBrowser.sessionId) {
+    downloadWatcher = new DownloadWatcher({ connectBrowser, host: hostDownloads(hostBrowser.sessionId), downloadsDir: WORKSPACE_DOWNLOADS_DIR });
+  } else if (hostBrowser?.remote) {
+    console.log('[Browser] The host named no session for this cloud browser: its downloads are not fetched');
+  } else if (!hostBrowser) {
+    downloadWatcher = new DownloadWatcher({ connectBrowser, downloadsDir: WORKSPACE_DOWNLOADS_DIR });
+  }
+  if (downloadWatcher) {
+    // Before any page loads: what a provider has already is not this browser's to fetch.
+    downloadWatcher.start();
+    await downloadWatcher.ensure().catch((err) => {
+      console.error('[Browser] Could not start watching the browser\'s downloads:', err instanceof Error ? err.message : err);
+    });
   }
 
   browserOpenGeneration++;
@@ -1705,10 +1686,20 @@ async function detachSession(s: BrowserSession, reason: string): Promise<void> {
   console.log(`[Browser] Session ${s.sessionId} stopped using the browser (${browserSessions().length} still on it)`);
 }
 
-/** Close the agent's browser: Chrome itself, and every session's use of it. */
-async function closeBrowser(reason: string): Promise<void> {
+/** How long closing a cloud browser waits for downloads still being fetched from the provider. */
+const CLOSE_DOWNLOAD_DRAIN_MS = 15_000;
+
+/**
+ * Close the agent's browser: Chrome itself, and every session's use of it.
+ * With `drainDownloads` (an agent's own close), a cloud browser's downloads
+ * still being fetched land first, any the watcher missed are fetched, and
+ * those not named yet are answered. A shutdown or a provider switch does not
+ * wait for them.
+ */
+async function closeBrowser(reason: string, options: { drainDownloads?: boolean } = {}): Promise<DownloadReport[]> {
   const { location } = browserState;
   const sessions = browserSessions();
+  const downloads = options.drainDownloads ? await downloadWatcher?.close(CLOSE_DOWNLOAD_DRAIN_MS) ?? [] : [];
   if (location === 'container') await execOwner(['close']);
   cleanupAgentBrowserDaemon();
   await stopHostBrowserIfNeeded(location);
@@ -1717,6 +1708,7 @@ async function closeBrowser(reason: string): Promise<void> {
   _setBrowserState({ active: false, cdpUrl: null, location: null });
   resetPerBrowserState();
   rejectBrowserBoundInputs(reason);
+  return downloads;
 }
 
 // A session that ended (deleted, evicted while idle, an automated turn done)
@@ -1908,6 +1900,7 @@ app.post('/browser/close', async (c) => {
     // awaiters unblock instead of hanging for the 24h human-input TTL behind a
     // card the user can no longer act on.
     const reason = 'The browser was closed before the user completed this request';
+    let downloads: DownloadReport[] = [];
     const othersStay = await inBrowserLifecycle(async () => {
       const s = browserSessionOf(body.sessionId);
       // Other sessions still use it: only this session lets go, and its tabs close.
@@ -1917,11 +1910,11 @@ app.post('/browser/close', async (c) => {
       }
       // The last one (or a close with no browser of this session's, as from the
       // viewer's close button after a restart): Chrome itself goes.
-      if (s || browserSessions().length === 0) await closeBrowser(reason);
+      if (s || browserSessions().length === 0) downloads = await closeBrowser(reason, { drainDownloads: true });
       return browserSessions().length > 0;
     });
 
-    return c.json({ success: true, othersStay });
+    return c.json({ success: true, othersStay, ...(downloads.length > 0 && { downloads }) });
   } catch (error: any) {
     console.error('[Browser] Error closing browser:', error);
     return c.json({ error: error.message || 'Failed to close browser' }, 500);
@@ -2128,7 +2121,7 @@ app.post('/browser/click', async (c) => {
     // field is still closing (bench: Google Hotels).
     const target = s.trees.get((await tabManager.queryTabs(s.key).catch(() => [])).find(t => t.active)?.url ?? '')?.seen.get(body.ref.replace(/^@/, '')) ?? '';
     const clickedField = target === '' || /^(textbox|searchbox|combobox|textarea)\b/.test(target);
-    const { result, digest, effect, settleMs, treeDiff } = await runWithEffect(
+    const { result, digest, effect, settleMs, treeDiff, downloads } = await runWithEffect(
       s,
       (before) => {
         humanInput = useHumanInput(before);
@@ -2143,7 +2136,7 @@ app.post('/browser/click', async (c) => {
 
     const tabInfo = await detectNewTab(s);
     notifyBrowserAction();
-    return c.json({ success: true, settleMs, ...(digest && { digest }), ...(effect && { effect }), ...(treeDiff && { treeDiff }), ...(tabInfo && { tabInfo }), ...(humanInput ? { humanInput: true } : {}) });
+    return c.json({ success: true, settleMs, ...(digest && { digest }), ...(effect && { effect }), ...(treeDiff && { treeDiff }), ...(tabInfo && { tabInfo }), ...(humanInput ? { humanInput: true } : {}), ...(downloads && { downloads }) });
   } catch (error: any) {
     console.error('[Browser] Error clicking:', error);
     return c.json({ error: error.message || 'Failed to click' }, 500);
@@ -2168,7 +2161,7 @@ app.post('/browser/fill', async (c) => {
     // raise a validation message or reveal fields, and the result should say
     // so. The field's own line is left out of the tree diff — the read-back
     // below reports it.
-    const { result, digest, effect, settleMs, treeDiff, docStart } = await runWithEffect(
+    const { result, digest, effect, settleMs, treeDiff, docStart, downloads } = await runWithEffect(
       s,
       () => withRefRestore(s, body.ref, () => execBrowser(['fill', body.ref, body.value], s)),
       ACTION_POLICIES.fill,
@@ -2188,7 +2181,7 @@ app.post('/browser/fill', async (c) => {
     if (digest) s.trees.acknowledge(digest.url, body.ref, committedValue, docStart);
 
     notifyBrowserAction();
-    return c.json({ success: true, settleMs, ...(committedValue !== null && { committedValue }), ...(effect && { effect }), ...(treeDiff && { treeDiff }) });
+    return c.json({ success: true, settleMs, ...(committedValue !== null && { committedValue }), ...(effect && { effect }), ...(treeDiff && { treeDiff }), ...(downloads && { downloads }) });
   } catch (error: any) {
     console.error('[Browser] Error filling:', error);
     return c.json({ error: error.message || 'Failed to fill' }, 500);
@@ -2330,7 +2323,7 @@ app.post('/browser/press', async (c) => {
       return c.json({ error: noBrowserOpen() }, 400);
     }
 
-    const { result, digest, effect, settleMs, treeDiff } = await runWithEffect(
+    const { result, digest, effect, settleMs, treeDiff, downloads } = await runWithEffect(
       s,
       () => execBrowser(['press', body.key], s),
       pressPolicy(body.key),
@@ -2342,7 +2335,7 @@ app.post('/browser/press', async (c) => {
 
     const tabInfo = await detectNewTab(s);
     notifyBrowserAction();
-    return c.json({ success: true, settleMs, ...(digest && { digest }), ...(effect && { effect }), ...(treeDiff && { treeDiff }), ...(tabInfo && { tabInfo }) });
+    return c.json({ success: true, settleMs, ...(digest && { digest }), ...(effect && { effect }), ...(treeDiff && { treeDiff }), ...(tabInfo && { tabInfo }), ...(downloads && { downloads }) });
   } catch (error: any) {
     console.error('[Browser] Error pressing key:', error);
     return c.json({ error: error.message || 'Failed to press key' }, 500);
@@ -2619,7 +2612,7 @@ app.post('/browser/select', async (c) => {
 
     const before = await readValue();
 
-    const { result, digest, effect, settleMs, treeDiff, docStart } = await runWithEffect(
+    const { result, digest, effect, settleMs, treeDiff, docStart, downloads } = await runWithEffect(
       s,
       () => withRefRestore(s, body.ref, () => execBrowser(['select', body.ref, body.value], s)),
       { ...ACTION_POLICIES.select, settleMs: SELECT_COMMIT_SETTLE_MS },
@@ -2655,7 +2648,7 @@ app.post('/browser/select', async (c) => {
     if (digest) s.trees.acknowledge(digest.url, body.ref, null, docStart);
 
     notifyBrowserAction();
-    return c.json({ success: true, committedValue: judgement.committed, settleMs, ...(effect && { effect }), ...(treeDiff && { treeDiff }) });
+    return c.json({ success: true, committedValue: judgement.committed, settleMs, ...(effect && { effect }), ...(treeDiff && { treeDiff }), ...(downloads && { downloads }) });
   } catch (error: any) {
     console.error('[Browser] Error selecting:', error);
     return c.json({ error: error.message || 'Failed to select' }, 500);
@@ -2676,7 +2669,7 @@ app.post('/browser/hover', async (c) => {
       return c.json({ error: noBrowserOpen() }, 400);
     }
 
-    const { result, effect, settleMs, treeDiff } = await runWithEffect(
+    const { result, effect, settleMs, treeDiff, downloads } = await runWithEffect(
       s,
       () => withRefRestore(s, body.ref, () => execBrowser(['hover', body.ref], s)),
       ACTION_POLICIES.hover,
@@ -2687,7 +2680,7 @@ app.post('/browser/hover', async (c) => {
     }
 
     notifyBrowserAction();
-    return c.json({ success: true, settleMs, ...(effect && { effect }), ...(treeDiff && { treeDiff }) });
+    return c.json({ success: true, settleMs, ...(effect && { effect }), ...(treeDiff && { treeDiff }), ...(downloads && { downloads }) });
   } catch (error: any) {
     console.error('[Browser] Error hovering:', error);
     return c.json({ error: error.message || 'Failed to hover' }, 500);
@@ -2707,8 +2700,8 @@ app.post('/browser/upload', async (c) => {
       urlsMatch: (left, right) => tabManager.urlsMatch(left, right),
     });
 
-    // Playwright's CDP attach can reset Browser.setDownloadBehavior — re-apply
-    // ours so click-triggered downloads keep landing in the workspace.
+    // Playwright's CDP connection resets Browser.setDownloadBehavior when it
+    // leaves: the download watcher sets it again.
     await reapplyDownloadBehavior();
 
     if (!result.success) {
@@ -2730,16 +2723,24 @@ app.post('/browser/download', async (c) => {
   try {
     const rawBody = await c.req.json().catch(() => ({}));
     const s = browserSessionOf(String(rawBody?.sessionId ?? ''));
-    const result = await runBrowserDownload(rawBody, {
+    const download = () => runBrowserDownload(rawBody, {
       validateSession: browserSessionRefusal,
       isBrowserActive: () => s !== null,
       getConnectionUrl: () => browserState.cdpUrl || getCdpHttpEndpoint(),
       getActiveTargetUrl: async () => (s ? (await findActivePageTarget(s))?.url ?? null : null),
       urlsMatch: (left, right) => tabManager.urlsMatch(left, right),
     });
+    // The attachment fallback opens a tab of its own on the URL, and a cloud
+    // browser keeps that tab's download too: it is this call's file, not one
+    // to save again. Its tab is no session's, which finds it after a redirect.
+    const url = typeof rawBody?.url === 'string' ? rawBody.url : '';
+    const watcher = downloadWatcher;
+    const result = watcher && url
+      ? await watcher.ignoring(url, (frameId) => !frameId || !openerOf(frameId), download)
+      : await download();
 
-    // Playwright's CDP attach can reset Browser.setDownloadBehavior — re-apply
-    // ours so click-triggered downloads keep landing in the workspace.
+    // Playwright's CDP connection resets Browser.setDownloadBehavior when it
+    // leaves: the download watcher sets it again.
     await reapplyDownloadBehavior();
 
     if (!result.success) {
@@ -2772,7 +2773,7 @@ app.post('/browser/type', async (c) => {
     // this is what drives keystroke-listening widgets (Stripe card fields,
     // OTP boxes, typeaheads) that programmatic fill cannot. Through the
     // settle, so a suggestion list the typing opened is reported.
-    const { result, digest, effect, settleMs, treeDiff, docStart } = await runWithEffect(
+    const { result, digest, effect, settleMs, treeDiff, docStart, downloads } = await runWithEffect(
       s,
       async () => {
         if (body.ref) {
@@ -2799,7 +2800,7 @@ app.post('/browser/type', async (c) => {
     }
 
     notifyBrowserAction();
-    return c.json({ success: true, settleMs, ...(committedValue !== null && { committedValue }), ...(effect && { effect }), ...(treeDiff && { treeDiff }) });
+    return c.json({ success: true, settleMs, ...(committedValue !== null && { committedValue }), ...(effect && { effect }), ...(treeDiff && { treeDiff }), ...(downloads && { downloads }) });
   } catch (error: any) {
     console.error('[Browser] Error typing:', error);
     return c.json({ error: error.message || 'Failed to type' }, 500);
@@ -2821,6 +2822,7 @@ app.post('/browser/eval', async (c) => {
     }
 
     const { script, wrapped } = prepareEvalScript(body.script);
+    const startedAt = await downloadsWatched();
     const result = await execBrowser(['eval', script], s);
 
     if (result.exitCode !== 0) {
@@ -2828,7 +2830,8 @@ app.post('/browser/eval', async (c) => {
     }
 
     notifyBrowserAction();
-    return c.json({ success: true, output: finalizeEvalOutput(result.stdout), wrapped });
+    const downloads = await downloadsSince(s, startedAt);
+    return c.json({ success: true, output: finalizeEvalOutput(result.stdout), wrapped, ...(downloads && { downloads }) });
   } catch (error: any) {
     console.error('[Browser] Error running eval:', error);
     return c.json({ error: error.message || 'Failed to run eval' }, 500);
@@ -2866,6 +2869,7 @@ app.post('/browser/run', async (c) => {
 
     const opensTab = commands.some(command => command[0]?.toLowerCase() === 'tab' && command[1]?.toLowerCase() === 'new');
     const tabOpened = opensTab ? await prepareNewTabWindow(s) : null;
+    const startedAt = await downloadsWatched();
     const result = await execBrowser(commandArgs, s);
     await tabOpened?.();
     if (result.exitCode === 0 && closes?.closesOwnTabAt != null) await moveOffClosedTab(s, closes.closesOwnTabAt);
@@ -2924,8 +2928,9 @@ app.post('/browser/run', async (c) => {
         ? labelTabList(result.stdout, await tabsAsSeen(s))
         : result.stdout;
 
+    const downloads = await downloadsSince(s, startedAt);
     notifyBrowserAction();
-    return c.json({ success: true, output, ...(tabInfo && { tabInfo }) });
+    return c.json({ success: true, output, ...(tabInfo && { tabInfo }), ...(downloads && { downloads }) });
   } catch (error: any) {
     console.error('[Browser] Error running command:', error);
     return c.json({ error: error.message || 'Failed to run browser command' }, 500);
@@ -3759,6 +3764,8 @@ async function submitLoginForm(plan: SubmitPlan, sessionId: string): Promise<Sub
     // A submit that only shows an error message still changed the page:
     // wait for the settle like a click on a button.
     plan.submitRef ? { ...ACTION_POLICIES.click, recheck: () => true } : pressPolicy('Enter'),
+    // The login card names no downloads: the agent's next action does.
+    { reportDownloads: false },
   );
   const observation = { settleMs, ...(digest && { digest }), ...(effect && { effect }), ...(treeDiff && { treeDiff }) };
   if (activity) return { ok: true, submitted: null, activity, observation };

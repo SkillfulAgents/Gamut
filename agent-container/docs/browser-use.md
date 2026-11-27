@@ -238,8 +238,13 @@ upload button that opens an operating-system picker. If the needed file is not
 in the workspace, request it first with `mcp__user-input__request_file`.
 
 Use `browser_download` for an actual file or image asset; do not substitute a
-screenshot. Browser downloads are stored under `/workspace/downloads/`.
-Report or deliver the saved path when the user needs the file.
+screenshot. Browser downloads are stored under `/workspace/downloads/`, and so
+is a file a click starts (an Export button, a generated key). The result of
+the action that started a download names the saved file, or says why it was
+not saved. The exceptions: Chrome on the user's computer (its downloads land
+there without a word) and a Tab Tender browser (which keeps them on its own
+machine). Report or deliver the saved path
+when the user needs the file.
 
 ## Finding a Site's API
 

@@ -17,6 +17,27 @@ export const hostBrowserRequestSchema = z.object({
 export type HostBrowserRequest = z.infer<typeof hostBrowserRequestSchema>
 
 /**
+ * Request body for `/api/browser/downloads` — a container asking which files
+ * its cloud browser's session downloaded. `sessionId` is the provider's
+ * session (the launch answer's): checked to be the agent's before anything is
+ * read. Capped: the body is attacker-influenceable.
+ */
+export const hostBrowserDownloadsRequestSchema = z.object({
+  agentId: z.string().min(1).optional(),
+  sessionId: z.string().min(1).max(256),
+})
+
+/**
+ * Request body for `/api/browser/download-file` — one of those files, by the
+ * CDP download's guid (or a name the listing gave).
+ */
+export const hostBrowserDownloadRequestSchema = hostBrowserDownloadsRequestSchema.extend({
+  guid: z.string().min(1).max(1024),
+})
+
+export type HostBrowserDownloadRequest = z.infer<typeof hostBrowserDownloadRequestSchema>
+
+/**
  * Request body for `/api/browser/report-launch-error` — a container relaying a
  * browser-launch failure that happened on its side (after launch-host-browser
  * succeeded) so the host can report it to Sentry. Lengths are capped because

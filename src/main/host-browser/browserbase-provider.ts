@@ -5,10 +5,12 @@ import {
   effectiveBrowserbaseProjectIdFrom,
   type AppSettings,
 } from '@shared/lib/config/settings'
-import { getOrCreateMapping } from './context-map-store'
+import { getOrCreateMapping, readContextMapping } from './context-map-store'
 import { GooglePasskeyRecovery } from './google-passkey-recovery'
 import { pageWsUrlFromDebuggerUrl } from './browserbase-live-view'
-import type { HostBrowserProvider, HostBrowserProviderStatus, BrowserConnectionInfo, BrowserDebugInfo } from './types'
+import { assertBrowserbaseSessionOn, listBrowserbaseDownloads, readBrowserbaseDownload, type BrowserbaseDownloadsApi } from './browserbase-downloads'
+import { DownloadsUnsupportedError } from './downloads'
+import type { HostBrowserProvider, HostBrowserProviderStatus, BrowserConnectionInfo, BrowserDebugInfo, BrowserDownloadRef, StoredDownload } from './types'
 
 const BROWSERBASE_API_BASE = 'https://api.browserbase.com/v1'
 
@@ -88,7 +90,7 @@ export class BrowserbaseProvider implements HostBrowserProvider {
           if (debugUrl) {
             console.log(`[BrowserbaseProvider] Reusing session ${existingSessionId} for instance ${instanceId}`)
             this.passkeyRecovery.watch(instanceId, debugUrl)
-            return { cdpUrl: debugUrl }
+            return { cdpUrl: debugUrl, sessionId: existingSessionId }
           }
         }
       } catch {
@@ -157,11 +159,11 @@ export class BrowserbaseProvider implements HostBrowserProvider {
     const debugUrl = await this.getDebugBrowserUrl(session.id, apiKey)
     if (debugUrl) {
       this.passkeyRecovery.watch(instanceId, debugUrl)
-      return { cdpUrl: debugUrl }
+      return { cdpUrl: debugUrl, sessionId: session.id }
     }
 
     // Fallback to connectUrl (single-use, but better than nothing)
-    return { cdpUrl: session.connectUrl }
+    return { cdpUrl: session.connectUrl, sessionId: session.id }
   }
 
   async getDebugInfo(instanceId: string): Promise<BrowserDebugInfo | null> {
@@ -189,6 +191,23 @@ export class BrowserbaseProvider implements HostBrowserProvider {
     })
 
     return { pages }
+  }
+
+  async listDownloads(agentId: string, sessionId: string): Promise<StoredDownload[]> {
+    return listBrowserbaseDownloads(await this.downloadsApiFor(agentId, sessionId), sessionId)
+  }
+
+  async readDownload(agentId: string, sessionId: string, download: BrowserDownloadRef): Promise<Buffer | null> {
+    return readBrowserbaseDownload(await this.downloadsApiFor(agentId, sessionId), sessionId, download)
+  }
+
+  /** The account's API, once the session is checked to be on the agent's context. */
+  private async downloadsApiFor(agentId: string, sessionId: string): Promise<BrowserbaseDownloadsApi> {
+    const apiKey = await getEffectiveBrowserbaseApiKey()
+    if (!apiKey) throw new DownloadsUnsupportedError('No Browserbase API key is configured')
+    const api = { base: BROWSERBASE_API_BASE, headers: { 'X-BB-API-Key': apiKey } }
+    await assertBrowserbaseSessionOn(api, sessionId, await readContextMapping('browserbase', agentId))
+    return api
   }
 
   async stop(instanceId: string): Promise<void> {

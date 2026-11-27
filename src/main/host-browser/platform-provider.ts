@@ -1,10 +1,12 @@
 import { getSettings } from '@shared/lib/config/settings'
 import { getPlatformAccessToken, platformAccessTokenFrom } from '@shared/lib/services/platform-auth-service'
 import { getPlatformProxyBaseUrl } from '@shared/lib/platform-auth/config'
-import { getOrCreateMapping } from './context-map-store'
+import { getOrCreateMapping, readContextMapping } from './context-map-store'
 import { GooglePasskeyRecovery } from './google-passkey-recovery'
 import { pageWsUrlFromDebuggerUrl } from './browserbase-live-view'
-import type { HostBrowserProvider, HostBrowserProviderStatus, BrowserConnectionInfo, BrowserDebugInfo } from './types'
+import { assertBrowserbaseSessionOn, listBrowserbaseDownloads, readBrowserbaseDownload, type BrowserbaseDownloadsApi } from './browserbase-downloads'
+import { DownloadsUnsupportedError } from './downloads'
+import type { HostBrowserProvider, HostBrowserProviderStatus, BrowserConnectionInfo, BrowserDebugInfo, BrowserDownloadRef, StoredDownload } from './types'
 
 
 interface BrowserbaseSession {
@@ -72,7 +74,7 @@ export class PlatformBrowserProvider implements HostBrowserProvider {
           if (debugUrl) {
             console.log(`[PlatformBrowserProvider] Reusing session ${existingSessionId} for instance ${instanceId}`)
             this.passkeyRecovery.watch(instanceId, debugUrl)
-            return { cdpUrl: debugUrl }
+            return { cdpUrl: debugUrl, sessionId: existingSessionId }
           }
         }
       } catch {
@@ -129,10 +131,10 @@ export class PlatformBrowserProvider implements HostBrowserProvider {
     const debugUrl = await this.getDebugBrowserUrl(session.id, token)
     if (debugUrl) {
       this.passkeyRecovery.watch(instanceId, debugUrl)
-      return { cdpUrl: debugUrl }
+      return { cdpUrl: debugUrl, sessionId: session.id }
     }
 
-    return { cdpUrl: session.connectUrl }
+    return { cdpUrl: session.connectUrl, sessionId: session.id }
   }
 
   async getDebugInfo(instanceId: string): Promise<BrowserDebugInfo | null> {
@@ -160,6 +162,32 @@ export class PlatformBrowserProvider implements HostBrowserProvider {
     })
 
     return { pages }
+  }
+
+  async listDownloads(agentId: string, sessionId: string): Promise<StoredDownload[]> {
+    return listBrowserbaseDownloads(await this.downloadsApiFor(agentId, sessionId), sessionId)
+  }
+
+  async readDownload(agentId: string, sessionId: string, download: BrowserDownloadRef): Promise<Buffer | null> {
+    return readBrowserbaseDownload(await this.downloadsApiFor(agentId, sessionId), sessionId, download)
+  }
+
+  /**
+   * Browserbase's Downloads API through the proxy, once the session is
+   * checked to be on the agent's context. A proxy that does not pass those
+   * paths through answers 404: the container is then told at once that the
+   * browser's downloads are out of reach.
+   */
+  private async downloadsApiFor(agentId: string, sessionId: string): Promise<BrowserbaseDownloadsApi> {
+    const token = await getPlatformAccessToken()
+    if (!token) throw new DownloadsUnsupportedError('Not signed in to Platform')
+    const api = {
+      base: this.proxyBase(),
+      headers: this.authHeaders(token),
+      unsupportedOn404: "The platform's browser proxy does not serve the browser's downloads",
+    }
+    await assertBrowserbaseSessionOn(api, sessionId, await readContextMapping('platform', agentId))
+    return api
   }
 
   async stop(instanceId: string): Promise<void> {

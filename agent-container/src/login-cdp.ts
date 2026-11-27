@@ -125,6 +125,11 @@ export class CdpConnection {
     })
   }
 
+  /** Whether the socket is gone, closed by either end. */
+  get isClosed(): boolean {
+    return this.closed
+  }
+
   /** Call `listener` with every event from now on; returns the unsubscribe. */
   onEvent(listener: (event: CdpEvent) => void): () => void {
     this.listeners.add(listener)

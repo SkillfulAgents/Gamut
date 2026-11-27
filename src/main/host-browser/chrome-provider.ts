@@ -326,7 +326,10 @@ export class ChromeProvider implements HostBrowserProvider {
     // Set Chrome download preferences so files go to the agent's workspace
     // instead of the user's ~/Downloads folder. The host browser runs on this
     // machine, so this is a host-only feature: it takes the workspace's host
-    // path from the container host rather than asking the actor.
+    // path from the container host rather than asking the actor. These
+    // preferences are all that puts a download there, under the page's name:
+    // nothing sets a download behaviour over CDP for this browser (one set
+    // over CDP lapses when the connection that set it closes).
     const downloadDir = path.join(containerHost.workspaceHostPath(instanceId), 'downloads')
     fs.mkdirSync(downloadDir, { recursive: true })
     const prefsDir = path.join(userDataDir, 'Default')
@@ -362,6 +365,14 @@ export class ChromeProvider implements HostBrowserProvider {
       prefs.profile = {
         ...(prefs.profile as Record<string, unknown> | undefined),
         password_manager_leak_detection: false,
+        // A site's second download a script starts (no click: a page's own
+        // "export", an agent's browser_eval) is blocked by default, with no
+        // prompt a headless or unattended browser could answer (measured,
+        // Chrome on macOS): the file never comes. Cloud browsers allow them.
+        default_content_setting_values: {
+          ...((prefs.profile as Record<string, unknown> | undefined)?.default_content_setting_values as Record<string, unknown> | undefined),
+          automatic_downloads: 1,
+        },
       }
       // Safe Browsing's password-reuse warning (a password typed on a site it
       // rates phishing) is the same kind of dialog, modal to the whole window.
@@ -708,7 +719,7 @@ export class ChromeProvider implements HostBrowserProvider {
     await this.watchPasskeyRecovery(instanceId, port)
 
     console.log(`[ChromeProvider] Chrome CDP on ${CDP_LOOPBACK_ADDRESS}:${port}${proxyPort ? `, proxy on ${proxyHost}:${proxyPort}` : ''} for instance ${instanceId} (pid ${chromePid})`)
-    return { port: exposedPort, downloadDir }
+    return { port: exposedPort }
   }
 
   // Google's passkey prompt opens a native WebAuthn dialog that swallows the viewer's CDP clicks.

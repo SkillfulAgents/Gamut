@@ -24,13 +24,19 @@ import { formatActionEffect, type ActionEffect, type ActionVerb, type EffectTree
 import { classifyWaitTarget, formatWaitResult } from '../wait-target'
 import { stripAnsi, extractScreenshotPath } from '../browser-output'
 import { redactToolResult } from '../injected-secrets'
+import { formatDownloadReports, type DownloadReport } from '../download-watcher'
 
-/** The effect line for a mutating action's result, from the server's settle-and-diff (and tree diff, when one was read). */
+/** The effect line for a mutating action's result, from the server's settle-and-diff (and tree diff, when one was read), and the downloads it saw. */
 function effectText(data: Record<string, unknown> | undefined, verb: ActionVerb, fallbackSettleMs: number, opts: { valueReadBack?: boolean } = {}): string {
   const effect = (data?.effect as ActionEffect | undefined) ?? null
   const settleMs = typeof data?.settleMs === 'number' ? data.settleMs : fallbackSettleMs
   const treeDiff = (data?.treeDiff as EffectTreeDiff | undefined) ?? null
-  return formatActionEffect(effect, { settleMs, verb, treeDiff, valueReadBack: opts.valueReadBack })
+  return formatActionEffect(effect, { settleMs, verb, treeDiff, valueReadBack: opts.valueReadBack }) + downloadsText(data)
+}
+
+/** The downloads a cloud browser made during the action (download-watcher.ts). */
+function downloadsText(data: Record<string, unknown> | undefined): string {
+  return formatDownloadReports(data?.downloads as DownloadReport[] | undefined)
 }
 
 function ageText(ms: number): string {
@@ -196,7 +202,7 @@ const browserCloseTool = tool(
     const othersStay = (result.data as Record<string, unknown> | undefined)?.othersStay === true
     return {
       content: [
-        { type: 'text' as const, text: othersStay ? 'Closed the tabs this session opened, except any another session is on. The browser stays open: other sessions of this agent are using it.' : 'Browser closed.' },
+        { type: 'text' as const, text: (othersStay ? 'Closed the tabs this session opened, except any another session is on. The browser stays open: other sessions of this agent are using it.' : 'Browser closed.') + downloadsText(result.data as Record<string, unknown> | undefined) },
       ],
     }
   }
@@ -292,7 +298,7 @@ The result reports what the click changed: navigation, dialogs, announcements, a
     const human = data?.humanInput === true ? ' (human-like mouse path: this site served a challenge page)' : ''
     // A new tab in front: its notice says where the agent is; the URL digest
     // compared two different tabs.
-    let text = `Clicked ${args.ref}.${human}${tabInfo ? '' : formatUrlDigest(digest)}${tabInfo ? '' : effectText(data, 'click', 300)}`
+    let text = `Clicked ${args.ref}.${human}${tabInfo ? '' : formatUrlDigest(digest)}${tabInfo ? downloadsText(data) : effectText(data, 'click', 300)}`
     if (tabInfo) {
       text += tabManager.formatTabNotification(tabInfo)
     } else {
@@ -408,7 +414,7 @@ This cannot type text — multi-character strings are rejected. To type into the
     const tabInfo = data?.tabInfo as { activeId: string; activeUrl: string; tabCount: number } | undefined
     const digest = (data?.digest as UrlDigest | undefined) ?? null
 
-    let text = `Pressed "${args.key}".${tabInfo ? '' : formatUrlDigestBrief(digest)}${tabInfo ? '' : effectText(data, 'press', 50)}`
+    let text = `Pressed "${args.key}".${tabInfo ? '' : formatUrlDigestBrief(digest)}${tabInfo ? downloadsText(data) : effectText(data, 'press', 50)}`
     if (tabInfo) {
       text += tabManager.formatTabNotification(tabInfo)
     } else {
@@ -565,7 +571,7 @@ Files are saved under /workspace/downloads/ and the saved path is returned.
 
 - Get the asset URL from the page first: browser_snapshot with includeUrls, browser_run("get attr @eN src"), or browser_eval (e.g. document.querySelector('img.profile-photo').src).
 - Supports http(s) URLs, blob: URLs (files the page generated — fetched from the current page), and data: URLs.
-- Links/buttons that trigger a browser download can also just be clicked — those files land in /workspace/downloads/ too.`,
+- Links/buttons that trigger a browser download can also just be clicked — those files land in /workspace/downloads/ too. The result of the action that started a download (a click, press, browser_eval, browser_run…) names the saved file or says why it was not saved — except with Chrome on the user's computer (its downloads land there without a word) and a Tab Tender browser (which keeps them on its own machine).`,
   {
     url: z.string().describe('URL of the file to download — an <img> src, <a> href, blob: or data: URL'),
     filename: z
@@ -649,6 +655,7 @@ const browserEvalTool = tool(
     if (data.wrapped && (output === '' || output === 'undefined')) {
       text += '\n(note: a statement body that does not `return` yields undefined — add `return` if you expected a value back)'
     }
+    text += downloadsText(data)
     text += getTabWarning()
     return {
       content: [{ type: 'text' as const, text }],
@@ -704,6 +711,7 @@ Available commands:
     // result — three mined sessions laundered it into "no console errors"
     // verdicts. Say what came back: nothing.
     let text = data.output ? String(data.output) : '(no output)'
+    text += downloadsText(data)
     const tabInfo = data.tabInfo as { activeId: string; activeUrl: string; tabCount: number } | undefined
     if (tabInfo) {
       text += tabManager.formatTabNotification(tabInfo)

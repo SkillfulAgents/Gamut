@@ -58,6 +58,7 @@ import {
   STEEL_PROFILE_SAVE_WAIT_MS,
   STEEL_SESSION_TIMEOUT_MS,
 } from './steel-provider'
+import { DownloadsUnsupportedError, SessionNotOwnedError } from './downloads'
 
 interface FakeSession { id: string; status: string; profileId?: string; body: Record<string, unknown> }
 interface FakeProfile { status: 'READY' | 'UPLOADING'; sourceSessionId: string | null }
@@ -78,6 +79,9 @@ class FakeSteel {
   /** While set, release requests wait for it: a release in flight. */
   releaseGate: Promise<void> | null = null
   releases: string[] = []
+  /** Each session's `/files`: uploads and the browser's downloads, kept after the session ends. */
+  files = new Map<string, Array<{ path: string; bytes: Buffer }>>()
+  fileReads: string[] = []
   staleLoads = 0
   private tokens = 0
 
@@ -168,7 +172,26 @@ class FakeSteel {
       const session = this.sessions.get(get[1])
       return session ? Response.json(this.wire(session)) : Response.json({ code: 'not_found' }, { status: 404 })
     }
+    const listFiles = pathname.match(/^\/v1\/sessions\/([^/]+)\/files$/)
+    if (method === 'GET' && listFiles) {
+      // Newest first while the session runs.
+      const files = [...(this.files.get(listFiles[1]) ?? [])].reverse()
+      return Response.json({ data: files.map((f) => ({ path: f.path, size: f.bytes.length, lastModified: '2026-11-27T20:00:00Z' })) })
+    }
+    const readFile = pathname.match(/^\/v1\/sessions\/([^/]+)\/files\/(.+)$/)
+    if (method === 'GET' && readFile) {
+      // Steel takes the path without its `/files/` prefix.
+      const wanted = `/files/${decodeURIComponent(readFile[2])}`
+      this.fileReads.push(readFile[2])
+      const file = this.files.get(readFile[1])?.find((f) => f.path === wanted)
+      return file ? new Response(new Uint8Array(file.bytes)) : Response.json({ code: 'file_not_found' }, { status: 404 })
+    }
     return Response.json({ code: 'unexpected', message: `${method} ${pathname}` }, { status: 500 })
+  }
+
+  /** The browser of a session saved a file into its `/files`. */
+  save(sessionId: string, name: string, content: string) {
+    this.files.set(sessionId, [...(this.files.get(sessionId) ?? []), { path: `/files/${name}`, bytes: Buffer.from(content) }])
   }
 }
 
@@ -454,6 +477,74 @@ describe('stop', () => {
     await provider.stop('agent-a')
     await new SteelProvider().stop('agent-a')
     expect(steel.releases).toEqual(['session-1'])
+  })
+})
+
+describe('downloads', () => {
+  it("reads a download from the session's /files by its guid", async () => {
+    const provider = new SteelProvider()
+    await provider.launch('agent-a', {}, 'agent-a')
+    steel.save('session-1', 'report.csv', 'an earlier report.csv')
+    steel.save('session-1', 'guid-1', 'keyword,volume')
+    const bytes = await provider.readDownload('agent-a', 'session-1', { guid: 'guid-1' })
+    expect(bytes?.toString()).toBe('keyword,volume')
+    expect(steel.fileReads).toEqual(['guid-1'])
+  })
+
+  it('reads a file by the name a listing gave, never one with the same name as the page gave', async () => {
+    const provider = new SteelProvider()
+    await provider.launch('agent-a', {}, 'agent-a')
+    steel.save('session-1', 'my report.pdf', '%PDF')
+    expect((await provider.readDownload('agent-a', 'session-1', { guid: 'my report.pdf' }))?.toString()).toBe('%PDF')
+    expect(steel.fileReads).toEqual(['my%20report.pdf'])
+    // A download not stored yet is not answered with an older file of its name.
+    expect(await provider.readDownload('agent-a', 'session-1', { guid: 'guid-new' })).toBeNull()
+  })
+
+  it("lists the session's files by their names under /files", async () => {
+    const provider = new SteelProvider()
+    await provider.launch('agent-a', {}, 'agent-a')
+    steel.save('session-1', 'guid-1', 'abc')
+    steel.save('session-1', 'notes.txt', 'hello')
+    expect(await provider.listDownloads('agent-a', 'session-1')).toEqual([{ name: 'notes.txt', size: 5 }, { name: 'guid-1', size: 3 }])
+  })
+
+  it('answers null while the file is not there', async () => {
+    const provider = new SteelProvider()
+    await provider.launch('agent-a', {}, 'agent-a')
+    expect(await provider.readDownload('agent-a', 'session-1', { guid: 'guid-1' })).toBeNull()
+  })
+
+  it('needs nothing the launching process kept: a fresh provider reads a released session', async () => {
+    const provider = new SteelProvider()
+    await provider.launch('agent-a', {}, 'agent-a')
+    steel.save('session-1', 'guid-1', 'kept')
+    await provider.stop('agent-a')
+    expect(steel.sessions.get('session-1')!.status).toBe('released')
+    expect((await new SteelProvider().readDownload('agent-a', 'session-1', { guid: 'guid-1' }))?.toString()).toBe('kept')
+  })
+
+  it("refuses another agent's session, and one Steel does not know", async () => {
+    const provider = new SteelProvider()
+    await provider.launch('agent-a', {}, 'agent-a')
+    await provider.launch('agent-b', {}, 'agent-b')
+    steel.save('session-1', 'guid-1', 'secret')
+    await expect(provider.readDownload('agent-b', 'session-1', { guid: 'guid-1' })).rejects.toBeInstanceOf(SessionNotOwnedError)
+    await expect(provider.listDownloads('agent-b', 'session-1')).rejects.toBeInstanceOf(SessionNotOwnedError)
+    await expect(provider.readDownload('agent-a', 'session-404', { guid: 'guid-1' })).rejects.toBeInstanceOf(SessionNotOwnedError)
+    await expect(provider.readDownload('agent-c', 'session-1', { guid: 'guid-1' })).rejects.toBeInstanceOf(SessionNotOwnedError)
+    expect(steel.fileReads).toEqual([])
+  })
+
+  it('says so when there is no API key', async () => {
+    h.settings.apiKeys = {}
+    await expect(new SteelProvider().readDownload('agent-a', 'session-1', { guid: 'g' })).rejects.toBeInstanceOf(DownloadsUnsupportedError)
+  })
+
+  it('hands its session id to the container with the CDP URL', async () => {
+    const provider = new SteelProvider()
+    expect(await provider.launch('agent-a', {}, 'agent-a')).toMatchObject({ sessionId: 'session-1' })
+    expect(await provider.launch('agent-a', {}, 'agent-a')).toMatchObject({ sessionId: 'session-1' })
   })
 })
 

@@ -6,16 +6,20 @@
 import {
   steelErrorSchema,
   steelProfileSchema,
+  steelSessionFileListSchema,
   steelSessionListSchema,
   steelSessionSchema,
   type SteelProfile,
   type SteelSession,
+  type SteelSessionFile,
 } from './steel-schemas'
 
 export const STEEL_API_BASE = 'https://api.steel.dev/v1'
 
 /** No call waits longer (session creation takes ~1 s): a stalled network must not hold a launch or shutdown. */
 const REQUEST_TIMEOUT_MS = 30_000
+/** A file read moves up to the download cap (100 MB), so it may take longer. */
+const FILE_READ_TIMEOUT_MS = 120_000
 
 /** A non-2xx answer from Steel, with the error code its body names (e.g. `profile_not_ready`). */
 export class SteelApiError extends Error {
@@ -75,6 +79,20 @@ export class SteelApi {
     return found
   }
 
+  /** A session's files: uploads and the browser's downloads. Readable after the session ends too. */
+  async listSessionFiles(sessionId: string): Promise<SteelSessionFile[]> {
+    return steelSessionFileListSchema.parse(await this.request('GET', `/sessions/${encodeURIComponent(sessionId)}/files`)).data
+  }
+
+  /** One session file's bytes, by the path the listing gave (`/files/report.pdf`). */
+  async readSessionFile(sessionId: string, filePath: string): Promise<Buffer> {
+    // Steel takes the path without its `/files/` prefix; one that starts with `/` fails.
+    const relative = filePath.replace(/^\/?files\//, '').replace(/^\/+/, '')
+    const encoded = relative.split('/').map(encodeURIComponent).join('/')
+    const response = await this.send('GET', `/sessions/${encodeURIComponent(sessionId)}/files/${encoded}`, undefined, FILE_READ_TIMEOUT_MS)
+    return Buffer.from(await response.arrayBuffer())
+  }
+
   /** One authenticated read, which creates nothing billable: does Steel accept this key? */
   async checkKey(): Promise<void> {
     await this.request('GET', '/sessions?limit=1')
@@ -82,6 +100,16 @@ export class SteelApi {
 
   /** The parsed JSON body of a 2xx answer; any other answer throws a {@link SteelApiError}. */
   private async request(method: 'GET' | 'POST', path: string, body?: unknown): Promise<unknown> {
+    const text = await (await this.send(method, path, body)).text()
+    try {
+      return text ? JSON.parse(text) : null
+    } catch {
+      return null
+    }
+  }
+
+  /** A 2xx answer, its body unread; any other answer throws a {@link SteelApiError}. */
+  private async send(method: 'GET' | 'POST', path: string, body?: unknown, timeoutMs = REQUEST_TIMEOUT_MS): Promise<Response> {
     const response = await fetch(`${STEEL_API_BASE}${path}`, {
       method,
       headers: {
@@ -89,8 +117,9 @@ export class SteelApi {
         ...(body !== undefined && { 'Content-Type': 'application/json' }),
       },
       body: body !== undefined ? JSON.stringify(body) : undefined,
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      signal: AbortSignal.timeout(timeoutMs),
     })
+    if (response.ok) return response
     const text = await response.text()
     let json: unknown = null
     try {
@@ -98,17 +127,14 @@ export class SteelApi {
     } catch {
       // Not JSON (a proxy's HTML error page): reported with the status below.
     }
-    if (!response.ok) {
-      const error = steelErrorSchema.safeParse(json)
-      const code = error.success ? error.data.code : undefined
-      const message = error.success && error.data.message ? error.data.message : text.slice(0, 500)
-      throw new SteelApiError(
-        response.status,
-        code,
-        `Steel ${method} ${path.split('?')[0]} answered ${response.status}${code ? ` (${code})` : ''}: ${message}`,
-        error.success ? error.data.retryAfterSeconds : undefined,
-      )
-    }
-    return json
+    const error = steelErrorSchema.safeParse(json)
+    const code = error.success ? error.data.code : undefined
+    const message = error.success && error.data.message ? error.data.message : text.slice(0, 500)
+    throw new SteelApiError(
+      response.status,
+      code,
+      `Steel ${method} ${path.split('?')[0]} answered ${response.status}${code ? ` (${code})` : ''}: ${message}`,
+      error.success ? error.data.retryAfterSeconds : undefined,
+    )
   }
 }
