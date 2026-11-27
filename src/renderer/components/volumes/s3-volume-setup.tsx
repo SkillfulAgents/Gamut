@@ -5,7 +5,7 @@ import { Input } from '@renderer/components/ui/input'
 import { Label } from '@renderer/components/ui/label'
 import { s3InputConfigSchema, type S3InputConfig } from '@shared/lib/volumes/s3-schema'
 import { volumeValidationSchema, type VolumeValidation } from '@shared/lib/volumes/volume-validation-schema'
-import { VolumeDetailsFields, VolumeSetupFooter, VolumeSetupHeader } from './volume-setup-layout'
+import { useVolumeSaveLabel, VolumeDetailsFields, VolumeSetupFooter, VolumeSetupHeader } from './volume-setup-layout'
 import type { VolumeSetupDefinition, VolumeSetupProps } from './volume-setup'
 
 function S3Logo({ className }: { className?: string }) { return <Database aria-hidden className={className} /> }
@@ -39,6 +39,8 @@ function S3VolumeSetup({ initialDetails, onSubmit, onBack, onCancel, isSaving, e
   useEffect(() => { if (result) resultRef.current?.focus() }, [result])
   const controller = useRef<AbortController | null>(null)
   useEffect(() => () => controller.current?.abort(), [])
+  // A prefix needs no making: one that is new and one already there are both typed in, so either host ends at "Use this bucket".
+  const saveLabel = useVolumeSaveLabel(attachToAgent ? 'Create and add' : 'Create drive', { noun: 'bucket' })
   const update = (next: S3InputConfig) => { setConfig(next); setResult(null); setConnectionError(null); clearError() }
   const parsed = s3InputConfigSchema.safeParse(config)
 
@@ -101,7 +103,7 @@ function S3VolumeSetup({ initialDetails, onSubmit, onBack, onCancel, isSaving, e
       {step === 'connection' && <p className="text-xs text-muted-foreground">Checking access creates temporary test objects inside this prefix, then removes them.</p>}
       <VolumeSetupFooter onBack={step === 'connection' ? onBack : () => { setStep('connection'); clearError() }} onCancel={onCancel}
         isSaving={checking || isSaving} disabled={step === 'connection' ? !parsed.success : !details.name.trim() || !result?.valid}
-        submitLabel={step === 'details' ? attachToAgent ? 'Create and add' : 'Create drive' : checking ? 'Checking access…' : result?.valid ? 'Continue' : 'Test connection'} />
+        submitLabel={step === 'details' ? saveLabel : checking ? 'Checking access…' : result?.valid ? 'Continue' : 'Test connection'} />
     </form>
   </>
 }

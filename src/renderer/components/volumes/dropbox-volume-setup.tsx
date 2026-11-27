@@ -1,10 +1,11 @@
-import { useState } from 'react'
+import { useContext, useState } from 'react'
 import { useConnectedAccountsByToolkit } from '@renderer/hooks/use-connected-accounts'
 import { ServiceIcon } from '@renderer/components/ui/service-icon'
 import { dropboxVolumeConfigSchema, type DropboxVolumeConfig } from '@shared/lib/volumes/dropbox-schema'
 import { VolumeAccountStep, VolumeRemoteDetailsStep } from './volume-account-step'
 import { VolumeFolderPicker, type VolumeFolderSource } from './volume-folder-picker'
-import { VolumeSetupHeader } from './volume-setup-layout'
+import { VolumeNewFolderStep } from './volume-new-folder-step'
+import { VolumeSetupFolderContext, VolumeSetupHeader } from './volume-setup-layout'
 import type { VolumeSetupDefinition, VolumeSetupProps } from './volume-setup'
 
 function DropboxLogo({ className }: { className?: string }) {
@@ -27,6 +28,7 @@ const dropboxFolders: VolumeFolderSource<string> = {
 
 function DropboxVolumeSetup({ initialDetails, onSubmit, onBack, onCancel, isSaving, error, clearError, attachToAgent }: VolumeSetupProps) {
   const accounts = useConnectedAccountsByToolkit('dropbox')
+  const mode = useContext(VolumeSetupFolderContext)
   const [step, setStep] = useState<'account' | 'details'>('account')
   const [accountId, setAccountId] = useState('')
   const [config, setConfig] = useState<DropboxVolumeConfig | null>(null)
@@ -43,11 +45,17 @@ function DropboxVolumeSetup({ initialDetails, onSubmit, onBack, onCancel, isSavi
   }
 
   return <>
-    <VolumeSetupHeader title={step === 'account' ? 'Connect Dropbox' : 'Set up Dropbox drive'}
+    <VolumeSetupHeader title={step === 'account' ? 'Connect Dropbox' : mode === 'new' ? 'Create a Dropbox folder' : mode === 'existing' ? 'Choose a Dropbox folder' : 'Set up Dropbox drive'}
       description={step === 'account' ? (accounts.data?.accounts.length === 0 ? 'Sign in to Dropbox, then choose a folder to add.' : 'Choose an account or connect a new one.') : 'Select a folder and name it. Agents you add it to get read/write access.'}
       Logo={DropboxLogo} steps={['Source', 'Account', 'Details']} step={step === 'account' ? 1 : 2} />
     {step === 'account' ? <VolumeAccountStep toolkit="dropbox" label="Dropbox" accounts={accounts} accountId={accountId} active={active}
       onSelect={selectAccount} onNext={() => { clearError(); setStep('details') }} onBack={onBack} onCancel={onCancel} />
+    // A new folder goes at the top of the Dropbox unless another place is picked.
+    : mode === 'new' ? <VolumeNewFolderStep key={accountId} source={dropboxFolders} accountId={accountId} account={{ name: account?.displayName, active }}
+      defaultName={initialDetails.name} where={{ initial: '', pick: true, preset: '' }}
+      toConfig={(folder): DropboxVolumeConfig => ({ accountId, path: folder.id })}
+      onSubmit={made => onSubmit(made, details)} onBack={() => { clearError(); setStep('account') }} onCancel={onCancel}
+      isSaving={isSaving} error={error} clearError={clearError} />
     : <VolumeRemoteDetailsStep label="Dropbox" accountName={account?.displayName} active={active} details={details}
       onDetailsChange={value => { setDetails(value); clearError() }} isSaving={isSaving} error={error} canSave={!!config} attachToAgent={attachToAgent}
       onSave={() => { if (config) void onSubmit(config, details) }} onBack={() => { clearError(); setStep('account') }} onCancel={onCancel}>

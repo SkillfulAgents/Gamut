@@ -8,7 +8,7 @@ import { captureRendererException } from '@renderer/lib/error-reporting'
 import { fillTeamBrainSetupBlock, setUpByOf, TEAM_BRAIN_CRON } from '@renderer/lib/team-brain/team-brain-setup-block'
 import { usesTeamBrain, useTeamBrain } from '@renderer/lib/team-brain/team-brain-store'
 import type { VolumeDetails } from '@renderer/components/volumes/volume-details-schema'
-import { TEAM_BRAIN_STEPS, type TeamBrainChoices, type TeamBrainSetup, type TeamBrainSetupView, type TeamBrainStep } from '@shared/lib/config/team-brain-schema'
+import { TEAM_BRAIN_STEPS, type TeamBrainChoices, type TeamBrainOrigin, type TeamBrainSetup, type TeamBrainSetupView, type TeamBrainStep } from '@shared/lib/config/team-brain-schema'
 import { DEFAULT_PUBLIC_SKILLSET } from '@shared/lib/skillset-provider/default-public-skillset'
 import type { ApiAgent } from '@shared/lib/types/api'
 import type { MountSummaryWithHealth } from '@shared/lib/types/mount'
@@ -189,10 +189,10 @@ export function useTeamBrainSetup() {
 
   /**
    * Step 1: claim the set-up, then make its agent and drive through the app's routes, recording each the moment it is
-   * made. A set-up that has them already keeps its agent, and a new drive replaces its drive. False when the window now
-   * shows another set-up instead.
+   * made. A set-up that has them already keeps its agent, and a new drive replaces its drive. `origin` says whether the
+   * drive's folder was just made for it or was there already. False when the window now shows another set-up instead.
    */
-  const prepare = async (source: VolumeSource, details: VolumeDetails): Promise<boolean> => {
+  const prepare = async (source: VolumeSource, details: VolumeDetails, origin: TeamBrainOrigin): Promise<boolean> => {
     if (!template) throw new Error('The Team Brain template is not available yet. Try again in a moment.')
     try {
       // Claimed first: a tab closed from here on leaves a set-up to resume, not an agent and a drive no one knows of.
@@ -229,7 +229,7 @@ export function useTeamBrainSetup() {
       const mount = await addMount.mutateAsync({ agentSlug: slug, ...source, name: details.name, visibility: details.visibility, onlyNew: true })
       try {
         // Saving the drive is step 1 done: Resume opens past it.
-        current = await send<TeamBrainSetupView>('PATCH', '', { setupId, drive: { volumeId: mount.volumeId, location: source.type, replaces: null }, step: 'agents' })
+        current = await send<TeamBrainSetupView>('PATCH', '', { setupId, drive: { volumeId: mount.volumeId, location: source.type, origin, replaces: null }, step: 'agents' })
       } catch (error) {
         void removeDrive(mount.volumeId).catch(() => {})
         throw error

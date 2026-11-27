@@ -6,20 +6,23 @@ import type { VolumeType } from '@shared/lib/types/mount'
 
 const foldersKey = (type: VolumeType, query: Record<string, string>) => [`${type}-folders`, query]
 
+/** One listing, read now: what the picker's query reads, for a set-up step that needs it outside a render. */
+export async function fetchVolumeFolders(source: { type: VolumeType; label: string }, query: Record<string, string>): Promise<VolumeFolders> {
+  const response = await apiFetch(`/api/volume-types/${source.type}/folders?${new URLSearchParams(query)}`)
+  if (!response.ok) {
+    const error = await response.json().catch(() => null)
+    throw new Error(error?.error ?? `Could not load ${source.label} folders`)
+  }
+  return volumeFoldersSchema.parse(await response.json())
+}
+
 /** All sources browse through the type registry and return the same folder shape. */
 export function useVolumeFolders(source: { type: VolumeType; label: string }, query: Record<string, string>, enabled: boolean) {
   return useQuery({
     queryKey: foldersKey(source.type, query),
     enabled,
     retry: false,
-    queryFn: async () => {
-      const response = await apiFetch(`/api/volume-types/${source.type}/folders?${new URLSearchParams(query)}`)
-      if (!response.ok) {
-        const error = await response.json().catch(() => null)
-        throw new Error(error?.error ?? `Could not load ${source.label} folders`)
-      }
-      return volumeFoldersSchema.parse(await response.json())
-    },
+    queryFn: () => fetchVolumeFolders(source, query),
   })
 }
 

@@ -1,13 +1,12 @@
-import { CalendarDays, Clock, Sunrise, type LucideIcon } from 'lucide-react'
+import { CalendarDays, Clock, FolderPlus, FolderSearch, Sunrise, type LucideIcon } from 'lucide-react'
 import { cn } from '@shared/lib/utils/cn'
-import { TEAM_BRAIN_SCHEDULES, type TeamBrainLocationId, type TeamBrainSchedule } from '@shared/lib/config/team-brain-schema'
+import { TEAM_BRAIN_ORIGINS, TEAM_BRAIN_SCHEDULES, type TeamBrainLocationId, type TeamBrainOrigin, type TeamBrainSchedule } from '@shared/lib/config/team-brain-schema'
 import { SCHEDULE_LABELS } from '@renderer/lib/team-brain/team-brain-format'
 import { TEAM_BRAIN_LOCATIONS, type TeamBrainLocation } from './team-brain-locations'
 
 /**
- * The two rigid set-up questions, where Team Brain lives and how often it
- * syncs, as choice cards. Both set-up modals ask them; the agent-led one
- * offers fewer homes.
+ * The rigid set-up questions, whether there is a Team Brain already, where it
+ * lives and how often it syncs, as choice cards.
  */
 
 /** A choice card: hairline border, brand border when chosen. */
@@ -59,6 +58,51 @@ export function RadioDot({ checked }: { checked: boolean }) {
 
 export function Recommended() {
   return <span className="shrink-0 rounded-[5px] bg-brand/10 px-1.5 py-0.5 text-[11px] font-medium text-brand">Recommended</span>
+}
+
+const ORIGINS: Record<TeamBrainOrigin, { Icon: LucideIcon; title: string; detail: string }> = {
+  new: {
+    Icon: FolderPlus,
+    title: 'Create a new Team Brain',
+    detail: 'Make a new folder for it where your team keeps files. You name the folder and choose where it goes.',
+  },
+  existing: {
+    Icon: FolderSearch,
+    title: 'Use an existing Team Brain',
+    detail: 'Your team already keeps a Team Brain folder somewhere. Select it, and keep using it.',
+  },
+}
+
+/** Set-up's first question: make a new folder for Team Brain, or use the one the team already has. */
+export function OriginChoices({ value, onChoose }: { value: TeamBrainOrigin | null; onChoose: (origin: TeamBrainOrigin) => void }) {
+  return (
+    <div role="radiogroup" aria-label="New or existing" className="grid grid-cols-2 gap-3">
+      {TEAM_BRAIN_ORIGINS.map((origin) => {
+        const { Icon, title, detail } = ORIGINS[origin]
+        const on = origin === value
+        return (
+          <button
+            key={origin}
+            type="button"
+            role="radio"
+            aria-checked={on}
+            onClick={() => onChoose(origin)}
+            data-testid={`team-brain-origin-${origin}`}
+            className={cn(CHOICE, on ? CHOICE_ON : CHOICE_OFF, 'flex flex-col gap-5 px-4 py-5')}
+          >
+            <span className="flex w-full items-start justify-between">
+              <Icon className="size-6 text-muted-foreground/70" strokeWidth={1.5} />
+              <RadioDot checked={on} />
+            </span>
+            <span>
+              <span className="block text-[14px] font-medium">{title}</span>
+              <span className="mt-1.5 block text-[12px]/4 text-muted-foreground">{detail}</span>
+            </span>
+          </button>
+        )
+      })}
+    </div>
+  )
 }
 
 /** Where Team Brain lives: every drive type it can use. */

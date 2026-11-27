@@ -1,6 +1,6 @@
 import { Hono } from 'hono'
 import { z } from 'zod'
-import { TEAM_BRAIN_LOCATION_IDS, teamBrainChoicesSchema } from '@shared/lib/config/team-brain-schema'
+import { TEAM_BRAIN_LOCATION_IDS, TEAM_BRAIN_ORIGINS, teamBrainChoicesSchema } from '@shared/lib/config/team-brain-schema'
 import { Authenticated, IsAdmin } from '../middleware/auth'
 import { claimSetup, dropSetup, markReady, readSetupView, saveSetup, TeamBrainSetupError } from '../lib/team-brain-setup'
 
@@ -12,6 +12,7 @@ const saveBodySchema = teamBrainChoicesSchema.partial().extend({
   drive: z.object({
     volumeId: z.string().min(1).nullable(),
     location: z.enum(TEAM_BRAIN_LOCATION_IDS).nullable(),
+    origin: z.enum(TEAM_BRAIN_ORIGINS).optional(),
     replaces: z.string().nullable(),
   }).strict().optional(),
 }).strict()
