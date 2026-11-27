@@ -109,7 +109,8 @@ export async function writeFileExclusive(filePath: string, data: string, mode = 
     const code = (error as NodeJS.ErrnoException).code
     if (code === 'EEXIST') return 'exists'
     // A file system without hard links: an exclusive create still keeps one writer.
-    if (code === 'EPERM' || code === 'ENOTSUP' || code === 'EOPNOTSUPP' || code === 'ENOSYS' || code === 'EXDEV') {
+    // S3 Files (cloud hosts' /data) refuses link() with EMLINK.
+    if (code === 'EPERM' || code === 'ENOTSUP' || code === 'EOPNOTSUPP' || code === 'ENOSYS' || code === 'EXDEV' || code === 'EMLINK') {
       try {
         await writeSynced(filePath, data, mode, 'wx')
         return 'created'
