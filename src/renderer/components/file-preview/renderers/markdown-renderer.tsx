@@ -5,7 +5,7 @@ import type { PluggableList } from 'unified'
 import { useFilePreview } from '@renderer/context/file-preview-context'
 import { rehypeCommentLines } from '@renderer/lib/rehype-comment-lines'
 import { useCommentBox } from '../comments/use-comment-box'
-import { useFileContent } from './use-file-content'
+import { fileLoadErrorText, fileLoadErrorTone, useFileContent } from './use-file-content'
 import { splitFrontmatter } from '@renderer/lib/markdown-frontmatter'
 import { isAgentFilePath } from '@renderer/lib/workspace-file-url'
 import { toWorkspaceAbsolutePath } from '@shared/lib/utils/workspace-path'
@@ -75,9 +75,9 @@ export function MarkdownRenderer({ url, filePath, agentSlug }: MarkdownRendererP
           <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
         </div>
       ) : error ? (
-        <div className="flex items-center gap-2 text-sm text-destructive">
+        <div className={`flex items-center gap-2 text-sm ${fileLoadErrorTone(error)}`}>
           <AlertCircle className="h-4 w-4 shrink-0" />
-          <span>Failed to load file</span>
+          <span>{fileLoadErrorText(error)}</span>
         </div>
       ) : (
         <div

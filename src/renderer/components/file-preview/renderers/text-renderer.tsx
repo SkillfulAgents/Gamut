@@ -1,7 +1,7 @@
 import { Loader2, AlertCircle } from 'lucide-react'
 import { useMemo, useRef } from 'react'
 import { useCommentBox } from '../comments/use-comment-box'
-import { useFileContent } from './use-file-content'
+import { fileLoadErrorText, fileLoadErrorTone, useFileContent } from './use-file-content'
 
 interface TextRendererProps {
   url: string
@@ -30,9 +30,9 @@ export function TextRenderer({ url, filePath, agentSlug }: TextRendererProps) {
           <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
         </div>
       ) : error ? (
-        <div className="flex items-center gap-2 p-4 text-sm text-destructive">
+        <div className={`flex items-center gap-2 p-4 text-sm ${fileLoadErrorTone(error)}`}>
           <AlertCircle className="h-4 w-4 shrink-0" />
-          <span>Failed to load file</span>
+          <span>{fileLoadErrorText(error)}</span>
         </div>
       ) : (
         <>

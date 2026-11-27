@@ -6,6 +6,12 @@ export class HttpError extends Error {
   }
 }
 
+/** The response as an HttpError carrying the server's `error` text, else `fallback`. */
+export async function readHttpError(res: Response, fallback: string): Promise<HttpError> {
+  const body = await res.json().catch(() => null) as { error?: unknown } | null
+  return new HttpError(res.status, typeof body?.error === 'string' && body.error ? body.error : fallback)
+}
+
 /** Retrying the same request can recover from transport failures, timeouts, rate limits, and server failures. */
 export function isRetryableRequestError(error: unknown): boolean {
   return !(error instanceof HttpError) || error.status === 408 || error.status === 429 || error.status >= 500

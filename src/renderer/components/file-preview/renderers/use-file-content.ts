@@ -1,4 +1,5 @@
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
+import { HttpError, isRetryableRequestError, readHttpError } from '@renderer/lib/http-error'
 
 /**
  * Hard cap on how much text we pull into the renderer. Measured in UTF-16 code
@@ -10,6 +11,16 @@ export interface FileContent {
   text: string
   /** True when the file exceeded MAX_CONTENT_CHARS and `text` is a prefix. */
   truncated: boolean
+}
+
+/** What a preview says when its file did not load: the server's reason when it gave one. */
+export function fileLoadErrorText(error: Error): string {
+  return error instanceof HttpError ? error.message : 'Failed to load file'
+}
+
+/** A refused or missing file is the app working as intended, so it reads as a notice, not an error. */
+export function fileLoadErrorTone(error: Error): string {
+  return error instanceof HttpError && (error.status === 403 || error.status === 404) ? 'text-muted-foreground' : 'text-destructive'
 }
 
 /**
@@ -25,7 +36,7 @@ export function useFileContent(url: string) {
     queryKey: ['file-content', url],
     queryFn: async ({ signal }) => {
       const res = await fetch(url, { signal })
-      if (!res.ok) throw new Error(`Failed to load file: ${res.status}`)
+      if (!res.ok) throw await readHttpError(res, 'Failed to load file')
       const text = await res.text()
       if (text.length > MAX_CONTENT_CHARS) {
         return { text: text.slice(0, MAX_CONTENT_CHARS), truncated: true }
@@ -33,6 +44,8 @@ export function useFileContent(url: string) {
       return { text, truncated: false }
     },
     staleTime: 30_000,
+    // A refusal or a missing file answers the same way again: show it at once.
+    retry: (count, error) => isRetryableRequestError(error) && count < 3,
     // A reload is a new URL for the same file. The text on screen stays until the
     // new text arrives, so a reload neither flashes a spinner nor loses the scroll
     // position. Each renderer is keyed by its file, so one file's text never stands in for another's.
