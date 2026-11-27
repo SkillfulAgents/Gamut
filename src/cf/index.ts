@@ -109,7 +109,7 @@ export default {
     if (!servedByApi(pathname)) return serveAppShell(request, env.ASSETS)
     try {
       // Before this isolate boots: the task manager object serves the request whole.
-      if (needsLiveConnections(pathname)) {
+      if (needsLiveConnections(pathname, request.method)) {
         // The deploy's steps first, with this origin: they trust it for sign-in, and the object knows no origin.
         await prepareDeployOnce(env, ctx, origin)
         return await serveInTaskManager(withClientAddress(request), env)
