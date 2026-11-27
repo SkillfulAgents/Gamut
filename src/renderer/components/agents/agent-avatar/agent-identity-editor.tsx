@@ -5,6 +5,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@renderer/components/ui
 import { cn } from '@shared/lib/utils/cn'
 import type { ApiAgent } from '@shared/lib/types/api'
 import type { AgentAvatar } from '@shared/lib/types/agent-avatar'
+import type { OrbShape } from '@shared/lib/types/agent-avatar-shapes'
 import { useUpdateAgent, useUpdateAgentAvatar } from '@renderer/hooks/use-agents'
 
 import { AvatarView, orbRestingPhi, type AvatarMotionState } from './agent-avatar'
@@ -23,6 +24,8 @@ interface AgentIdentityEditorProps {
   nameClassName?: string
   /** Optional secondary text below the name, within the same identity control. */
   subtitle?: ReactNode
+  /** Shapes on offer to this agent alone, as the picker takes them. */
+  extraShapes?: readonly OrbShape[]
 }
 
 /** Lets a parent (the agent menu's "Rename") open the editor. */
@@ -48,6 +51,7 @@ export const AgentIdentityEditor = forwardRef<AgentIdentityEditorHandle, AgentId
   size,
   nameClassName,
   subtitle,
+  extraShapes,
 }, ref) {
   const updateName = useUpdateAgent()
   const updateAvatar = useUpdateAgentAvatar()
@@ -167,7 +171,7 @@ export const AgentIdentityEditor = forwardRef<AgentIdentityEditorHandle, AgentId
           // Below the name: the same shape and colour grid the create page's
           // name step shows.
           <div className="pt-2.5">
-            <AvatarChoices value={draftAvatar} onChange={setDraftAvatar} />
+            <AvatarChoices value={draftAvatar} onChange={setDraftAvatar} extraShapes={extraShapes} />
           </div>
         )}
       </PopoverContent>

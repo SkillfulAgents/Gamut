@@ -9,7 +9,7 @@
  * (`phi`) are degrees with 0 = right, 90 = down, as in Math.atan2 on screen.
  */
 
-import type { AgentAvatarShape } from './agent-avatar'
+import { TEAM_BRAIN_AVATAR_SHAPE, type AgentAvatarShape } from './agent-avatar'
 
 type Point = readonly [number, number]
 
@@ -112,8 +112,46 @@ export const ORB_SHAPES: readonly OrbShape[] = [
   },
 ]
 
+/**
+ * Lucide's `brain` icon, filled: the outer arcs of its 24-unit grid (right
+ * half; the left mirrors), so the two small lobes on top and the notches at
+ * the fissure's ends match the sidebar's nav icon. Each ray from the centre
+ * reaches as far as the farthest lobe it meets. The ray straight up only
+ * grazes the two top lobes and rounds to 0, and the blur along the outline
+ * turns that into the top notch and softens where lobes meet.
+ */
+const BRAIN_LOBES = ([[15, 5, 3], [17, 9, 4], [18, 14, 4], [16, 18, 4]] as const)
+  .flatMap(([x, y, r]) => [[x, y, r], [24 - x, y, r]])
+  .map(([x, y, r]) => [(x - 12) / 10, (y - 12) / 10, r / 10] as const)
+
+function brainOutline(): Point[] {
+  const count = 240
+  const blur = 4 // samples, ≈6°
+  const reaches = polar(count, t => [Math.cos(t), Math.sin(t)]).map(([fx, fy]) =>
+    Math.max(...BRAIN_LOBES.map(([cx, cy, r]) => {
+      const along = cx * fx + cy * fy
+      const disc = along * along - (cx * cx + cy * cy) + r * r
+      return disc < 0 ? 0 : along + Math.sqrt(disc)
+    })))
+  const kernel = Array.from({ length: blur * 6 + 1 }, (_, j) => Math.exp(-((j - blur * 3) ** 2) / (2 * blur * blur)))
+  const weight = kernel.reduce((sum, w) => sum + w, 0)
+  const outline = reaches.map((_, i): Point => {
+    const t = (i / count) * Math.PI * 2
+    const r = kernel.reduce((sum, w, j) => sum + w * reaches[(i + j - blur * 3 + count) % count], 0) / weight
+    return [r * Math.cos(t), r * Math.sin(t)]
+  })
+  const extent = Math.max(...outline.flat().map(Math.abs))
+  return outline.map(([x, y]): Point => [(0.96 * x) / extent, (0.96 * y) / extent])
+}
+
+/** Team Brain's shape: kept out of `ORB_SHAPES`, the picker's and the random pick's list. */
+export const BRAIN_SHAPE: OrbShape = {
+  name: TEAM_BRAIN_AVATAR_SHAPE, label: 'Brain', duration: 950, ease: FREE_EASE,
+  points: brainOutline(),
+}
+
 export const orbShape = (name: OrbShapeName | undefined): OrbShape =>
-  ORB_SHAPES.find(shape => shape.name === name) ?? ORB_SHAPES[0]
+  name === BRAIN_SHAPE.name ? BRAIN_SHAPE : ORB_SHAPES.find(shape => shape.name === name) ?? ORB_SHAPES[0]
 
 /** CSS `path()` data for the outline at `size` px. */
 export function shapePath(shape: OrbShape, size: number): string {

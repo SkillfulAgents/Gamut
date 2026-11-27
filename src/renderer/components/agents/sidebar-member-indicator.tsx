@@ -1,12 +1,15 @@
 import { UserPlus } from 'lucide-react'
 import { AgentShareRows } from './agent-share-rows'
 import { useAgentMemberAgents } from '@renderer/hooks/use-agent-member-agents'
+import { useAgents, type ApiAgent } from '@renderer/hooks/use-agents'
 import { useAgentMembers } from '@renderer/hooks/use-agent-members'
 import { useUser } from '@renderer/context/user-context'
 import { AgentSharePopover } from '@renderer/components/agents/agent-share-popover'
 import { Button } from '@renderer/components/ui/button'
 import { UserAvatar } from '@renderer/components/ui/user-avatar'
 import { MemberRosterPopover } from '@renderer/components/sharing/member-roster-popover'
+
+const teamBrainSlug = (agents: ApiAgent[]) => agents.find(agent => agent.teamBrain)?.slug
 
 /** A compact member stack with roster and invite access, independent of navigation. */
 export function SidebarMemberIndicator({ agentSlug, agentName, memberCount, maxFaces = 4, variant = 'sidebar', className }: {
@@ -22,7 +25,10 @@ export function SidebarMemberIndicator({ agentSlug, agentName, memberCount, maxF
   const { isAuthMode, isAdmin, canAdminAgent } = useUser()
   // An admin can open an agent directly even after leaving it; the sidebar's aggregate omits it.
   const unlisted = variant === 'page' && isAuthMode && isAdmin && memberCount === 0
-  const agents = useAgentMemberAgents(agentSlug, unlisted)
+  const memberAgents = useAgentMemberAgents(agentSlug, unlisted)
+  // Team Brain reads for nearly every agent, so its face would be on every stack. The Share roster still lists it.
+  const { data: brainSlug, isSuccess: agentsKnown } = useAgents({ select: teamBrainSlug, poll: false })
+  const agents = !agentsKnown ? [] : brainSlug ? memberAgents.filter(agent => agent.slug !== brainSlug) : memberAgents
   const loadPeople = isAuthMode && (memberCount > 1 || agents.length > 0 || unlisted)
   const { data: members, isLoading, isError, refetch } = useAgentMembers(agentSlug, loadPeople)
   // Test ids keep the sidebar's names there; Agent Home's are its own, as both show at once.

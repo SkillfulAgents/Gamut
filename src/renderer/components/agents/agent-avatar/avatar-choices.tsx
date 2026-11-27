@@ -6,7 +6,7 @@ import type { AgentAvatar } from '@shared/lib/types/agent-avatar'
 import { AvatarView, orbRestingPhi } from './agent-avatar'
 import { avatarSource } from './avatar-source'
 import { OFFERED_ORBS } from '@shared/lib/types/agent-avatar-orbs'
-import { ORB_SHAPES } from '@shared/lib/types/agent-avatar-shapes'
+import { ORB_SHAPES, type OrbShape } from '@shared/lib/types/agent-avatar-shapes'
 
 // Options, px across.
 const OPTION_SIZE = 37
@@ -16,6 +16,8 @@ interface AvatarChoicesProps {
   onChange: (avatar: AgentAvatar) => void
   /** Eight columns from `sm` up, for a page rather than the identity editor's popover. */
   wide?: boolean
+  /** Shapes on offer to this agent alone, after everyone's. */
+  extraShapes?: readonly OrbShape[]
 }
 
 /**
@@ -24,7 +26,7 @@ interface AvatarChoicesProps {
  * previews its working motion. Agent Home's identity editor and the create
  * page's name step both show it.
  */
-export function AvatarChoices({ value, onChange, wide = false }: AvatarChoicesProps) {
+export function AvatarChoices({ value, onChange, wide = false, extraShapes = [] }: AvatarChoicesProps) {
   const [previewing, setPreviewing] = useState<string | null>(null)
 
   const option = (avatar: AgentAvatar, label: string, pressed: boolean) => {
@@ -63,7 +65,7 @@ export function AvatarChoices({ value, onChange, wide = false }: AvatarChoicesPr
     <div onMouseLeave={() => setPreviewing(null)}>
       <div className="px-2 pb-1 pt-0.5 text-xs text-muted-foreground">Shape</div>
       <div className={cn('grid gap-1', columns)}>
-        {ORB_SHAPES.map(shape => option({ ...value, shape: shape.name }, shape.label, value.shape === shape.name))}
+        {[...ORB_SHAPES, ...extraShapes].map(shape => option({ ...value, shape: shape.name }, shape.label, value.shape === shape.name))}
       </div>
       <div className="px-2 pb-1 pt-2 text-xs text-muted-foreground">Color</div>
       <div className={cn('grid gap-1', columns)}>

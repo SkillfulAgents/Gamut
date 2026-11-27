@@ -9,7 +9,7 @@ import { apiFetch } from '@renderer/lib/api'
 import { AgentAvatar } from './agent-avatar'
 import { AgentIdentityEditor } from './agent-identity-editor'
 import { OFFERED_ORBS } from '@shared/lib/types/agent-avatar-orbs'
-import { ORB_SHAPES } from '@shared/lib/types/agent-avatar-shapes'
+import { BRAIN_SHAPE, ORB_SHAPES, type OrbShape } from '@shared/lib/types/agent-avatar-shapes'
 
 vi.mock('@renderer/lib/api', () => ({ apiFetch: vi.fn() }))
 
@@ -26,20 +26,20 @@ const clients: QueryClient[] = []
 const orbOf = (id: string) => screen.getByTestId(id).querySelector('[data-avatar-orb]')?.getAttribute('data-avatar-orb')
 const shapeOf = (id: string) => screen.getByTestId(id).querySelector('[data-avatar-shape]')?.getAttribute('data-avatar-shape')
 
-function Harness() {
+function Harness({ extraShapes }: { extraShapes?: readonly OrbShape[] }) {
   const { data = [] } = useQuery({ queryKey: ['agents'], queryFn: async () => [first, second] })
   const edited = data.find(agent => agent.slug === 'second')!
   return <>
-    <AgentIdentityEditor agent={edited} />
+    <AgentIdentityEditor agent={edited} extraShapes={extraShapes} />
     {data.map(agent => <span key={agent.slug} data-testid={agent.slug}><AgentAvatar agent={agent} /></span>)}
   </>
 }
 
-function mount() {
+function mount(extraShapes?: readonly OrbShape[]) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
   clients.push(client)
   client.setQueryData(['agents'], [first, second])
-  return render(<QueryClientProvider client={client}><Harness /></QueryClientProvider>)
+  return render(<QueryClientProvider client={client}><Harness extraShapes={extraShapes} /></QueryClientProvider>)
 }
 
 beforeEach(() => {
@@ -134,6 +134,22 @@ it('previews locally, saves both fields once on close, and reads the saved pair 
   mount()
   expect(orbOf('second')).toBe('duo-red-amber')
   expect(shapeOf('second')).toBe('bloom')
+})
+
+it("offers a shape kept out of everyone's list only where the caller adds it, and saves and draws it like any shape", async () => {
+  const user = userEvent.setup()
+  const view = mount()
+  await user.click(screen.getByRole('button', { name: "Edit Second's name and avatar" }))
+  expect(screen.queryByRole('button', { name: BRAIN_SHAPE.label })).toBeNull()
+  view.unmount()
+  mount([BRAIN_SHAPE])
+  await user.click(screen.getByRole('button', { name: "Edit Second's name and avatar" }))
+  await user.click(screen.getByRole('button', { name: BRAIN_SHAPE.label }))
+  await user.keyboard('{Escape}')
+  await waitFor(() => expect(shapeOf('second')).toBe('brain'))
+  expect(apiFetch).toHaveBeenCalledExactlyOnceWith('/api/agents/second/avatar', expect.objectContaining({
+    body: JSON.stringify({ color: 'tonal-green', shape: 'brain' }),
+  }))
 })
 
 it('saves when dismissed by clicking outside, but skips unchanged choices', async () => {

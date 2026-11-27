@@ -18,9 +18,12 @@ export const AGENT_AVATAR_SHAPES = [
   'circle', 'squircle', 'triangle', 'diamond', 'hexagon', 'pill', 'arch', 'bloom',
 ] as const
 
+/** Stored like any shape, but Team Brain's alone: never a random pick, and offered only where Team Brain is edited. */
+export const TEAM_BRAIN_AVATAR_SHAPE = 'brain'
+
 export const agentAvatarSchema = z.object({
   color: z.enum(AGENT_AVATAR_COLORS),
-  shape: z.enum(AGENT_AVATAR_SHAPES),
+  shape: z.enum([...AGENT_AVATAR_SHAPES, TEAM_BRAIN_AVATAR_SHAPE]),
 }).strict()
 
 export type AgentAvatar = z.infer<typeof agentAvatarSchema>
