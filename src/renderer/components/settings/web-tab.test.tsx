@@ -68,6 +68,16 @@ describe('WebTab', () => {
     expect(mutateMock).toHaveBeenCalledWith({ webProvider: 'youcom' })
   })
 
+  it('selects SpecStream without a Gamut account and shows its key field', async () => {
+    setup({ webProvider: 'specstream', webProviderIsDefault: false, connected: false })
+    render(<WebTab />)
+    const card = screen.getByRole('radio', { name: /SpecStream/i })
+    expect(card).toBeChecked()
+    expect(screen.getByTestId('api-key-input')).toBeInTheDocument()
+    await userEvent.click(card)
+    expect(mutateMock).toHaveBeenCalledWith({ webProvider: 'specstream' })
+  })
+
   it('marks "(default)" on the selected card only when isDefault', () => {
     setup({ webProvider: 'platform', webProviderIsDefault: true, connected: true })
     const { unmount } = render(<WebTab />)

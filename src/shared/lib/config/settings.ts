@@ -85,6 +85,7 @@ export interface ApiKeySettings {
   accountProviderUserId?: string
   exaApiKey?: string
   ydcApiKey?: string
+  specstreamApiKey?: string
 }
 
 export type { VoiceProvider } from '../voice/provider-types'
@@ -447,6 +448,7 @@ export interface GlobalSettingsResponse {
     openai: ApiKeyStatus
     exa: ApiKeyStatus
     youcom: ApiKeyStatus
+    specstream: ApiKeyStatus
   }
   composioUserId?: string
   /** Saved generic-provider endpoint. Not a secret — echoed so the Settings UI can display/edit it. */

@@ -360,6 +360,7 @@ async function buildSettingsResponse(
       openai: getVoiceProvider('openai').apiKeyStatusFrom(appSettings),
       exa: getWebProvider('exa').apiKeyStatusFrom(appSettings),
       youcom: getWebProvider('youcom').apiKeyStatusFrom(appSettings),
+      specstream: getWebProvider('specstream').apiKeyStatusFrom(appSettings),
     },
     models: effectiveModelsFrom(appSettings),
     agentLimits: appSettings.agentLimits ?? {},

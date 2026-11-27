@@ -165,7 +165,7 @@ export const SETTINGS_PAGES: readonly SettingsPageEntry[] = [
   {
     id: 'web', label: 'Web Search', icon: 'search', group: 'Agent Capabilities',
     shownTo: admins,
-    keywords: ['Search provider', 'Web provider', 'Exa', 'You.com', 'Parallel', 'API keys'],
+    keywords: ['Search provider', 'Web provider', 'Exa', 'You.com', 'Parallel', 'SpecStream', 'API keys'],
   },
   {
     id: 'browser', label: 'Browser Use', icon: 'pointer', group: 'Agent Capabilities',
