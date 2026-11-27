@@ -52,6 +52,17 @@ export const MCP_REFRESH_REUSE_SECONDS = 30
 /** The renderer route the provider sends a person to, signed in or not (consent and login both). */
 export const MCP_CONSENT_PAGE_PATH = '/oauth/consent'
 
+/** Headers for the consent page's document: never framed. */
+export const CONSENT_PAGE_HEADERS = {
+  'Content-Security-Policy': "frame-ancestors 'none'",
+  'X-Frame-Options': 'DENY',
+} as const
+
+/** The consent page's paths, as the renderer's case-insensitive router matches them. */
+export function isConsentPagePath(path: string): boolean {
+  return /^\/oauth(?:\/|$)/i.test(path)
+}
+
 /** Better Auth's base path in this app. */
 export const AUTH_BASE_PATH = '/api/auth'
 

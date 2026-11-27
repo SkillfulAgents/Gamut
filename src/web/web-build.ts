@@ -3,6 +3,7 @@ import type { Context, Hono } from 'hono'
 import { existsSync, readFileSync } from 'fs'
 import { join } from 'path'
 import { getServerFacts, withServerFacts, withServerFactsRevision } from '@shared/lib/facts/server-facts'
+import { CONSENT_PAGE_HEADERS, isConsentPagePath } from '@shared/lib/mcp-server/oauth/oauth-config'
 
 // Cache policy for the static web build. Vite emits content-hashed JS/CSS into
 // `/assets/*`, so the filename itself changes whenever the bytes change — those
@@ -16,17 +17,6 @@ function staticCacheControl(filePath: string): string {
   if (p.includes('/assets/')) return 'public, max-age=31536000, immutable'
   if (p.endsWith('index.html')) return 'no-cache'
   return 'public, max-age=3600, must-revalidate'
-}
-
-/** Headers for the MCP consent page's document: never framed. */
-export const CONSENT_PAGE_HEADERS = {
-  'Content-Security-Policy': "frame-ancestors 'none'",
-  'X-Frame-Options': 'DENY',
-} as const
-
-/** The consent page's paths, as the renderer's case-insensitive router matches them. */
-export function isConsentPagePath(path: string): boolean {
-  return /^\/oauth(?:\/|$)/i.test(path)
 }
 
 /** Serve the built renderer in `root`: its files, and its HTML entry for every other route. */

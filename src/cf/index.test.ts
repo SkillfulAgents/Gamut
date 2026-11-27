@@ -116,6 +116,19 @@ describe('serveAppShell', () => {
     const entry = await serveAppShell(new Request('https://org.example.com/agents/sales'), assets(() => new Response('<html><head></head></html>', { headers: { 'content-type': 'text/html; charset=utf-8' } })))
     expect(entry.headers.get('cache-control')).toBe('no-cache')
   })
+
+  it('serves the MCP consent page so no other origin can frame it, and only that page', async () => {
+    const entry = () => new Response('<html><head></head></html>', { headers: { 'content-type': 'text/html; charset=utf-8' } })
+    for (const path of ['/oauth/consent?client_id=x&sig=y', '/OAuth/Consent']) {
+      const consent = await serveAppShell(new Request(`https://org.example.com${path}`), assets(entry))
+      expect(consent.headers.get('content-security-policy'), path).toBe("frame-ancestors 'none'")
+      expect(consent.headers.get('x-frame-options'), path).toBe('DENY')
+    }
+
+    const other = await serveAppShell(new Request('https://org.example.com/settings/mcp-server'), assets(entry))
+    expect(other.headers.get('content-security-policy')).toBeNull()
+    expect(other.headers.get('x-frame-options')).toBeNull()
+  })
 })
 
 describe('the server facts of a Worker', () => {
