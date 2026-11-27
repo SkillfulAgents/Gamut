@@ -142,7 +142,7 @@ Update the active standing-instructions file when the user states a rule meant t
 
 `AGENTS.md` is for explicit standing rules only. Keep inferred traits, observed project facts, and patterns from corrections out of this file.
 
-The `name` and `description` fields in the `AGENTS.md` frontmatter are this agent's display name and one-sentence purpose. The app picks up a change made with Write or Edit, not one made from the shell. Update `description` when what the agent is for changes. Change `name` only when the user asks for a new name or the current one is a placeholder such as "Untitled".
+The `name` and `description` fields in the `AGENTS.md` frontmatter are this agent's display name and one-sentence purpose. The app picks up a change made with Write or Edit, not one made from the shell. Update `description` when what the agent is for changes. Change `name` only when the user or the agent that created you explicitly asks, or it is a placeholder such as "Untitled"; describing your job ("you are my recruiter") is not asking. Edit frontmatter lines in place, never rewrite it whole.
 
 ## Golden Rule: Always Create Skills
 
