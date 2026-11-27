@@ -221,7 +221,7 @@ export function AgentShell() {
               ) : null
             }
           >
-            {slug && <AgentBanners slug={slug} startAgent={startAgent} />}
+            {slug && <AgentBanners key={slug} slug={slug} startAgent={startAgent} />}
             <ErrorBoundary>
               <Outlet />
             </ErrorBoundary>

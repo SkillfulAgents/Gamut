@@ -128,7 +128,7 @@ vi.mock('@shared/lib/agent-actor/registry', () => ({
       const of = () => [...fake.state.sessions.values()].filter((session) => session.agent === slug)
       const find = (id: string) => of().find((session) => session.id === id)
       return {
-        live: async () => ({ container: { status: 'running', port: null, healthWarnings: [], stale: false, idleSince: null }, activeSessionIds: of().filter((s) => s.active).map((s) => s.id) }),
+        live: async () => ({ container: { status: 'running', port: null, healthWarnings: [], missingDrives: [], stale: false, idleSince: null }, activeSessionIds: of().filter((s) => s.active).map((s) => s.id) }),
         container: { start: async () => {} },
         sessions: {
           list: async () => of().map((session) => ({ id: session.id, agentSlug: slug, name: session.name, createdAt: new Date(1), lastActivityAt: new Date(2) })),

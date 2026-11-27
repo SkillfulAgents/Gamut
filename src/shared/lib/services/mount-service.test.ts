@@ -285,7 +285,7 @@ describe('volume health and stored configuration', () => {
     await storedMount('v4', '', { path: notes })
     expect(await listVolumes('test-agent')).toEqual({
       volumes: [{ volumeId: 'v1', name: 'notes', volumeName: 'notes', cacheMode: 'local' }],
-      notMounted: [{ name: 'gone', reason: 'not found' }, { name: 'bad', reason: 'unreadable' }, { name: '', reason: 'invalid name' }],
+      notMounted: [{ name: 'gone', reason: 'not found', driveId: 'v2' }, { name: 'bad', reason: 'unreadable', driveId: 'v3' }, { name: '', reason: 'invalid name', driveId: 'v4' }],
     })
     expect((await getMountsWithHealth('test-agent', viewer)).map(m => m.health)).toEqual(['ok', 'missing', 'missing', 'missing'])
   })
@@ -330,7 +330,7 @@ describe('volume health and stored configuration', () => {
     await add(inner)
     fs.chmodSync(parent, 0)
     try {
-      expect((await listVolumes('test-agent')).notMounted).toEqual([{ name: 'inner', reason: 'not accessible' }])
+      expect((await listVolumes('test-agent')).notMounted).toEqual([{ name: 'inner', reason: 'not accessible', driveId: expect.any(String) }])
     } finally { fs.chmodSync(parent, 0o755) }
   })
   it('preserves unknown sources and reserved names, and permits detaching them', async () => {

@@ -118,6 +118,7 @@ function fakeDeps() {
     noteSessionActivity: vi.fn(),
     idleSince: vi.fn<() => number | null>().mockReturnValue(null),
     getHealthWarnings: vi.fn().mockReturnValue([]),
+    getMissingDrives: vi.fn().mockReturnValue([]),
     isStale: vi.fn().mockReturnValue(false),
     holdsDrives: vi.fn().mockReturnValue(true),
     isStarting: vi.fn().mockReturnValue(false),
@@ -861,7 +862,7 @@ describe('createAgentRegistry', () => {
 
       const live = await actor.live()
 
-      expect(live.container).toEqual({ status: 'running', port: 4321, healthWarnings: [{ checkName: 'disk', status: 'warning' }], stale: true, idleSince: null })
+      expect(live.container).toEqual({ status: 'running', port: 4321, healthWarnings: [{ checkName: 'disk', status: 'warning' }], missingDrives: [], stale: true, idleSince: null })
       expect(live.activeSessionIds).toEqual(['s-busy'])
       expect(live.awaitingSessionIds).toEqual(['s-busy'])
       // Without payloads: a status view has no use for them.

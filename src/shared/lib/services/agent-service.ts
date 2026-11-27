@@ -54,16 +54,18 @@ async function teamBrainOf(): Promise<TeamBrainStored | null> {
  */
 function toApiAgent(
   record: AgentRecord,
-  container: Pick<AgentLiveSummary['container'], 'status' | 'port' | 'healthWarnings' | 'stale'>,
+  container: Pick<AgentLiveSummary['container'], 'status' | 'port' | 'healthWarnings' | 'missingDrives' | 'stale'>,
   teamBrain: TeamBrainStored | null,
   instructions?: string,
 ): ApiAgent {
-  const { status, port, healthWarnings, stale } = container
+  const { status, port, healthWarnings, missingDrives, stale } = container
   return {
     ...newAgentResponse(record, teamBrain, instructions),
     status,
     containerPort: port,
     ...(healthWarnings.length > 0 ? { healthWarnings } : {}),
+    // A starting agent's list is still settling: shown once it runs.
+    ...(status === 'running' && missingDrives.length > 0 ? { missingDrives: missingDrives.map(({ name, reason }) => ({ name, reason })) } : {}),
     ...(stale ? { stale: true } : {}),
   }
 }

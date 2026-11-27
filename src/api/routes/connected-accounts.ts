@@ -17,6 +17,7 @@ import { getAccountProviderUserId } from '@shared/lib/config/settings'
 import { Authenticated, OwnsAccount, IsAdmin, Or } from '../middleware/auth'
 import { trackServerEvent } from '@shared/lib/analytics/server-analytics'
 import { background } from '@shared/lib/background'
+import { recheckAgentDrives } from '../lib/mount-change'
 import { logAuditEvent } from '@shared/lib/services/audit-log-service'
 import { countActiveTriggersPerAccount, cancelTriggersForConnectedAccount } from '@shared/lib/services/webhook-trigger-service'
 import {
@@ -331,6 +332,7 @@ connectedAccountsRouter.post('/complete', async (c) => {
       // ACTIVE above. Resume every proxy request parked on this account before
       // the best-effort runtime refresh, which is unrelated to proxy tokens.
       await resumeAccountReauthWaits(id)
+      background(recheckAgentDrives(), { name: 'connected-accounts.recheck-agent-drives' })
 
       // Clean up the old remote connection (fire-and-forget)
       deleteReplacedConnection(oldRecord, providerName, connectionId)
@@ -466,6 +468,7 @@ connectedAccountsRouter.get('/callback', async (c) => {
       id = reconnectAccountId
 
       await resumeAccountReauthWaits(id)
+      background(recheckAgentDrives(), { name: 'connected-accounts.recheck-agent-drives' })
 
       deleteReplacedConnection(oldRecord, providerName, connectionId)
 

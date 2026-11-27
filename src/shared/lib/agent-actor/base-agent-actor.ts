@@ -297,6 +297,7 @@ function liveSummary(slug: AgentSlug, state: AgentState): AgentLiveSummary {
     container: {
       ...runtime.getCachedInfo(),
       healthWarnings: runtime.getHealthWarnings(),
+      missingDrives: runtime.getMissingDrives(),
       stale: runtime.isStale(),
       idleSince: runtime.idleSince(),
     },
@@ -329,6 +330,7 @@ function createContainerOps(slug: AgentSlug, runtime: () => ContainerRuntime): C
       return 'restarted'
     },
     holdsDrives: async (options) => runtime().holdsDrives() || (!!options?.orStarting && runtime().isStarting()),
+    noteDriveHealth: async (driveId, reason) => runtime().noteDriveHealth(driveId, reason),
     info: async () => (await client()).getInfo(),
     syncConnectionEnvironment: (kind, options) => syncAgentConnectionEnvironment(slug, kind, runtime(), options),
     fetch: async (...args) => (await client()).fetch(...args),

@@ -109,7 +109,7 @@ describe.skipIf(!ENABLED)('client folders as volumes, from the list to the mount
     fs.rmSync(path.join(tmpDir, 'gone'), { recursive: true })
 
     const listed = await listVolumes('agent-a')
-    expect(listed.notMounted).toEqual([{ name: 'gone', reason: 'not found' }])
+    expect(listed.notMounted).toEqual([{ name: 'gone', reason: 'not found', driveId: expect.any(String) }])
     expect(listed.volumes.map((v) => v.name)).toEqual(['notes', 'late'])
     // Vanishes between the start's list and the container's mount.
     fs.rmSync(path.join(tmpDir, 'late'), { recursive: true })

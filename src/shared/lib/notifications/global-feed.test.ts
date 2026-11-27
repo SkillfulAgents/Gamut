@@ -22,7 +22,6 @@ const FAMILIES: Array<{ event: GlobalFeedEvent; on: 'tenant' | 'agent' | 'user' 
   { event: { type: 'agent_updated', agentSlug: 'a' }, on: 'agent' },
   { event: { type: 'agent_status_changed', agentSlug: 'a', status: 'running' }, on: 'agent' },
   { event: { type: 'container_health_changed', agentSlug: 'a' }, on: 'agent' },
-  { event: { type: 'mount_health_warning', agentSlug: 'a', notMounted: [] }, on: 'agent' },
   { event: { type: 'browser_active', agentSlug: 'a', active: false }, on: 'agent' },
   { event: { type: 'session_active', agentSlug: 'a', sessionId: 's', isActive: true }, on: 'agent' },
   { event: { type: 'session_idle', agentSlug: 'a', sessionId: 's', isActive: false }, on: 'agent' },

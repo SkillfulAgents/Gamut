@@ -1,7 +1,11 @@
-import { Loader2, AlertCircle, AlertTriangle, X } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { Loader2, AlertCircle, AlertTriangle, RefreshCw, X } from 'lucide-react'
+import { Button } from '@renderer/components/ui/button'
+import { useUser } from '@renderer/context/user-context'
 import { useAgent, type useStartAgent } from '@renderer/hooks/use-agents'
-import { useMountWarnings } from '@renderer/hooks/use-mount-warnings'
+import { useRestartAgent } from '@renderer/hooks/use-mounts'
 import { useRuntimeStatus } from '@renderer/hooks/use-runtime-status'
+import { driveProblemLine } from './drive-problem-line'
 
 interface AgentBannersProps {
   slug: string
@@ -17,7 +21,19 @@ interface AgentBannersProps {
  */
 export function AgentBanners({ slug, startAgent }: AgentBannersProps) {
   const { data: agent } = useAgent(slug)
-  const { warning: mountWarning, dismiss: dismissMountWarning } = useMountWarnings(slug)
+  const { canUseAgent } = useUser()
+  const restartAgent = useRestartAgent()
+  // A failed restart's error holds until the agent runs again by any route. A failed stop leaves it running, so its error stays.
+  const running = agent?.status === 'running'
+  const { reset: resetRestart } = restartAgent
+  useEffect(() => { if (running) resetRestart() }, [running, resetRestart])
+  const missingDrives = agent?.missingDrives ?? []
+  const driveLines = missingDrives.map(driveProblemLine)
+  // A dismissal holds until the list changes, or empties at a stop.
+  const drivesKey = JSON.stringify(missingDrives)
+  const [dismissedDrives, setDismissedDrives] = useState<string | null>(null)
+  if (!missingDrives.length && dismissedDrives !== null) setDismissedDrives(null)
+  const canRestart = canUseAgent(slug) && driveLines.some((line) => line.restart)
   const { data: runtimeStatus } = useRuntimeStatus()
   const readiness = runtimeStatus?.runtimeReadiness
   const progress = readiness?.pullProgress
@@ -52,12 +68,12 @@ export function AgentBanners({ slug, startAgent }: AgentBannersProps) {
         </div>
       )}
 
-      {/* Start error banner */}
-      {startAgent.isError && (
+      {/* Start error banner, also for a failed restart */}
+      {(startAgent.isError || restartAgent.isError) && (
         <div data-top-banner className="shrink-0 border-b bg-destructive/10 px-4 py-2">
           <div className="flex items-center gap-2 text-xs text-destructive select-text">
             <AlertCircle className="h-3 w-3 shrink-0" />
-            <span>Failed to start agent: {startAgent.error.message}</span>
+            <span>{startAgent.isError ? `Failed to start agent: ${startAgent.error.message}` : restartAgent.error?.message}</span>
           </div>
         </div>
       )}
@@ -84,16 +100,28 @@ export function AgentBanners({ slug, startAgent }: AgentBannersProps) {
         </div>
       ))}
 
-      {/* Missing mount warning banner */}
-      {mountWarning && mountWarning.notMounted.length > 0 && (
+      {/* Drives the running agent started without */}
+      {driveLines.length > 0 && dismissedDrives !== drivesKey && (
         <div data-top-banner className="shrink-0 border-b bg-yellow-500/10 px-4 py-2">
           <div className="flex items-center gap-2 text-xs text-yellow-700 dark:text-yellow-400 select-text">
             <AlertTriangle className="h-3 w-3 shrink-0" />
             <span className="flex-1">
-              Drive not available: {mountWarning.notMounted.map((v) => `${v.name} (${v.reason})`).join(', ')}
+              {[...new Set(driveLines.map((line) => line.text))].join(' ')}
             </span>
+            {canRestart && (
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-6 text-yellow-700 dark:text-yellow-400 hover:bg-yellow-500/20 hover:text-yellow-800 dark:hover:text-yellow-300"
+                onClick={() => restartAgent.mutate(slug)}
+                disabled={restartAgent.isPending}
+              >
+                <RefreshCw className={restartAgent.isPending ? 'animate-spin' : ''} />
+                {restartAgent.isPending ? 'Restarting...' : 'Restart'}
+              </Button>
+            )}
             <button
-              onClick={dismissMountWarning}
+              onClick={() => setDismissedDrives(drivesKey)}
               className="text-yellow-700 dark:text-yellow-400 hover:text-foreground transition-colors"
             >
               <X className="h-3.5 w-3.5" />

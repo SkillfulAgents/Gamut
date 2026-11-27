@@ -16,7 +16,8 @@ import {
 
 // Mock the container host before importing the service
 // Use vi.hoisted to ensure mock variables are available when vi.mock is hoisted
-const { mockGetCachedInfo, mockStopContainer, mockGetClient, mockPendingReviews } = vi.hoisted(() => {
+const { mockGetCachedInfo, mockStopContainer, mockGetClient, mockPendingReviews, mockGetMissingDrives } = vi.hoisted(() => {
+  const mockGetMissingDrives = vi.fn((): unknown[] => [])
   const mockGetCachedInfo = vi.fn((): { status: string; port: number | null } => ({ status: 'stopped', port: null }))
   const mockStopContainer = vi.fn(() => Promise.resolve())
   const mockGetInfo = vi.fn(() => Promise.resolve({ status: 'stopped', port: null }))
@@ -24,7 +25,7 @@ const { mockGetCachedInfo, mockStopContainer, mockGetClient, mockPendingReviews 
     getInfo: mockGetInfo,
   }))
   const mockPendingReviews = vi.fn((_agentSlug: string): unknown[] => [])
-  return { mockGetCachedInfo, mockStopContainer, mockGetClient, mockPendingReviews }
+  return { mockGetCachedInfo, mockStopContainer, mockGetClient, mockPendingReviews, mockGetMissingDrives }
 })
 
 vi.mock('@shared/lib/container/container-host', async () => {
@@ -35,6 +36,7 @@ vi.mock('@shared/lib/container/container-host', async () => {
       getCachedInfo: mockGetCachedInfo,
       stopContainer: mockStopContainer,
       getHealthWarnings: vi.fn(() => []),
+      getMissingDrives: mockGetMissingDrives,
       // deleteAgent evicts the handle once the agent is gone (dropRuntime).
       removeClient: vi.fn(),
     }),
@@ -478,9 +480,16 @@ Instructions`
   })
 
   describe('getAgentWithListing', () => {
+    it('reports no missing drives for a stopped agent: nothing it runs is mounted', async () => {
+      await createTestAgent('stopped-agent', SAMPLE_INSTRUCTIONS)
+      mockGetMissingDrives.mockReturnValueOnce([{ name: 'notes', reason: 'not found', driveId: 'drive-1' }])
+      expect((await getAgentWithListing((await getAgentRecord('stopped-agent'))!)).agent.missingDrives).toBeUndefined()
+    })
+
     it('returns the agent with its instructions, and its status from the listing', async () => {
       await createTestAgent('detail-agent', SAMPLE_INSTRUCTIONS)
       mockGetCachedInfo.mockReturnValueOnce({ status: 'running', port: 3456 })
+      mockGetMissingDrives.mockReturnValueOnce([{ name: 'notes', reason: 'not found', driveId: 'drive-1' }])
       const actor = agentRegistry.get('detail-agent')
       const listings = vi.spyOn(actor, 'listing')
       const lives = vi.spyOn(actor, 'live')
@@ -488,6 +497,8 @@ Instructions`
       const { agent, listing } = await getAgentWithListing((await getAgentRecord('detail-agent'))!)
 
       expect(agent).toMatchObject({ slug: 'detail-agent', status: 'running', containerPort: 3456 })
+      // A viewer learns which drives are missing, not their ids.
+      expect(agent.missingDrives).toEqual([{ name: 'notes', reason: 'not found' }])
       expect(agent.instructions).toBe((await getAgent('detail-agent'))?.instructions)
       expect(agent.instructions).toBeTruthy()
       expect(listing.live.container).toMatchObject({ status: 'running', port: 3456 })

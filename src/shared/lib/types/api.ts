@@ -6,6 +6,7 @@
  */
 
 import type { HealthCheckResult } from '@shared/lib/container/types'
+import type { NotMountedVolume } from '@shared/lib/types/mount'
 import type { RuntimeOptions, StoredRuntimeOptions } from '@shared/lib/container/runtime-options'
 import type { ProviderErrorPresentation } from '@shared/lib/llm-provider/error-presentation'
 import type { SessionOrigin, SessionUsage } from '@shared/lib/types/agent'
@@ -41,6 +42,8 @@ export interface ApiAgent {
   status: 'running' | 'stopped'
   containerPort: number | null
   healthWarnings?: HealthCheckResult[]
+  /** The drives the running container started without, and why. */
+  missingDrives?: NotMountedVolume[]
   /** Running on a container env that a setting change replaced. A stop clears it. */
   stale?: boolean
   templateStatus?: ApiAgentTemplateStatus

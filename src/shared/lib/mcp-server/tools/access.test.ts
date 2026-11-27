@@ -26,7 +26,7 @@ vi.mock('@shared/lib/auth/config', async (original) => ({
 vi.mock('@shared/lib/agent-actor/registry', () => ({
   agentRegistry: {
     get: (slug: string) => ({
-      live: async () => ({ container: { status: 'stopped', port: null, healthWarnings: [], stale: false, idleSince: null }, activeSessionIds: [] }),
+      live: async () => ({ container: { status: 'stopped', port: null, healthWarnings: [], missingDrives: [], stale: false, idleSince: null }, activeSessionIds: [] }),
       sessions: {
         list: async () => [{ id: 's1', agentSlug: slug, name: 'One', createdAt: new Date(1), lastActivityAt: new Date(2) }],
         readMetadata: async () => ({}),

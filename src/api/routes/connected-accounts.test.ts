@@ -160,6 +160,7 @@ const mockFindAgentsAssignedConnectedAccount = vi.fn()
 const mockSyncAgentsAssignedConnectedAccount = vi.fn().mockResolvedValue(true)
 const mockSyncConnectedAccountAgents = vi.fn().mockResolvedValue(true)
 const mockCompleteReauthAccount = vi.fn()
+const mockRecheckAgentDrives = vi.fn(async () => {})
 
 vi.mock('@shared/lib/services/webhook-trigger-service', () => ({
   countActiveTriggersPerAccount: (...args: unknown[]) => mockCountActiveTriggersPerAccount(...args),
@@ -176,6 +177,9 @@ vi.mock('@shared/lib/services/connection-sync-service', () => ({
   // Each assigned agent's parked calls on the account go on.
   resumeAccountReauthWaits: (...args: unknown[]) => mockCompleteReauthAccount(...args),
 }))
+
+// A drive on the account may have come back for an agent that started without it.
+vi.mock('../lib/mount-change', () => ({ recheckAgentDrives: () => mockRecheckAgentDrives() }))
 
 import connectedAccountsRouter from './connected-accounts'
 import { PlatformReconnectRequiredError } from '@shared/lib/agent-runtime-errors/platform-reconnect-required/platform-reconnect-required-error'
@@ -426,6 +430,7 @@ describe('connected-accounts reconnect flow', () => {
         'existing-acc',
       )
       expect(mockCompleteReauthAccount).toHaveBeenCalledWith('existing-acc')
+      expect(mockRecheckAgentDrives).toHaveBeenCalledOnce()
     })
 
     it('deletes old remote connection after reconnect', async () => {

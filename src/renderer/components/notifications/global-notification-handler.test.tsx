@@ -75,10 +75,6 @@ vi.mock('@renderer/hooks/use-user-settings', () => ({
   useUserSettings: vi.fn(() => ({ data: undefined })),
 }))
 
-vi.mock('@renderer/hooks/use-mount-warnings', () => ({
-  setMountWarning: vi.fn(),
-}))
-
 import { STREAM_RECONNECT_MS } from '@renderer/lib/stream-liveness'
 import { GlobalNotificationHandler, isRefetchableAfterOutage } from './global-notification-handler'
 import { closePreopenedNotificationStream, preopenNotificationStream } from './notification-stream'
