@@ -4,7 +4,18 @@
  * {@link XAgentCaller} and returns what the caller gets, or the refusal with
  * the HTTP status the agent-facing routes have always answered it with.
  */
+import { eq } from 'drizzle-orm'
+import { inList } from '@shared/lib/db/bound-parameters'
+import { db } from '@shared/lib/db'
+import { agentConnectedAccounts, connectedAccounts } from '@shared/lib/db/schema'
+import { isAuthMode } from '@shared/lib/auth/mode'
 import { listAgents } from '@shared/lib/services/agent-service'
+import { listAgentMembersByAgent } from '@shared/lib/services/agent-members-service'
+import { listAgentShares } from '@shared/lib/services/agent-sharing-service'
+import type { AgentMember } from '@shared/lib/agent-members-schema'
+import type { MemberAgent } from '@shared/lib/types/agent-sharing'
+import type { AgentListing, AgentRecord } from '@shared/lib/agent-actor/types'
+import { isHiddenAutomatedSession } from '@shared/lib/services/session-visibility'
 import { displaySlug } from '@shared/lib/utils/file-storage'
 import { agentCatalog, agentRegistry } from '@shared/lib/agent-actor'
 import {
@@ -14,7 +25,6 @@ import {
   XAgentAttachmentError,
 } from '@shared/lib/services/x-agent-attachment-service'
 import type { TranscriptView } from '@shared/lib/services/x-agent-transcript-view'
-import { isHiddenAutomatedSession } from '@shared/lib/services/session-visibility'
 import type { SessionMetadata } from '@shared/lib/types/agent'
 import {
   callerHasRoleOnTarget,
@@ -49,30 +59,95 @@ function ok<T>(value: T): { ok: true; value: T } {
 // list - agents visible to caller
 // ----------------------------------------------------------------------------
 
+type ListedAgentMember = Pick<AgentMember, 'name' | 'role' | 'invited'> & { kind: 'person' | 'agent' }
+
 export interface ListedAgent {
   slug: string
   name: string
   description: string | undefined
+  createdAt: Date
+  /** People first, then member agents, capped at MAX_RESUME_MEMBERS; memberCount is the full total. */
+  members: ListedAgentMember[]
+  memberCount: number
+  running: boolean
+  needsInput: boolean
+  lastActivityAt: Date | null
+  sessionCount: number
+  automatedSessionCount: number
+  dashboards: string[]
+  /** Toolkits the agent has accounts for (gmail, slack), whatever their status: never the accounts, as the app shows another person's account. */
+  accountServices: string[]
 }
+
+// Bounds each entry's roster; the full one stays a list_agent_members call away for the caller's own agent.
+const MAX_RESUME_MEMBERS = 25
 
 export async function listVisibleAgents(caller: XAgentCaller): Promise<XAgentResult<{ agents: ListedAgent[] }>> {
   const policy = await checkCallerPolicy(caller, 'list', null, 'all agents')
   if (!policy.allowed) return fail(403, policy.reason ?? 'Forbidden')
 
   const visible = await callerVisibleAgentSlugs(caller)
-  const all = await listAgents()
-  const filtered = all
+  const records = (await listAgents())
     // An agent lists the others, not itself.
     .filter((a) => caller.kind !== 'agent' || a.slug !== caller.agentSlug)
     .filter((a) => (visible ? visible.has(a.slug) : true))
-    .map((a) => ({
-      // Project the decorative display slug for the model; the catalog tolerates
-      // it (and the bare id / legacy form) on the way back in via invoke/get-*.
-      slug: displaySlug(a.name, a.slug),
-      name: a.name,
-      description: a.description,
-    }))
-  return ok({ agents: filtered })
+  const slugs = records.map((a) => a.slug)
+  const [people, shares, services, listings] = await Promise.all([
+    // People are members only with sign-in on, as list_agent_members.
+    listAgentMembersByAgent(isAuthMode() ? slugs : []),
+    listAgentShares(slugs, null),
+    accountServicesByAgent(slugs),
+    // The Home list's per-agent read: cached state, no container is woken.
+    Promise.all(slugs.map((slug) => agentRegistry.get(slug).listing())),
+  ])
+  const agents = records.map((a, i) =>
+    toListedAgent(a, listings[i], people[a.slug] ?? [],
+      // As the app's member stack: only member agents the caller could list itself.
+      (shares[a.slug]?.direct ?? []).filter((m) => !visible || visible.has(m.slug)),
+      services.get(a.slug) ?? []))
+  return ok({ agents })
+}
+
+export function toListedAgent(
+  record: AgentRecord,
+  { live, sessions, artifacts }: AgentListing,
+  people: AgentMember[],
+  memberAgents: MemberAgent[],
+  accountServices: string[],
+): ListedAgent {
+  const members: ListedAgentMember[] = [
+    ...people.map(({ name, role, invited }) => ({ name, role, invited, kind: 'person' as const })),
+    ...memberAgents.map(({ name, role }) => ({ name, role, kind: 'agent' as const })),
+  ]
+  return {
+    // Project the decorative display slug for the model; the catalog tolerates
+    // it (and the bare id / legacy form) on the way back in via invoke/get-*.
+    slug: displaySlug(record.name, record.slug),
+    name: record.name,
+    description: record.description,
+    createdAt: record.createdAt,
+    members: members.slice(0, MAX_RESUME_MEMBERS),
+    memberCount: members.length,
+    running: live.activeSessionIds.length > 0,
+    // As the Home list: a proxy review waits on the user too, session or not.
+    needsInput: live.awaitingSessionIds.length > 0 || live.pendingReviews.length > 0,
+    lastActivityAt: sessions.lastActivityAt,
+    sessionCount: sessions.sessionCount,
+    automatedSessionCount: sessions.sessionIds.filter((id) => isHiddenAutomatedSession(sessions.metadata[id])).length,
+    dashboards: artifacts.dashboards.map((d) => d.name || d.slug),
+    accountServices,
+  }
+}
+
+async function accountServicesByAgent(slugs: string[]): Promise<Map<string, string[]>> {
+  if (!slugs.length) return new Map()
+  const rows = await db
+    .selectDistinct({ agentSlug: agentConnectedAccounts.agentSlug, toolkit: connectedAccounts.toolkitSlug })
+    .from(agentConnectedAccounts)
+    .innerJoin(connectedAccounts, eq(agentConnectedAccounts.connectedAccountId, connectedAccounts.id))
+    .where(inList(agentConnectedAccounts.agentSlug, slugs))
+    .orderBy(connectedAccounts.toolkitSlug)
+  return new Map([...Map.groupBy(rows, (row) => row.agentSlug)].map(([slug, entries]) => [slug, entries.map((row) => row.toolkit)]))
 }
 
 // ----------------------------------------------------------------------------

@@ -118,6 +118,7 @@ vi.mock('@shared/lib/services/session-service', () => ({
   updateSessionMetadata: (...args: unknown[]) => mockUpdateSessionMetadata(...args),
   getSessionMetadata: (...args: unknown[]) => mockGetSessionMetadata(...args),
   sessionIsKnown: (...args: unknown[]) => mockSessionIsKnown(...args),
+  getSessionSummary: async () => ({ sessionIds: [], sessionCount: 0, lastActivityAt: null, metadata: {} }),
 }))
 
 function openBytes(bytes: Uint8Array | string, size?: number, body?: ReadableStream<Uint8Array>): OpenFile {
@@ -498,7 +499,7 @@ describe('/list', () => {
     expect(res.status).toBe(200)
     const body = await res.json()
     // caller is filtered out
-    expect(body.agents).toEqual([{ slug: 'a', name: 'Agent A', description: 'd1' }])
+    expect(body.agents).toEqual([expect.objectContaining({ slug: 'a', name: 'Agent A', description: 'd1' })])
   })
 
   it('prompts for review when no policy exists, denies if user denies', async () => {
@@ -543,6 +544,47 @@ describe('/list', () => {
     const res = await authedFetch('/x-agent/list', {})
     const body = await res.json()
     expect(body.agents.map((a: { slug: string }) => a.slug)).toEqual(['visible-agent'])
+  })
+  it('describes each agent: its people, the agents it is shared with, and its account services', async () => {
+    authModeEnabled = true
+    const { setPolicy } = await import('@shared/lib/services/x-agent-policy-service')
+    await setPolicy(CALLER_SLUG, 'list', null, 'allow')
+    await setPolicy(CALLER_SLUG, 'invoke', TARGET_SLUG, 'allow')
+    // Shared with the target too, but no owner of the caller can see it.
+    await seedAgentRows(['hidden-agent'])
+    await setPolicy('hidden-agent', 'invoke', TARGET_SLUG, 'allow')
+    await grantCallerOwnerTargetAccess()
+    // Joined first, so the roster lists Other before Owner whatever the clock does.
+    await testDb.insert(schema.agentAcl).values({ id: randomUUID(), userId: OTHER_USER_ID, agentSlug: TARGET_SLUG, role: 'owner', createdAt: new Date(0) })
+    const now = new Date()
+    await testDb.insert(schema.connectedAccounts).values([
+      { id: 'acct-gmail', providerConnectionId: 'c1', toolkitSlug: 'gmail', displayName: 'Work mail', status: 'active', userId: OTHER_USER_ID, createdAt: now, updatedAt: now },
+      { id: 'acct-slack', providerConnectionId: 'c2', toolkitSlug: 'slack', displayName: 'Old Slack', status: 'revoked', userId: OTHER_USER_ID, createdAt: now, updatedAt: now },
+      { id: 'acct-gmail-old', providerConnectionId: 'c3', toolkitSlug: 'gmail', displayName: 'Old mail', status: 'expired', userId: OTHER_USER_ID, createdAt: now, updatedAt: now },
+    ])
+    await testDb.insert(schema.agentConnectedAccounts).values([
+      { id: randomUUID(), agentSlug: TARGET_SLUG, connectedAccountId: 'acct-gmail-old', createdAt: now },
+      { id: randomUUID(), agentSlug: TARGET_SLUG, connectedAccountId: 'acct-gmail', createdAt: now },
+      { id: randomUUID(), agentSlug: TARGET_SLUG, connectedAccountId: 'acct-slack', createdAt: now },
+    ])
+    mockListAgents.mockResolvedValue([
+      { slug: TARGET_SLUG, frontmatter: { name: 'Target', createdAt: '2026-09-14T10:00:00.000Z' } },
+      { slug: CALLER_SLUG, frontmatter: { name: 'Caller' } },
+    ])
+    const res = await authedFetch('/x-agent/list', {})
+    expect(res.status).toBe(200)
+    const [agent] = (await res.json()).agents
+    expect(agent).toMatchObject({
+      createdAt: '2026-09-14T10:00:00.000Z',
+      members: [
+        { name: 'Other', role: 'owner', kind: 'person' },
+        { name: 'Owner', role: 'user', kind: 'person' },
+        { name: CALLER_SLUG, role: 'user', kind: 'agent' },
+      ],
+      memberCount: 3,
+      accountServices: ['gmail', 'slack'],
+    })
+    expect(JSON.stringify(agent)).not.toContain('@test')
   })
 })
 
@@ -2630,7 +2672,7 @@ describe('display-slug resolution', () => {
     mockListAgents.mockResolvedValue([{ slug: TARGET_ID, frontmatter: { name: 'Pretty Target' } }])
     const res = await authedFetch('/x-agent/list', {})
     const body = await res.json()
-    expect(body.agents).toEqual([{ slug: DISPLAY_SLUG, name: 'Pretty Target' }])
+    expect(body.agents).toEqual([expect.objectContaining({ slug: DISPLAY_SLUG, name: 'Pretty Target' })])
   })
 
   it('/invoke accepts the display slug and keys runtime calls on the id', async () => {
