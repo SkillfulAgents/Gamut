@@ -16,6 +16,7 @@ import { createUserMessage, createAssistantMessage, createToolCall, createCompac
 import type { ProviderErrorPresentation } from '@shared/lib/llm-provider/error-presentation'
 import type { ApiMessageOrBoundary } from '@shared/lib/types/api'
 import type { IntegrationMessageDisplay } from '@shared/lib/agent-integrations/message-display-schema'
+import type { PendingMessage } from './pending-message'
 
 // Mock useMessages
 const mockFetchOlder = vi.fn()
@@ -26,6 +27,7 @@ const mockMessagesData: {
   fetchOlder: typeof mockFetchOlder
   hasOlder: boolean
   isFetchingOlder: boolean
+  dataUpdatedAt: number
 } = {
   data: undefined,
   isLoading: false,
@@ -33,6 +35,7 @@ const mockMessagesData: {
   fetchOlder: mockFetchOlder,
   hasOlder: false,
   isFetchingOlder: false,
+  dataUpdatedAt: 0,
 }
 
 const mockDeleteMessage = vi.fn()
@@ -68,6 +71,7 @@ const mockStreamState = {
   typingUser: null as { id: string; name?: string } | null,
   peerUserMessages: [] as Array<{ uuid: string; receivedAt: number; content: string; sender?: { id: string; name?: string; email?: string }; queued?: boolean; integration?: IntegrationMessageDisplay }>,
   discardedCommandUuids: [] as string[],
+  pickedUpSends: new Set<string>() as ReadonlySet<string>,
   thinkingBlocks: [] as Array<{ id: number; persistedId?: string; text: string; startedAt: number; endedAt: number | null }>,
   error: null as string | null,
   apiErrorCode: null as string | null,
@@ -189,6 +193,7 @@ describe('MessageList', () => {
     mockMessagesData.error = null
     mockMessagesData.hasOlder = false
     mockMessagesData.isFetchingOlder = false
+    mockMessagesData.dataUpdatedAt = 0
     mockIsOnline = true
     mockCurrentUser = null
     mockCancelResult = { cancelled: true }
@@ -203,6 +208,7 @@ describe('MessageList', () => {
       typingUser: null,
       peerUserMessages: [],
       discardedCommandUuids: [],
+      pickedUpSends: new Set(),
       thinkingBlocks: [],
       error: null,
       apiErrorCode: null,
@@ -3055,7 +3061,11 @@ describe('MessageList', () => {
   })
 
   describe('new-turn scroll anchoring', () => {
-    const pending = { localId: 'pending-turn', text: 'What changed?', sentAt: Date.now() }
+    // Fresh per test: a list marks the ghost it takes as a send.
+    let pending: PendingMessage
+    beforeEach(() => {
+      pending = { localId: 'pending-turn', text: 'What changed?', sentAt: Date.now() }
+    })
 
     // Live-edge following is convergence-driven: the scroll hook's
     // ResizeObserver on the content wrapper re-pins after every resize.
@@ -3184,6 +3194,52 @@ describe('MessageList', () => {
       expect(anchor.getBoundingClientRect().top).toBe(101)
       expect(geometry.scrollTop).toBe(1099)
       expect(screen.getByTestId('turn-anchor-spacer')).toHaveStyle({ height: '400px' })
+    })
+
+    // The same geometry the send case uses, in place before the list mounts.
+    function withMountGeometry(run: (spacer: () => number) => void, history = [createAssistantMessage({ content: { text: 'Previous response' } })]) {
+      mockMessagesData.data = history
+      const proto = HTMLElement.prototype
+      const saved = { rect: proto.getBoundingClientRect, ch: Object.getOwnPropertyDescriptor(proto, 'clientHeight'), sh: Object.getOwnPropertyDescriptor(proto, 'scrollHeight') }
+      const isList = (el: HTMLElement) => el.dataset?.testid === 'message-list'
+      const spacer = () => Number.parseFloat((document.querySelector('[data-testid="turn-anchor-spacer"]') as HTMLElement | null)?.style.height || '0') || 0
+      vi.spyOn(window, 'matchMedia').mockImplementation((query: string) => ({ matches: query === '(prefers-reduced-motion: reduce)', media: query, addEventListener: vi.fn(), removeEventListener: vi.fn() }) as unknown as MediaQueryList)
+      proto.getBoundingClientRect = function (this: HTMLElement) {
+        const top = this.dataset?.turnAnchorId ? 1200 - (document.querySelector('[data-testid="message-list"]')?.scrollTop ?? 0) : 0
+        return { top, bottom: top, height: 0, left: 0, right: 0, width: 0, x: 0, y: top, toJSON: () => ({}) } as DOMRect
+      }
+      Object.defineProperty(proto, 'clientHeight', { configurable: true, get(this: HTMLElement) { return isList(this) ? 600 : 0 } })
+      Object.defineProperty(proto, 'scrollHeight', { configurable: true, get(this: HTMLElement) { return isList(this) ? 1300 + spacer() : 0 } })
+      try {
+        run(spacer)
+      } finally {
+        proto.getBoundingClientRect = saved.rect
+        for (const [k, d] of [['clientHeight', saved.ch], ['scrollHeight', saved.sh]] as const) {
+          if (d) Object.defineProperty(proto, k, d); else delete (proto as unknown as Record<string, unknown>)[k]
+        }
+      }
+    }
+
+    it("anchors a new session's first message on the list's first mount", () => {
+      withMountGeometry((spacer) => {
+        renderWithProviders(<MessageList sessionId="s-1" agentSlug="agent-1" pendingUserMessages={[pending]} />)
+        const anchor = screen.getByText('What changed?').closest('[data-turn-anchor-id]') as HTMLElement
+        // Same reading line as a send into an open list: TURN_ANCHOR_TOP + the 1px live-edge allowance.
+        expect(anchor.getBoundingClientRect().top).toBe(101)
+        expect(spacer()).toBe(400)
+      }, [])
+    })
+
+    it('reserves no reading line for a message an earlier mount already anchored', () => {
+      withMountGeometry((spacer) => {
+        const first = renderWithProviders(<MessageList sessionId="s-1" agentSlug="agent-1" pendingUserMessages={[pending]} />)
+        expect(spacer()).toBeGreaterThan(0)
+        first.unmount()
+        // The reader comes back to the session: the store hands the new list a
+        // rebuilt entry (the POST assigned its uuid), carrying the mark.
+        renderWithProviders(<MessageList sessionId="s-1" agentSlug="agent-1" pendingUserMessages={[{ ...pending, uuid: 'srv-1' }]} />)
+        expect(spacer()).toBe(0)
+      })
     })
 
     it('holds the reading line when content mounts above the anchored turn', async () => {
@@ -4532,6 +4588,62 @@ describe('MessageList', () => {
 
       renderWithProviders(<MessageList sessionId="s-1" agentSlug="agent-1" />)
       expect(screen.queryByTestId('thinking-block')).not.toBeInTheDocument()
+    })
+  })
+
+  describe('pending messages after leaving the session', () => {
+    // A pending bubble outlives the MessageList that could clear it (a session
+    // switch unmounts the list, the shell keeps the bubble). The owner below
+    // stands in for AgentShell's per-agent store: it drops a bubble only when the
+    // list reports it through onPendingMessageAppeared.
+    function makeOwner(initial: Array<{ localId: string; uuid?: string; text: string; sentAt: number }>) {
+      const appeared: string[] = []
+      let current = initial
+      function Owner({ view }: { view: 'S' | 'other' }) {
+        const [pending, setPending] = useState(initial)
+        current = pending
+        return view === 'S' ? (
+          <MessageList
+            key="S"
+            sessionId="S"
+            agentSlug="agent-1"
+            pendingUserMessages={pending}
+            onPendingMessageAppeared={(localId) => {
+              appeared.push(localId)
+              setPending((cur) => cur.filter((p) => p.localId !== localId))
+            }}
+          />
+        ) : (
+          <div>other session</div>
+        )
+      }
+      return { Owner, appeared, pending: () => current }
+    }
+
+    const U = '46c36d89-3735-4a18-bf0a-98b40f872316'
+    const sentAt = Date.parse('2026-11-19T08:15:15.248Z')
+    const before = [createAssistantMessage({ id: 'a-before', createdAt: new Date(sentAt - 60_000) })]
+    // More than the 300-item trailing page lands after the send.
+    const overnight = Array.from({ length: 320 }, (_, i) =>
+      createAssistantMessage({ id: `a-${i}`, createdAt: new Date(sentAt + 60_000 + i * 1000) })
+    )
+
+    it('a picked-up bubble whose copy is past the loaded page clears on return', () => {
+      const { Owner, appeared, pending } = makeOwner([{ localId: 'l1', uuid: U, text: 'Start it', sentAt }])
+      mockMessagesData.data = before
+      const { rerender } = renderWithProviders(<Owner view="S" />)
+      rerender(<Owner view="other" />)
+
+      // Return: the snapshot says the runtime took U, and a fresh load brings the trailing page only.
+      mockStreamState.pickedUpSends = new Set([U])
+      mockMessagesData.data = overnight.slice(-300)
+      mockMessagesData.hasOlder = true
+      mockMessagesData.dataUpdatedAt = Date.now() + 1000
+      rerender(<Owner view="S" />)
+
+      expect(appeared).toEqual(['l1'])
+      expect(pending()).toEqual([])
+      expect(screen.queryByText('Start it')).not.toBeInTheDocument()
     })
   })
 })

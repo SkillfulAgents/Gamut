@@ -105,6 +105,19 @@ describe('useMessageStream', () => {
     unmount()
   })
 
+  it('keeps the sends the host saw picked up: a snapshot replaces them, frames add to them', async () => {
+    const { useMessageStream } = await getHookModule()
+    const { result, unmount } = renderHook(() => useMessageStream('picked-up', 'agent-1'), { wrapper: createWrapper() })
+    const send = (data: Record<string, unknown>) => act(() => MockEventSource.instances[0].simulateMessage(data))
+    send({ type: 'connected', isActive: true, pickedUpSends: ['old'] })
+    send({ type: 'command_lifecycle', commandUuid: 'fresh', state: 'started' })
+    send({ type: 'command_lifecycle', commandUuid: 'queued', state: 'queued' })
+    expect([...result.current.pickedUpSends]).toEqual(['old', 'fresh'])
+    send({ type: 'connected', isActive: false, pickedUpSends: ['back'] })
+    expect([...result.current.pickedUpSends]).toEqual(['back'])
+    unmount()
+  })
+
   it('keeps background work visible after a cancelled foreground turn, including reconnect', async () => {
     const { useMessageStream } = await getHookModule()
     const { result, unmount } = renderHook(() => useMessageStream('cancel-background', 'agent-1'), { wrapper: createWrapper() })

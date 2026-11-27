@@ -10,7 +10,7 @@ import {
   consumeDiscardedCommand,
   consumeThinkingBlocks,
 } from '@renderer/hooks/use-message-stream'
-import { isTurnStartingUserMessage, type PendingMessage } from './pending-message'
+import { isTurnStartingUserMessage, pickedUpAbovePage, type PendingMessage } from './pending-message'
 import { classifyUserMessage, classifyUserText } from './user-message-kinds'
 import { MessageItem, hasWorkflowCall } from './message-item'
 import { GhostMessageItem } from './ghost-message-item'
@@ -177,7 +177,9 @@ interface MessageListProps {
 
 export function MessageList({ sessionId, agentSlug, pendingUserMessages, pendingRequestCount = 0, onPendingMessageAppeared, readOnly, suppressScrollToBottom = false, bottomInset = 0, messageTarget }: MessageListProps) {
   useRenderTracker('MessageList')
-  const { data: messages, isLoading, error, fetchOlder, hasOlder, isFetchingOlder } = useMessages(sessionId, agentSlug)
+  const { data: messages, isLoading, error, fetchOlder, hasOlder, isFetchingOlder, dataUpdatedAt } = useMessages(sessionId, agentSlug)
+  // A ghost sent before this mount may have been taken while no list was open.
+  const [mountedAt] = useState(() => Date.now())
   // useMutation returns a new object every render; only `mutate` is stable, and the
   // row handlers must stay stable for MessageItem's memo.
   const { mutate: deleteMessage } = useDeleteMessage()
@@ -256,6 +258,7 @@ export function MessageList({ sessionId, agentSlug, pendingUserMessages, pending
     typingUser,
     peerUserMessages,
     discardedCommandUuids,
+    pickedUpSends,
     workflows,
     thinkingBlocks,
   } = useMessageStream(sessionId, agentSlug)
@@ -328,7 +331,7 @@ export function MessageList({ sessionId, agentSlug, pendingUserMessages, pending
         )
         if (match) claimed.add(match.id)
       }
-      if (match) {
+      if (match || pickedUpAbovePage(pending, { pickedUpSends, mountedAt, hasOlder, dataUpdatedAt })) {
         onPendingMessageAppeared?.(pending.localId)
       }
     }
@@ -349,7 +352,7 @@ export function MessageList({ sessionId, agentSlug, pendingUserMessages, pending
         removePeerUserMessage(sessionId, peer.uuid)
       }
     }
-  }, [messages, pendingUserMessages, peerUserMessages, onPendingMessageAppeared, sessionId, user?.id])
+  }, [messages, pendingUserMessages, peerUserMessages, onPendingMessageAppeared, sessionId, user?.id, pickedUpSends, mountedAt, hasOlder, dataUpdatedAt])
 
   // Deterministic ghost rescue: the runtime reported these queued messages
   // dead via command_lifecycle discarded (e.g. killed by Stop, or dropped by
