@@ -1,0 +1,23 @@
+{
+  "storyId": "browser-test",
+  "passed": true,
+  "reason": "Sent the browser-title prompt to agent QA-20261127-222412-50ue and verified the reply reports \"Example Domain\".",
+  "steps": [
+    "Navigated to http://localhost:47891 — Gamut home loaded with the sidebar listing QA-20261127-222412-50ue and QA-20261127-222411-8vif. No errors.",
+    "Clicked the QA-20261127-222412-50ue agent in the sidebar — agent page opened at /agents/qa-20261127-222412-50ue-puxi48bz8h, status idle, message input visible.",
+    "Typed \"Open a browser and go to https://example.com. Tell me the page title.\" and clicked Send — a new session \"Browser Page Title Check\" started, the status changed to \"working\", and the message appeared in the transcript.",
+    "Waited for the response (wait for \"Example Domain\", 180s limit) — the reply appeared before the limit. The turn showed \"Worked for 5s · 3 tool calls · 164,091 tokens\", and the agent returned to idle.",
+    "Verified the response and took a viewport screenshot — the reply reads: The page title of https://example.com is \"Example Domain\". I've closed the browser. The text matches the expected \"Example Domain\"."
+  ],
+  "bugs": [],
+  "durationMs": 71023,
+  "sessionId": "67549588-0c4c-4513-924a-8cf32ea11b0b",
+  "cost": {
+    "inputTokens": 7764,
+    "outputTokens": 4159,
+    "cacheCreationTokens": 153813,
+    "cacheReadTokens": 470835,
+    "model": "claude-haiku-5-5",
+    "totalCostUsd": 0.267909
+  }
+}
