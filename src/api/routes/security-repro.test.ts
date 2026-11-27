@@ -154,6 +154,7 @@ vi.mock('@shared/lib/config/settings', () => ({
 
 // Auth middleware — passthrough for both routers' middlewares.
 const mockAuthUser = { id: ACTING_USER_ID, name: 'Test User', email: 'test@example.com' }
+const agentRole = { value: 'owner' as 'owner' | 'user' | 'viewer' }
 vi.mock('../middleware/auth', () => ({
   Authenticated: () => async (c: any, next: () => Promise<void>) => { c.set('user', mockAuthUser); return next() },
   AgentRead: () => async (c: any, next: () => Promise<void>) => { c.set('user', mockAuthUser); return next() },
@@ -164,6 +165,7 @@ vi.mock('../middleware/auth', () => ({
   Or: (..._mw: unknown[]) => async (_c: unknown, next: () => Promise<void>) => next(),
   ResolveAgent: () => async (c: any, next: () => Promise<void>) => { c.set('agentId', c.req.param('id')); return next() },
   getAgentId: (c: any) => c.get('agentId') ?? c.req.param('id'),
+  getAuthorizedAgentRole: () => agentRole.value,
 }))
 
 vi.mock('@shared/lib/analytics/server-analytics', () => ({
@@ -435,6 +437,28 @@ describe('SUP-200: GET /api/agents/:id/files/* — workspace containment', () =>
 
     expect(res.status).toBe(200)
     expect(await res.text()).toBe('hello world')
+  })
+
+  it('refuses the root secrets file below owner, in any spelling, and serves it to an owner', async () => {
+    const workspace = path.join(agentDataRoot, 'agent')
+    fs.mkdirSync(path.join(workspace, 'notes'), { recursive: true })
+    fs.writeFileSync(path.join(workspace, '.env'), 'API_KEY=sk-dummy-1')
+    fs.writeFileSync(path.join(workspace, 'notes', '.env'), 'not-secrets')
+    try {
+      agentRole.value = 'user'
+      for (const spelling of ['.env', '.ENV', '%2fworkspace%2f.env']) {
+        const res = await appWithAgents().request(`http://localhost/api/agents/agent/files/${spelling}`)
+        expect(res.status, spelling).toBe(403)
+        expect(await res.text(), spelling).not.toContain('sk-dummy-1')
+      }
+      expect((await appWithAgents().request('http://localhost/api/agents/agent/files/notes/.env')).status).toBe(200)
+      agentRole.value = 'owner'
+      const owned = await appWithAgents().request('http://localhost/api/agents/agent/files/.env')
+      expect(owned.status).toBe(200)
+      expect(await owned.text()).toBe('API_KEY=sk-dummy-1')
+    } finally {
+      agentRole.value = 'owner'
+    }
   })
 
   it('rejects a file symlink that resolves outside the agent workspace', async () => {

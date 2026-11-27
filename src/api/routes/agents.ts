@@ -185,6 +185,7 @@ import {
 import { MAX_UPLOAD_CHUNKS, uploadIdSchema } from '@shared/lib/utils/chunked-upload-schema'
 import { getMountsWithHealth, addMount, attachMount, removeMount, setMountReadOnly, volumeSummary, resolveMountPath } from '@shared/lib/services/mount-service'
 import { isMountPath } from '@shared/lib/utils/workspace-path'
+import { isSecretsDocumentPath, SECRETS_FILE_OWNER_ONLY } from '@shared/lib/agent-actor/config-schema'
 import { serveVolumeFile, volumeFailure } from '../lib/volume-file'
 import { addMountSchema, updateMountSchema } from '@shared/lib/services/mount-schema'
 import { releaseVolume, VolumeError } from '@shared/lib/services/volume-service'
@@ -7436,8 +7437,11 @@ agents.get('/:id/files/*', AgentRead(), async (c) => {
     // catch below. The file is then served by its real location, as it
     // always was: a link is followed only while it stays inside the
     // workspace, and one that leaves it is the same 400.
+    const workspacePath = normalizeWorkspacePath(filePath)
+    // Members see secret names on the Secrets page; only an owner reads the values.
+    if (isSecretsDocumentPath(workspacePath) && getAuthorizedAgentRole(c) !== 'owner') return c.json({ error: SECRETS_FILE_OWNER_ONLY }, 403)
     const actor = agentRegistry.get(agentSlug)
-    const resolved = await actor.files.resolve(filePath)
+    const resolved = await actor.files.resolve(workspacePath)
     const stat = resolved === null ? null : await actor.files.stat(resolved)
     if (resolved === null || !stat || stat.kind !== 'file') {
       return c.json({ error: 'File not found' }, 404)

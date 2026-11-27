@@ -542,6 +542,12 @@ describe('get_file_download', () => {
     expect((await call(getFileDownload, { agent: 'alpha', path: 'x', session_id: 's', delivery_id: 'd' }, person('alice'))).error).toMatch(/not both/)
   })
 
+  it('the secrets file only for an owner', async () => {
+    fake.state.files.set('alpha:.env', new TextEncoder().encode('API_KEY=secret'))
+    expect((await call(getFileDownload, { agent: 'alpha', path: '.env' }, person('alice'))).error).toMatch(/Only an owner/)
+    expect((await call(getFileDownload, { agent: 'alpha', path: '.env' }, person('bob'))).value).toMatchObject({ text: 'API_KEY=secret' })
+  })
+
   it('a binary file is a URL only', async () => {
     fake.state.files.set('alpha:img.png', new Uint8Array([0x89, 0x50, 0x00, 0x01]))
     expect((await call(getFileDownload, { agent: 'alpha', path: 'img.png' }, person('alice'))).value).toMatchObject({ text: null, size_bytes: 4 })
