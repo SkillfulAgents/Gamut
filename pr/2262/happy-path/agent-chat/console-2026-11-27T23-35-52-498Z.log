@@ -1,0 +1,4 @@
+[    5008ms] [WARNING] [.WebGL-0x170402a38000]GL Driver Message (OpenGL, Performance, GL_CLOSE_PATH_NV, High): GPU stall due to ReadPixels @ http://localhost:47891/agents/qa-20261127-233537-87yo-lvi6ouakg3:0
+[    5280ms] [WARNING] [.WebGL-0x170402a38000]GL Driver Message (OpenGL, Performance, GL_CLOSE_PATH_NV, High): GPU stall due to ReadPixels @ http://localhost:47891/agents/qa-20261127-233537-87yo-lvi6ouakg3:0
+[    5440ms] [WARNING] [.WebGL-0x170402a38000]GL Driver Message (OpenGL, Performance, GL_CLOSE_PATH_NV, High): GPU stall due to ReadPixels @ http://localhost:47891/agents/qa-20261127-233537-87yo-lvi6ouakg3:0
+[    5680ms] [WARNING] [.WebGL-0x170402a38000]GL Driver Message (OpenGL, Performance, GL_CLOSE_PATH_NV, High): GPU stall due to ReadPixels (this message will no longer repeat) @ http://localhost:47891/agents/qa-20261127-233537-87yo-lvi6ouakg3:0

@@ -1,0 +1,24 @@
+{
+  "storyId": "agent-chat",
+  "passed": true,
+  "reason": "Sent \"Hello! What is 2+2?\" to agent QA-20261127-233537-87yo in the Gamut UI and verified the reply contains \"4\".",
+  "steps": [
+    "Step 1: Navigated to http://localhost:47891 — the Gamut home page loaded with the sidebar listing both agents, no errors.",
+    "Step 2: Clicked \"QA-20261127-233537-87yo\" in the sidebar — its agent page opened (URL /agents/qa-20261127-233537-87yo-lvi6ouakg3). Screenshot step2-agent-selected.png taken.",
+    "Step 3: Checked agent status — the header and sidebar both show \"idle\", which is an allowed status.",
+    "Step 4: Typed \"Hello! What is 2+2?\" into the composer and clicked Send — the message was submitted and the view navigated to a new session \"Simple Arithmetic Question\". Screenshots step4-message-typed.png and step4-message-sent.png taken.",
+    "Step 5: Waited for a response — the assistant reply \"2 + 2 = 4.\" was already rendered in the message list by the time of the first check, so no wait was needed.",
+    "Step 6: Verified the response — the message list shows \"2 + 2 = 4.\", which mentions 4. Screenshot step4-message-sent.png taken."
+  ],
+  "bugs": [],
+  "durationMs": 41249,
+  "sessionId": "95093f1a-a3f2-40f9-a747-f779525f87b1",
+  "cost": {
+    "inputTokens": 8262,
+    "outputTokens": 5773,
+    "cacheCreationTokens": 151734,
+    "cacheReadTokens": 613872,
+    "model": "claude-haiku-5-5",
+    "totalCostUsd": 0.288182
+  }
+}
