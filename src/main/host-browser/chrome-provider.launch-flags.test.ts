@@ -216,6 +216,13 @@ describe('ChromeProvider launch flags (profile disk growth)', () => {
     expect(prefs!.safebrowsing.password_protection_warning_trigger).toBe(0)
   })
 
+  it("lets a page start more than one download, into the agent's workspace", () => {
+    const prefs = h.writes.map((w) => JSON.parse(w) as Record<string, any>).find((p) => p.download)
+    expect(prefs!.download.prompt_for_download).toBe(false)
+    expect(prefs!.download.default_directory).toMatch(/\/downloads$/)
+    expect(prefs!.profile.default_content_setting_values.automatic_downloads).toBe(1)
+  })
+
   it('claims the profile before waiting on the cleanup sweep, which precedes the spawn', () => {
     // Mark BEFORE wait: a sweep firing between the two would see the claim and
     // skip this profile; marking after the wait leaves a window where the

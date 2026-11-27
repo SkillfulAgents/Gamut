@@ -32,6 +32,19 @@ export const steelSessionListSchema = z.object({
   nextCursor: z.string().nullish(),
 }).loose()
 
+/**
+ * A session's files (`GET /v1/sessions/{id}/files`): what was uploaded and what
+ * the browser downloaded, each at a `path` under `/files` (`/files/report.pdf`),
+ * kept after the session ends. Newest first while the session runs.
+ */
+export const steelSessionFileListSchema = z.object({
+  data: z.array(z.object({
+    path: z.string().min(1),
+    size: z.number().nullish(),
+  }).loose()),
+}).loose()
+export type SteelSessionFile = z.infer<typeof steelSessionFileListSchema>['data'][number]
+
 /** Steel's error body, e.g. `{ code: 'profile_not_ready', message, retryable, retryAfterSeconds }`. */
 export const steelErrorSchema = z.object({
   code: z.string().optional(),

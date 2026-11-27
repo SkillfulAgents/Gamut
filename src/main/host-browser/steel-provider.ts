@@ -4,7 +4,8 @@ import { getOrCreateMapping, readContextMapping, replaceContextMapping } from '.
 import { GooglePasskeyRecovery } from './google-passkey-recovery'
 import { SteelApi, SteelApiError } from './steel-api'
 import { steelPendingSaveSchema, type SteelSession } from './steel-schemas'
-import type { HostBrowserProvider, HostBrowserProviderStatus, BrowserConnectionInfo } from './types'
+import { DownloadTooLargeError, DownloadsUnsupportedError, MAX_BROWSER_DOWNLOAD_BYTES, SessionNotOwnedError, assertSessionOwned, findStoredDownload } from './downloads'
+import type { HostBrowserProvider, HostBrowserProviderStatus, BrowserConnectionInfo, BrowserDownloadRef, StoredDownload } from './types'
 
 /**
  * How long a session may run. Steel releases a session at its timeout (5
@@ -67,6 +68,11 @@ export function planTimeoutCapFrom(message: string): number | null {
 }
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+
+/** A session file's name under `/files` (`/files/report.pdf` → `report.pdf`). */
+function storedName(filePath: string): string {
+  return filePath.replace(/^\/?files\//, '')
+}
 
 /** The timeout one launch asks for: lowered to the plan's cap once Steel names it. */
 interface SessionTimeout { ms: number }
@@ -145,7 +151,7 @@ export class SteelProvider implements HostBrowserProvider {
       if (status === 'live' || status === 'unknown') {
         // Unknown: Steel did not answer. The browser the container has is the best guess.
         this.passkeyRecovery.watch(instanceId, existing.cdpUrl)
-        return { cdpUrl: existing.cdpUrl }
+        return { cdpUrl: existing.cdpUrl, sessionId: existing.id }
       }
       // It timed out or its browser was closed: Steel is saving the profile from it.
       if (existing.profileId && status === 'ended') await this.recordPendingSave(existing.profileId, existing.id)
@@ -317,7 +323,42 @@ export class SteelProvider implements HostBrowserProvider {
     console.log(`[SteelProvider] Session ${session.id} on profile ${session.profileId} for instance ${instanceId}`)
     this.sessions.set(instanceId, { id: session.id, cdpUrl: session.websocketUrl, profileId: session.profileId ?? null })
     this.passkeyRecovery.watch(instanceId, session.websocketUrl)
-    return { cdpUrl: session.websocketUrl }
+    return { cdpUrl: session.websocketUrl, sessionId: session.id }
+  }
+
+  /**
+   * The downloads in the session's `/files` folder: Steel saves every download
+   * there whatever path the browser is given (under the page's name, or the
+   * guid under `allowAndName`), and keeps them after the session ends.
+   */
+  async listDownloads(agentId: string, sessionId: string): Promise<StoredDownload[]> {
+    const steel = await this.steelForSession(agentId, sessionId)
+    return (await steel.listSessionFiles(sessionId)).map((file) => ({ name: storedName(file.path), size: file.size ?? null }))
+  }
+
+  async readDownload(agentId: string, sessionId: string, download: BrowserDownloadRef): Promise<Buffer | null> {
+    const steel = await this.steelForSession(agentId, sessionId)
+    const stored = findStoredDownload(await steel.listSessionFiles(sessionId), (file) => file.path, download)
+    if (!stored) return null
+    if (stored.size != null && stored.size > MAX_BROWSER_DOWNLOAD_BYTES) throw new DownloadTooLargeError(stored.size)
+    const bytes = await steel.readSessionFile(sessionId, stored.path)
+    if (bytes.length > MAX_BROWSER_DOWNLOAD_BYTES) throw new DownloadTooLargeError(bytes.length)
+    return bytes
+  }
+
+  /** The account's API, once the session is checked to be on the agent's profile (it keeps `profileId` once released). */
+  private async steelForSession(agentId: string, sessionId: string): Promise<SteelApi> {
+    const steel = steelApiFrom(await getSettings())
+    if (!steel) throw new DownloadsUnsupportedError('No Steel API key is configured')
+    let session: SteelSession
+    try {
+      session = await steel.getSession(sessionId)
+    } catch (error) {
+      if (error instanceof SteelApiError && error.status === 404) throw new SessionNotOwnedError()
+      throw error
+    }
+    assertSessionOwned(session.profileId, await readContextMapping('steel', agentId))
+    return steel
   }
 
   /**

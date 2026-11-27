@@ -1,13 +1,15 @@
 import { Hono } from 'hono'
 import type { Context } from 'hono'
-import { getActiveProvider, setOnExternalClose } from '../../main/host-browser'
+import { getActiveProvider, setOnExternalClose, type HostBrowserProvider } from '../../main/host-browser'
 import { getSettings } from '@shared/lib/config/settings'
 import { agentRegistry } from '@shared/lib/agent-actor'
 import { globalFeed } from '@shared/lib/notifications/global-feed'
 import { IsAgent } from '../middleware/auth'
 import { captureException } from '@shared/lib/error-reporting'
 import { background } from '@shared/lib/background'
-import { hostBrowserRequestSchema, browserLaunchErrorReportSchema } from './browser-schema'
+import type { z } from 'zod'
+import { DownloadTooLargeError, DownloadsUnsupportedError, SessionNotOwnedError } from '../../main/host-browser/downloads'
+import { hostBrowserRequestSchema, hostBrowserDownloadRequestSchema, hostBrowserDownloadsRequestSchema, browserLaunchErrorReportSchema } from './browser-schema'
 
 const browser = new Hono()
 
@@ -129,6 +131,58 @@ browser.post('/debug-info', IsAgent(), async (c) => {
     return c.json({ error: message }, 500)
   }
 })
+
+// The files the agent's cloud browser downloaded. A cloud browser saves a
+// download on the provider's machine, out of the container's sight; the
+// provider reads it from its API. The container names the provider's session
+// (from the launch answer), and the provider checks it is this agent's: no
+// request depends on what an earlier one left in memory.
+//
+// POST /api/browser/downloads - the session's files: { files: [{ name, size }] }.
+// POST /api/browser/download-file - one file's bytes: 404 while the provider
+// does not have it yet (the container asks again).
+// Both: 501 when the provider keeps no downloads to read, 403 for another
+// agent's session; the read 413 for a file over the limit.
+browser.post('/downloads', IsAgent(), (c) => serveDownloads(c, hostBrowserDownloadsRequestSchema, async (provider, agentId, body) => {
+  if (!provider.listDownloads) return null
+  return c.json({ files: await provider.listDownloads(agentId, body.sessionId) })
+}))
+
+browser.post('/download-file', IsAgent(), (c) => serveDownloads(c, hostBrowserDownloadRequestSchema, async (provider, agentId, body) => {
+  if (!provider.readDownload) return null
+  const bytes = await provider.readDownload(agentId, body.sessionId, { guid: body.guid })
+  if (!bytes) return c.json({ error: 'not_found' }, 404)
+  return c.body(new Uint8Array(bytes), 200, { 'Content-Type': 'application/octet-stream' })
+}))
+
+/** One downloads request: the body checked, the provider asked, its errors mapped to statuses. Null from `serve`: the provider has no downloads to read. */
+async function serveDownloads<S extends typeof hostBrowserDownloadsRequestSchema>(
+  c: Context,
+  schema: S,
+  serve: (provider: HostBrowserProvider, agentId: string, body: z.infer<S>) => Promise<Response | null>,
+): Promise<Response> {
+  const resolved = await resolveTokenBoundAgentId(c)
+  if ('error' in resolved) return resolved.error
+
+  const parsed = schema.safeParse(resolved.raw)
+  if (!parsed.success) {
+    return c.json({ error: 'Invalid request body' }, 400)
+  }
+
+  const provider = await getActiveProvider()
+  const unsupported = () => c.json({ error: `${provider?.name ?? 'This browser'} keeps no copy of the browser's downloads that the app can read` }, 501)
+  if (!provider) return unsupported()
+  try {
+    return (await serve(provider, resolved.agentId, parsed.data)) ?? unsupported()
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : "Failed to read the browser's downloads"
+    if (error instanceof DownloadsUnsupportedError) return c.json({ error: message }, 501)
+    if (error instanceof SessionNotOwnedError) return c.json({ error: message }, 403)
+    if (error instanceof DownloadTooLargeError) return c.json({ error: message }, 413)
+    console.error(`[Browser] Failed to read downloads for ${resolved.agentId}:`, message)
+    return c.json({ error: message }, 502)
+  }
+}
 
 // When a host browser instance closes externally (e.g. user closed Chrome),
 // notify that agent's container so it can clean up its internal state, and

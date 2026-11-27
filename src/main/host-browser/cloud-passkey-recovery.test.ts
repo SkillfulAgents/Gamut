@@ -58,7 +58,7 @@ for (const Provider of [BrowserbaseProvider, PlatformBrowserProvider]) {
   describe(`${Provider.name} passkey recovery lifecycle`, () => {
     it('watches the reusable debug connection on launch and reuse, and stops before release', async () => {
       const provider = new Provider()
-      expect(await provider.launch('instance')).toEqual({ cdpUrl: 'wss://test/debug/1' })
+      expect(await provider.launch('instance')).toEqual({ cdpUrl: 'wss://test/debug/1', sessionId: 'session-1' })
       expect(h.watch).toHaveBeenLastCalledWith('instance', 'wss://test/debug/1')
       await provider.launch('instance')
       expect(created).toBe(1)
@@ -71,7 +71,7 @@ for (const Provider of [BrowserbaseProvider, PlatformBrowserProvider]) {
     it('preserves the single-use fallback URL for the agent', async () => {
       available = false
       const provider = new Provider()
-      expect(await provider.launch('instance')).toEqual({ cdpUrl: 'wss://test/single-use/1' })
+      expect(await provider.launch('instance')).toEqual({ cdpUrl: 'wss://test/single-use/1', sessionId: 'session-1' })
       expect(h.watch).not.toHaveBeenCalled()
       await provider.stop('instance')
     })
