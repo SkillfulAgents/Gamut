@@ -200,10 +200,10 @@ describe('openLiveSession', () => {
     expect(new Set(opened.map((o) => o.sessionId))).toEqual(new Set([recorded]))
   })
 
-  it('still ends with one recorded session when a stop takes the record mid-launch', async () => {
+  it.each(['ended', 'unknown'] as const)('records the session it made when a stop takes a record of an %s session mid-launch', async (recordedState) => {
     const { browser, state, log, running } = fakeBrowser()
     await openLiveSession(sessions, 'agent-a', browser)
-    state.set('sess-1', 'ended')
+    state.set('sess-1', recordedState)
     log.length = 0
     // A stop in another process lands between this launch's read and its write.
     const create = browser.create.bind(browser)
@@ -215,11 +215,11 @@ describe('openLiveSession', () => {
 
     const opened = await openLiveSession(sessions, 'agent-a', browser)
 
-    // The session made for the record that was taken is released, and the next one is the agent's.
-    expect(log).toEqual(['connect sess-1', 'create sess-2', 'release sess-2', 'create sess-3'])
-    expect(opened).toMatchObject({ sessionId: 'sess-3', reused: false })
-    expect((await sessions.read('agent-a'))?.sessionId).toBe('sess-3')
-    expect(running()).toEqual(['sess-3'])
+    // No second session, and sess-1 is left to the stop that took it.
+    expect(log).toEqual(['connect sess-1', 'create sess-2'])
+    expect(opened).toMatchObject({ sessionId: 'sess-2', reused: false })
+    expect((await sessions.read('agent-a'))?.sessionId).toBe('sess-2')
+    expect(running()).toEqual(['sess-2'])
   })
 
   it('releases the session it created when it cannot be recorded, and fails', async () => {

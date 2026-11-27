@@ -104,9 +104,15 @@ export async function openLiveSession<C>(sessions: LiveSessions, instanceId: str
     }
 
     const created = await browser.create()
+    let replacing = recorded
     let written: Awaited<ReturnType<LiveSessions['record']>>
     try {
-      written = await sessions.record(instanceId, created.sessionId, recorded)
+      written = await sessions.record(instanceId, created.sessionId, replacing)
+      if (!written.recorded && replacing && !written.current) {
+        // A stop took the record meanwhile, and released its session: this one takes the empty place.
+        replacing = null
+        written = await sessions.record(instanceId, created.sessionId, null)
+      }
     } catch (error) {
       // Unrecorded, no stop would ever find it.
       await release(created.sessionId)
@@ -114,7 +120,7 @@ export async function openLiveSession<C>(sessions: LiveSessions, instanceId: str
     }
     if (written.recorded) {
       // The session it replaces is no longer the agent's browser, and nothing else would release it.
-      if (recorded && mayStillRun) await release(recorded.sessionId)
+      if (replacing && mayStillRun) await release(replacing.sessionId)
       return { sessionId: created.sessionId, connection: created.connection, reused: false }
     }
     // Another process recorded one meanwhile: that is the agent's browser.
