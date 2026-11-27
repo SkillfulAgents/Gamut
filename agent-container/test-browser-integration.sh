@@ -274,6 +274,17 @@ assert_contains "browser_read reads the top document" ".text" 'Top'
 post_any /browser/run "{$S,\"args\":[\"frame\",\"main\"]}"
 post_any /browser/eval "{$S,\"script\":\"location.href\"}"
 assert_contains "frame main returns eval to the top" ".output" '8765/frame.html'
+# By ref: a snapshot inside the frame replaces the CLI's ref table, and the
+# probes still select the frame again (they read the page to restore the ref).
+post /browser/snapshot "{$S,\"interactive\":true,\"compact\":true}"
+PAYFRAME=$(ref_of 'Iframe "payframe"')
+post_any /browser/run "{$S,\"args\":[\"frame\",\"@$PAYFRAME\"]}"
+assert_json "select the frame by its ref" ".success" "true"
+post /browser/snapshot "{$S,\"interactive\":true,\"compact\":true}"
+assert_json "the status line is the top page's with a ref-selected frame" ".page.title" "Top page"
+post_any /browser/eval "{$S,\"script\":\"location.href\"}"
+assert_contains "a ref-selected frame is still selected after an in-frame snapshot" ".output" '8766/inner.html'
+post_any /browser/run "{$S,\"args\":[\"frame\",\"main\"]}"
 
 post /browser/close "{$S}"
 assert_json "close" ".success" "true"

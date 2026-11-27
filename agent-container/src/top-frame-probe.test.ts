@@ -65,6 +65,33 @@ describe('stepOutOfFrame', () => {
     expect(s.frame).toBeNull()
   })
 
+  it('reads the page once to select a frame again by a ref an in-frame snapshot replaced', async () => {
+    const s = { frame: '@e3' as string | null, frameStep: null as Promise<void> | null }
+    const calls: string[] = []
+    let restored = false
+    const run = async (args: string[]) => {
+      calls.push(args[0] === 'eval' ? 'eval' : args.join(' '))
+      if (args[0] === 'snapshot') restored = true
+      if (args.join(' ') === 'frame @e3' && !restored) return { exitCode: 1, stdout: '✗ Unknown ref: e3' }
+      return { exitCode: 0, stdout: '✓ Done' }
+    }
+    await stepOutOfFrame(s, '1', run)
+    expect(calls).toEqual(['frame main', 'eval', 'frame @e3', 'snapshot -i -c', 'frame @e3'])
+    expect(s.frame).toBe('@e3')
+  })
+
+  it('does not read the page for a selector that no longer matches', async () => {
+    const s = { frame: '#pay' as string | null, frameStep: null as Promise<void> | null }
+    const calls: string[] = []
+    const run = async (args: string[]) => {
+      calls.push(args[0] === 'eval' ? 'eval' : args.join(' '))
+      return args.join(' ') === 'frame #pay' ? { exitCode: 1, stdout: '✗ Could not find frame for selector' } : { exitCode: 0, stdout: '✓ Done' }
+    }
+    await stepOutOfFrame(s, '1', run)
+    expect(calls).toEqual(['frame main', 'eval', 'frame #pay'])
+    expect(s.frame).toBeNull()
+  })
+
   it('answers the failure when it cannot step out, without reading', async () => {
     const s = { frame: '#pay' as string | null, frameStep: null as Promise<void> | null }
     const { calls, run } = runner({ 'frame main': { exitCode: 1, stdout: '✗ Browser not launched' } })

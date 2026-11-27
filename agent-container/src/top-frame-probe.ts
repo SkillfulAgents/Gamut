@@ -70,7 +70,15 @@ export async function stepOutOfFrame(s: ProbeSession, script: string, run: Run):
     if (out.exitCode !== 0) return out
     const read = await run(['eval', topFrameScript(script)])
     if (s.frame) {
-      const back = await run(['frame', s.frame])
+      let back = await run(['frame', s.frame])
+      // A snapshot taken inside the frame replaced the CLI's ref table with
+      // the frame's own refs (0.44+ replaces it on every snapshot), so the
+      // ref the agent selected the frame by is unknown on the page. Refs
+      // persist per element: a read of the page brings it back.
+      if (back.exitCode !== 0 && /^@?e\d+$/.test(s.frame) && /Unknown ref/.test(back.stdout)) {
+        const restored = await run(['snapshot', '-i', '-c'])
+        if (restored.exitCode === 0) back = await run(['frame', s.frame])
+      }
       if (back.exitCode !== 0) {
         console.log(`[Browser] Could not select the agent's frame again (${s.frame}); the session is on the top frame`)
         s.frame = null
