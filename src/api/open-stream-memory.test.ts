@@ -13,7 +13,7 @@ const MB = 1024 * 1024
 
 // An event stream through the real Node adapter and a real socket, held open
 // after its frames like a viewer's stream between events. @hono/node-server
-// 2.1.5 to 2.1.7 chained one promise per chunk until the stream ended, so a
+// before 2.1.8 chained one promise per chunk until the stream ended, so a
 // host kept memory for every frame it had sent on every stream still open.
 describe('an open event stream over the Node HTTP adapter', () => {
   let server: Server | undefined
