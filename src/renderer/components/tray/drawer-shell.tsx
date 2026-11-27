@@ -153,6 +153,8 @@ export const DrawerShell = forwardRef<DrawerShellHandle, DrawerShellProps>(funct
         // A negative margin pulls the drawer over the content by the overlap.
         style={{ width: isOpen ? shownWidth : 0, maxWidth: '100%', marginLeft: -overlap, contain: 'layout paint', willChange: 'transform' }}
         onTransitionEnd={onTransitionEnd}
+        // Beside the content rather than over it: the transcript's scrollbar moves into the gutter (globals.css).
+        data-docked={(floating && isOpen && overlap === 0 && !wideOverlay && !fullScreen) || undefined}
         data-testid="tray-drawer"
         data-fullscreen={fullScreen || undefined}
       >

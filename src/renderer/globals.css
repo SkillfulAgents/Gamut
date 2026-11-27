@@ -436,6 +436,82 @@ html[data-keyboard-open] [data-composer-footer] {
   background-color: rgba(120, 120, 130, .55);
 }
 
+/* The session transcript's scrollbar: the native one, styled, the OS still
+   drawing and driving it. Unstyled, macOS paints its classic scrollbar here
+   whenever scroll bars are set to show (a mouse attached, or "Always"): a
+   bordered track and a wide thumb, the track running behind the floating header
+   and off the bottom edge so both ends of the thumb are cut off. Instead: no
+   track, a 6px pill filling the scrollbar's width, the track inset from the
+   header and the bottom, and the thumb shown only while the pointer is over the
+   transcript or it has keyboard focus. The pill fills the width on purpose: one
+   narrowed with transparent borders loses its rounding on the bordered side.
+   The thumb's colour comes from a custom property set on the scroller: Chromium
+   repaints the thumb when that changes, but not for `:hover::-webkit-scrollbar-thumb`.
+   Registered as a colour, it transitions, so the thumb fades in as the pointer
+   enters (150ms) and out as it leaves (300ms). It must inherit, or the thumb
+   never sees it; the scroller's children reset it, so the fade restyles the
+   scroller and its direct children, not the whole transcript, on each frame.
+   WebKit pseudos for Chromium and Safari; in Chromium, setting `scrollbar-width`
+   or `scrollbar-color` would switch them off, so those are Firefox's fallback. */
+@property --transcript-thumb {
+  syntax: '<color>';
+  inherits: true;
+  initial-value: transparent;
+}
+.transcript-scroller {
+  --transcript-thumb: transparent;
+  transition: --transcript-thumb 300ms ease-out;
+}
+.transcript-scroller:hover,
+.transcript-scroller:focus-visible {
+  --transcript-thumb: hsl(var(--muted-foreground) / 0.3);
+  transition-duration: 150ms;
+}
+.transcript-scroller > * {
+  --transcript-thumb: transparent;
+}
+.transcript-scroller::-webkit-scrollbar {
+  width: 6px;
+  background: transparent;
+}
+.transcript-scroller::-webkit-scrollbar-track {
+  background: transparent;
+  margin-top: calc(var(--header-overlap, 0px) + 8px);
+  margin-bottom: 8px;
+}
+.transcript-scroller::-webkit-scrollbar-thumb {
+  border-radius: 9999px;
+  background-color: var(--transcript-thumb);
+}
+.transcript-scroller::-webkit-scrollbar-button {
+  display: none;
+}
+@supports not selector(::-webkit-scrollbar) {
+  .transcript-scroller {
+    scrollbar-width: thin;
+    scrollbar-color: var(--transcript-thumb) transparent;
+  }
+}
+/* Docked beside the session drawer (drawer-shell.tsx sets data-docked), the
+   drawer's card stands 8px in from the drawer's own edge. The transcript reaches
+   6px into that gutter, above the drawer, so its pill sits 2px off the card.
+   The composer footer, which overlays the transcript, is lifted above it again;
+   the scroller's matching left padding keeps the messages centred over the
+   composer. The drawer's resize handle keeps the gutter's inner 6px, around the
+   card's edge. Below 768px the drawer is a full-width overlay and nothing moves. */
+@container (min-width: 768px) {
+  .file-preview-container:has(> .tray-drawer-floating[data-docked]:not(.hidden)) > [data-transcript-host] > div:has(> .transcript-scroller) {
+    margin-right: -6px;
+    z-index: 31;
+  }
+  .file-preview-container:has(> .tray-drawer-floating[data-docked]:not(.hidden)) > [data-transcript-host] > [data-composer-footer] {
+    z-index: 32;
+  }
+  .file-preview-container:has(> .tray-drawer-floating[data-docked]:not(.hidden)) > [data-transcript-host] > div > .transcript-scroller {
+    padding-left: 6px;
+  }
+}
+
 /* The file drawer's tab strip. It scrolls horizontally so a trackpad swipe, a
    touch drag and the browser's focus reveal work natively, but a scrollbar
    drawn under the tabs would sit a second, competing affordance next to the

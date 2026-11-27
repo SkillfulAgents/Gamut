@@ -1036,7 +1036,7 @@ export function MessageList({ sessionId, agentSlug, pendingUserMessages, pending
       {/* eslint-disable jsx-a11y/no-noninteractive-tabindex */}
       {/* eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions, jsx-a11y/no-noninteractive-tabindex */}
       <div
-        className="overflow-y-auto overscroll-contain h-full"
+        className="transcript-scroller overflow-y-auto overscroll-contain h-full"
         style={{ overflowAnchor: 'none' }}
         ref={scrollRef}
         data-transcript-scroller
