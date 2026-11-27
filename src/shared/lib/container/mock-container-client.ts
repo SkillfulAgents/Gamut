@@ -2623,6 +2623,13 @@ export class MockContainerClient extends EventEmitter implements ContainerClient
       'src/index.ts\nsrc/utils.ts\nsrc/types.ts',
       'I found 3 TypeScript files.'
     )],
+    // As the container's browser_frame answers (agent-container/src/tools/browser.ts).
+    ['select frame', new ToolUseScenario(
+      'mcp__browser__browser_frame',
+      { target: '@e18' },
+      'Selected frame @e18 — https://js.stripe.com/v3/elements-inner-card.html?…. browser_snapshot, browser_read, browser_eval and browser_wait now act inside it; browser_frame("main") returns to the page.',
+      'I selected the card payment frame.'
+    )],
     // Mirrors the real formatter output (agent-container/src/tools/web/format-results.ts):
     // Links JSON contract line (title/url/published, optional favicon), then the numbered list.
     ['search web', new ToolUseScenario(

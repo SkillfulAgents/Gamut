@@ -655,7 +655,7 @@ const browserEvalTool = tool(
 
 - A single expression returns its value (e.g. document.title). A multi-line/statement body runs in a fresh scope — use \`return\` to produce a value (top-level return and await are supported; const/let won't collide across calls). Bare function expressions are auto-invoked.
 - Return JSON-serializable data — for structured results, end with JSON.stringify(...).
-- Runs in the top frame, or in the frame last selected with browser_run({"args": ["frame", "<iframe selector or @ref>"]}) — {"args": ["frame", "main"]} returns to the top. Fields inside payment iframes (e.g. Stripe) normally have refs in browser_snapshot: use those (browser_click / browser_fill / browser_type).
+- Runs in the page, or inside the frame selected with browser_frame (cross-origin frames included); browser_frame("main") returns to the page. Fields inside payment iframes (e.g. Stripe) normally have refs in browser_snapshot: use those (browser_click / browser_fill / browser_type).
 - Output is capped at ~8000 chars — query only the fields you need instead of dumping HTML.`,
   {
     script: z.string().describe('JavaScript to evaluate. An expression (document.title) returns its value; a statement body should use return, e.g. "const n = document.querySelectorAll(\'a\').length; return n;"'),
@@ -678,6 +678,34 @@ const browserEvalTool = tool(
     return {
       content: [{ type: 'text' as const, text }],
     }
+  }
+)
+
+const browserFrameTool = tool(
+  'browser_frame',
+  `Select an iframe of the page — cross-origin ones included (payment forms, embedded widgets, editors) — so that browser_snapshot, browser_read, browser_eval, browser_wait and browser_run's selector commands act inside it. Snapshots and reads then start with a [frame] line naming it. target "main" returns to the page. Without a target, lists the page's frames with their refs and origins.
+
+Refs from browser_snapshot work in any frame without selecting it: browser_click, browser_fill and browser_type on a payment field's ref need no browser_frame. Select a frame for what refs do not reach: a script, a wait for a selector, the frame's text.`,
+  {
+    target: z
+      .string()
+      .optional()
+      .describe('The frame: the ref of its Iframe line in browser_snapshot (e.g. "@e12") or a CSS selector for the <iframe> (e.g. \'iframe[title="Secure card payment input frame"]\'); "main" returns to the page; omit to list the frames'),
+  },
+  async (args) => {
+    const result = await browserFetch('frame', args.target === undefined ? {} : { target: args.target })
+    if (!result.success) return errorResult(result.error!)
+    const data = result.data as Record<string, unknown>
+    let text: string
+    if (typeof data.frames === 'string') {
+      text = data.frames
+    } else if (data.main === true) {
+      text = `Back on the page${typeof data.url === 'string' && data.url ? `: ${data.url}` : ''}. browser_snapshot, browser_read, browser_eval and browser_wait act on the page again.`
+    } else {
+      const where = typeof data.url === 'string' ? ` — ${data.url}${typeof data.title === 'string' && data.title ? ` · ${JSON.stringify(data.title)}` : ''}` : ''
+      text = `Selected frame ${args.target}${where}. browser_snapshot, browser_read, browser_eval and browser_wait now act inside it; browser_frame("main") returns to the page.`
+    }
+    return { content: [{ type: 'text' as const, text }] }
   }
 )
 
@@ -705,7 +733,7 @@ Available commands:
 - find role/text/label/placeholder/alt/title/testid <query> <action> — Semantic locators
 - back / forward / reload — Navigation
 - tab / tab new [--label <name>] [url] / tab <id|label> / tab close [<id|label>] — Tab management. Tabs have STABLE string ids like t1, t2 (shown by "tab"); bare integers are rejected
-- frame <selector|@ref> / frame main — Select an iframe (eval and selector commands then act inside it) / return to the top frame
+- frame <selector|@ref> / frame main — Select an iframe / return to the page (the browser_frame tool does the same and says what it selected)
 - dialog accept/dismiss — Handle dialogs
 - set viewport/device/geo/offline/headers/media — Browser settings
 - cookies / cookies set/clear — Cookie management
@@ -866,7 +894,7 @@ const browserReadTool = tool(
 - No refs: to act on something you read, take browser_snapshot (scope it to the region). For text next to controls — form validation errors, table rows with buttons — browser_snapshot(fullText) is the better fit.
 - To count, total or group many items (labels across 100 rows, prices across a grid), compute it with browser_eval over the DOM rather than tallying the read by hand.
 - A dialog or banner open on top of the page is named under the status line; iframes the read did not enter are listed at the end with how much of the viewport each covers.
-- The top document only: text inside iframes (embedded widgets, payment frames) is not included. Link targets are not included — use browser_snapshot(includeUrls) for those.`,
+- The page's own document: text inside iframes (embedded widgets, payment frames) is not included — browser_frame selects a frame, and browser_read then reads that frame's text. Link targets are not included — use browser_snapshot(includeUrls) for those.`,
   {
     outline: z
       .boolean()
@@ -929,6 +957,7 @@ The recording has no Cookie or Set-Cookie headers and none of the headers the br
     browserDownloadTool,
     browserTypeTool,
     browserEvalTool,
+    browserFrameTool,
     browserRunTool,
     browserGetStateTool,
     browserCaptureTrafficTool,

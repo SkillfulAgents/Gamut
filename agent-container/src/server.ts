@@ -824,7 +824,8 @@ import { classifyWaitTarget, WAIT_PAGE_PROBE_SCRIPT, parseWaitPageProbe } from '
 /** Budget for the page probe around a wait — independent of the exec ceiling. */
 const WAIT_PAGE_PROBE_TIMEOUT_MS = 3000;
 import { resolveCommittedValue } from './field-value-readback';
-import { topFrameScript, ranInFrame, stepOutOfFrame, frameSelectionOf } from './top-frame-probe';
+import { topFrameScript, ranInFrame, stepOutOfFrame, atTopFrame, frameSelectionOf } from './top-frame-probe';
+import { frameInventory, formatFrameInventory, formatFrameLine, frameUrlShown, parseFrameInfo, FRAME_INFO_SCRIPT, type SelectedFrame } from './frame-inventory';
 import { capBrowserOutput, redactCdpUrls, describeExecFailure, commandWarnings, cliJsonError, extractScreenshotPath, navigationNetError, BROWSER_EXEC_TIMEOUT_MS, MAX_BROWSER_OUTPUT_CHARS, MAX_SNAPSHOT_RAW_CHARS, MAX_BROWSER_ERROR_CHARS } from './browser-output';
 import { capSnapshot, capReadText, compactWithText, countRefs, formatIframePlaceholders, formatTextFooter, THIN_TREE_REFS } from './snapshot-format';
 import { observerScript, parseObservation, EMPTY_OBSERVATION, PREVIEW_CHARS, THIN_TREE_PREVIEW_CHARS, type PageObservation } from './page-observer';
@@ -1001,6 +1002,20 @@ async function observeUrlDigest(s: BrowserSession): Promise<UrlDigest | null> {
   const r = await execBrowser(['get', 'url'], s);
   if (r.exitCode !== 0 || !r.stdout.trim()) return null;
   return s.urls.observe(await addressBarUrl(s, r.stdout.trim()));
+}
+
+/**
+ * The frame the agent selected, read inside it: its address and title. Null
+ * when none is selected; a remembered selection the CLI has since dropped (a
+ * navigation, a tab change, the frame removed) is forgotten here.
+ */
+async function selectedFrame(s: BrowserSession): Promise<SelectedFrame | null> {
+  if (!s.frame) return null;
+  const r = await execBrowser(['eval', FRAME_INFO_SCRIPT], s);
+  if (r.exitCode !== 0) return null;
+  const frame = parseFrameInfo(r.stdout, s.frame);
+  if (!frame && r.stdout.trim() === 'null') s.frame = null;
+  return frame;
 }
 
 /** Run a page-observer script in the session's page (its top frame); null when the page cannot be read. */
@@ -2128,15 +2143,22 @@ app.post('/browser/snapshot', async (c) => {
     // page and would read as everything else having been removed.
     if (!body.scope && probe.url) s.trees.set(probe.url, result.stdout, 'snapshot', Date.now(), probe.docStart);
 
-    const header = formatStatusLine(probe, refCount, { waitedMs });
+    // With a frame selected the tree is that frame's (the CLI's snapshot
+    // follows the selection): the page line says where the page is, the frame
+    // line where the tree is from, and the page's text footer and frame
+    // placeholders, which describe the page, are left out.
+    const frame = await selectedFrame(s);
+    const header = frame
+      ? `${formatStatusLine(probe, null, { waitedMs })}\n${formatFrameLine(frame, refCount)}`
+      : formatStatusLine(probe, refCount, { waitedMs });
     return c.json({
       snapshot:
         (header ? `${header}\n\n` : '') +
-        capSnapshot(tree, Boolean(body.scope), probe.top.find(t => t.kind === 'dialog' || t.kind === 'alertdialog')) +
-        formatTextFooter(probe, { fullText, scoped: Boolean(body.scope), previewChars }) +
-        formatIframePlaceholders(iframes, tree),
+        capSnapshot(tree, Boolean(body.scope), frame ? undefined : probe.top.find(t => t.kind === 'dialog' || t.kind === 'alertdialog')) +
+        (frame ? '' : formatTextFooter(probe, { fullText, scoped: Boolean(body.scope), previewChars }) + formatIframePlaceholders(iframes, tree)),
       iframes,
       page: { ...probe, preview: probe.preview.slice(0, previewChars) },
+      ...(frame && { frame }),
       tabCount: s.tabCount,
     });
   } catch (error: any) {
@@ -2485,8 +2507,12 @@ app.post('/browser/read', async (c) => {
     if (probe.url) s.urls.observe(probe.url);
 
     // The page's whole text comes back as one JSON string: past the default
-    // exec cap it would be cut mid-string and unparseable.
-    const raw = await probeTopFrame(s, readerScript(), { outputCap: MAX_SNAPSHOT_RAW_CHARS });
+    // exec cap it would be cut mid-string and unparseable. With a frame
+    // selected (browser_frame) the text is that frame's: the reader runs in it.
+    const frame = await selectedFrame(s);
+    const raw = frame
+      ? await execBrowser(['eval', readerScript()], s, { outputCap: MAX_SNAPSHOT_RAW_CHARS })
+      : await probeTopFrame(s, readerScript(), { outputCap: MAX_SNAPSHOT_RAW_CHARS });
     const read = raw.exitCode === 0 ? parseReadResult(raw.stdout) : null;
     if (!read) {
       // No page to answer: the session's tab was closed under it.
@@ -2509,14 +2535,15 @@ app.post('/browser/read', async (c) => {
     } else {
       content = text;
       // Nothing visible is an observation too — not an empty result to read as "no data".
-      if (!content) note = `The reader found no visible text on the page${probe.textChars > 0 ? `; the document's innerText has ${probe.textChars.toLocaleString('en-US')} chars (browser_snapshot with fullText:true shows text beside refs)` : ''}.`;
+      if (!content && frame) note = 'The reader found no visible text in the selected frame.';
+      else if (!content) note = `The reader found no visible text on the page${probe.textChars > 0 ? `; the document's innerText has ${probe.textChars.toLocaleString('en-US')} chars (browser_snapshot with fullText:true shows text beside refs)` : ''}.`;
     }
 
     // A dialog or banner on top reads like the page's own text; name it.
     const onTop = probe.top.length > 0
       ? `\nOpen on top of the page: ${probe.top.map(t => `${t.kind}${t.name ? ` ${JSON.stringify(t.name)}` : ''}`).join(', ')}`
       : '';
-    const header = formatStatusLine(probe, null, { waitedMs }) + (formatStatusLine(probe, null) ? onTop : '');
+    const header = formatStatusLine(probe, null, { waitedMs }) + (formatStatusLine(probe, null) ? onTop : '') + (frame ? `\n${formatFrameLine(frame, null)}` : '');
     return c.json({
       success: true,
       text: (header ? `${header}\n\n` : '') + (content ? capReadText(content, { collectTruncated: read.truncated && !body.outline && !body.section }) : '') + (note ? `${content ? '\n\n' : ''}${note}` : '') + formatUnreadFrames(read.frames),
@@ -2915,6 +2942,94 @@ app.post('/browser/eval', async (c) => {
   }
 });
 
+/**
+ * The page's frames, for browser_frame without a target: the top frame's
+ * observer lists the visible iframes, and the page's tree gives each the ref
+ * of its `Iframe` line. Read on the top frame whatever frame is selected.
+ */
+async function pageFrames(s: BrowserSession): Promise<string> {
+  // Held while the document loads, like a snapshot: right after an open, a
+  // page that mounts its frames late lists them before the tree has them.
+  const { obs: observed } = await waitForLoaded(async () => {
+    const out = await observePage(s, observerScript());
+    return out === null ? null : parseObservation(out);
+  });
+  const obs = observed ?? EMPTY_OBSERVATION;
+  const run = (args: string[]) => execBrowser(args, s, { withinFrameStep: true, timeoutMs: TREE_READ_TIMEOUT_MS, outputCap: MAX_SNAPSHOT_RAW_CHARS });
+  const readTree = async (): Promise<string> => {
+    const tree = s.frame
+      ? await atTopFrame(s, run, () => run(['snapshot', '-i', '-c']))
+      : await readSnapshot(s, ['snapshot', '-i', '-c'], { timeoutMs: TREE_READ_TIMEOUT_MS, outputCap: MAX_SNAPSHOT_RAW_CHARS });
+    return tree.exitCode === 0 ? tree.stdout : '';
+  };
+  // A frame is in the DOM (the observer lists it) before the tree has its
+  // line: a page that mounts its frames by script (Stripe) showed none in the
+  // tree right after load and both 3 s later. Read again while a named frame
+  // has no line yet, a few times.
+  let entries = frameInventory(obs.iframes, await readTree());
+  const unlisted = (): boolean => entries.some(e => e.title && !e.ref && obs.iframes.filter(f => f.title.trim() === e.title).length === 1);
+  for (let attempt = 0; attempt < FRAME_TREE_RETRIES && unlisted(); attempt++) {
+    await sleep(FRAME_TREE_RETRY_MS);
+    entries = frameInventory(obs.iframes, await readTree());
+  }
+  return formatFrameInventory(entries, s.frame);
+}
+
+/** How many more tree reads, how far apart, while a listed frame has no tree line yet. */
+const FRAME_TREE_RETRIES = 3;
+const FRAME_TREE_RETRY_MS = 800;
+
+// POST /browser/frame - Select an iframe (by ref or selector), go back to the page, or list the frames
+app.post('/browser/frame', async (c) => {
+  try {
+    const body = await c.req.json<{ sessionId: string; target?: string }>();
+    if (!body.sessionId) {
+      return c.json({ error: 'sessionId is required' }, 400);
+    }
+    const s = browserSessionOf(body.sessionId);
+    if (!s) {
+      return c.json({ error: noBrowserOpen() }, 400);
+    }
+    const target = typeof body.target === 'string' ? body.target.trim() : '';
+    if (!target) {
+      // Forget a selection the CLI has dropped before saying which is selected.
+      await selectedFrame(s);
+      return c.json({ success: true, frames: await pageFrames(s) });
+    }
+    if (target === 'main' || target === 'top') {
+      const r = await execBrowser(['frame', 'main'], s);
+      if (r.exitCode !== 0) return c.json({ error: r.stdout, success: false }, 500);
+      if (s.frame !== null) s.trees.reset();
+      s.frame = null;
+      const page = await observeNow(s);
+      notifyBrowserAction();
+      return c.json({ success: true, main: true, url: page.url, title: page.title });
+    }
+    let r = await execBrowser(['frame', target], s);
+    if (r.exitCode !== 0 && /^@?e\d+$/.test(target) && /Unknown ref/.test(r.stdout)) {
+      // A snapshot inside a frame replaced the CLI's refs with that frame's:
+      // the page's refs (its Iframe lines among them) come back with a read
+      // of the page. Read it there, then select again.
+      await execBrowser(['frame', 'main'], s);
+      s.frame = null;
+      await readSnapshot(s, ['snapshot', '-i', '-c'], { timeoutMs: TREE_READ_TIMEOUT_MS, outputCap: MAX_SNAPSHOT_RAW_CHARS });
+      r = await execBrowser(['frame', target], s);
+    }
+    if (r.exitCode !== 0) {
+      // What the page has to select instead: facts, not a guess at which.
+      return c.json({ error: `${r.stdout}\n${await pageFrames(s)}`, success: false }, 500);
+    }
+    if (s.frame !== target) s.trees.reset();
+    s.frame = target;
+    const frame = await selectedFrame(s);
+    notifyBrowserAction();
+    return c.json({ success: true, target, ...(frame && { url: frameUrlShown(frame.url), title: frame.title }) });
+  } catch (error: any) {
+    console.error('[Browser] Error selecting frame:', error);
+    return c.json({ error: error.message || 'Failed to select frame' }, 500);
+  }
+});
+
 // POST /browser/run - Generic catch-all for any agent-browser command
 app.post('/browser/run', async (c) => {
   try {
@@ -2961,8 +3076,11 @@ app.post('/browser/run', async (c) => {
       // A navigation or a tab change leaves the CLI on the top frame; a
       // `frame` command (alone or in a batch) selects the agent's frame.
       const selection = frameSelectionOf(commands);
-      if (selection !== undefined) s.frame = selection;
-      else if (navigates) s.frame = null;
+      if (selection !== undefined) {
+        // Another frame's tree: the baseline was the frame (or page) left.
+        if (selection !== s.frame) s.trees.reset();
+        s.frame = selection;
+      } else if (navigates) s.frame = null;
     }
     // A navigation Chrome answered with its own error page still happened:
     // `tab new <dead url>` leaves a new tab in front. The error stands, and

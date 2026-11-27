@@ -287,7 +287,7 @@ export function formatUnreadFrames(frames: ReadFrame[]): string {
     return `${label}${f.host ? ` (${f.host})` : ''} · covers ${pct < 1 ? '<1' : pct}% of the viewport`
   })
   const more = frames.filter(f => f.cover > 0).length - shown.length
-  return `\n\nIframes on the page, not included above (browser_snapshot reads into them): ${items.join('; ')}${more > 0 ? `; … ${more} more` : ''}`
+  return `\n\nIframes on the page, not included above (browser_snapshot reads into them; browser_frame selects one, and browser_read then reads it): ${items.join('; ')}${more > 0 ? `; … ${more} more` : ''}`
 }
 
 /** A section longer than this comes back as its start plus its sub-headings. */

@@ -286,6 +286,26 @@ post_any /browser/eval "{$S,\"script\":\"location.href\"}"
 assert_contains "a ref-selected frame is still selected after an in-frame snapshot" ".output" '8766/inner.html'
 post_any /browser/run "{$S,\"args\":[\"frame\",\"main\"]}"
 
+# browser_frame: the page's frames with their refs, a selection the results name, and back.
+post_any /browser/frame "{$S}"
+assert_contains "browser_frame lists the cross-origin frame" ".frames" '"payframe" (127.0.0.1:8766, cross-origin) — browser_frame("@e'
+FRAME_REF=$(jq -r '.frames' < "$RESP_FILE" | grep -oE 'browser_frame\("@e[0-9]+"\)' | head -1 | grep -oE 'e[0-9]+')
+post_any /browser/frame "{$S,\"target\":\"@$FRAME_REF\"}"
+assert_contains "browser_frame selects it by ref" ".url" '8766/inner.html'
+post /browser/snapshot "{$S,\"interactive\":true,\"compact\":true}"
+assert_contains "the snapshot names the selected frame" ".snapshot" '[frame] http://127.0.0.1:8766/inner.html · "Inner frame"'
+assert_contains "the page line is still the top page's" ".snapshot" '[page] http://127.0.0.1:8765/frame.html'
+assert_contains "the tree is the frame's" ".snapshot" 'textbox "Card'
+post_any /browser/read "{$S}"
+assert_contains "browser_read reads the selected frame" ".text" 'Card'
+assert_not_contains "browser_read leaves the page's own text out" ".text" '# Top'
+post_any /browser/frame "{$S,\"target\":\"main\"}"
+assert_json "browser_frame main goes back" ".main" "true"
+post /browser/snapshot "{$S,\"interactive\":true,\"compact\":true}"
+assert_not_contains "no frame line once back on the page" ".snapshot" '[frame]'
+post_any /browser/frame "{$S,\"target\":\"#no-such-frame\"}"
+assert_contains "an unknown frame is answered with the page's frames" ".error" 'Frames on the page'
+
 post /browser/close "{$S}"
 assert_json "close" ".success" "true"
 

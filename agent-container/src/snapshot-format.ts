@@ -104,7 +104,7 @@ export function formatIframePlaceholders(iframes: IframeInfo[], tree = ''): stri
     const origin = f.sameOrigin ? '' : ' · cross-origin'
     return `  - iframe ${label}(${f.host})${origin}`
   })
-  return `\n\nFrames on this page whose contents are not in this tree:\n${lines.join('\n')}`
+  return `\n\nFrames on this page whose contents are not in this tree (browser_frame lists them with their refs, and selects one):\n${lines.join('\n')}`
 }
 
 /**

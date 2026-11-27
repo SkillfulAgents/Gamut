@@ -72,7 +72,7 @@ export interface ExecFailure {
  * cause the exec layer can actually vouch for.
  */
 export function describeExecFailure(err: ExecFailure, verb: string, elapsedMs: number): string {
-  const detail = [err.stdout?.trim(), withoutInstanceNotices(err.stderr ?? '').trim()].filter(Boolean).join('\n')
+  const detail = withoutCliAdvice([err.stdout?.trim(), withoutInstanceNotices(err.stderr ?? '').trim()].filter(Boolean).join('\n'))
   const tail = detail ? `\n${detail}` : ''
   const ms = Math.max(0, Math.round(elapsedMs))
   // Stopping the CLI client says nothing about the page: an eval it started
@@ -132,6 +132,19 @@ export function commandWarnings(stderr: string): string[] {
     else if (warnings.length > 0) warnings[warnings.length - 1] += `\n${line}`
   }
   return warnings
+}
+
+/**
+ * Advice the CLI appends to an observation and the harness does not pass on.
+ * A ref click whose point would land outside the element's frame (0.44+,
+ * click_point.rs) ends "Open the frame's own URL to interact with it": on a
+ * payment or sign-in frame that is the wrong move (the frame's page alone
+ * has no session or parent), and the observation before it stands alone.
+ */
+const CLI_ADVICE = / Open (?:the|that) frame's own URL to interact with it\./g
+
+export function withoutCliAdvice(text: string): string {
+  return text.replace(CLI_ADVICE, '')
 }
 
 /**

@@ -1,6 +1,7 @@
 import { defineToolRenderer } from '../renderer-types'
 import {
   BookOpen,
+  Frame,
   Braces,
   Download,
   Network,
@@ -18,7 +19,7 @@ import {
   Upload,
 } from 'lucide-react'
 import {
-  browserOpenDef, browserCloseDef, browserSnapshotDef, browserReadDef, browserCaptureTrafficDef,
+  browserOpenDef, browserCloseDef, browserSnapshotDef, browserReadDef, browserCaptureTrafficDef, browserFrameDef,
   browserClickDef, browserFillDef, browserScrollDef,
   browserWaitDef, browserPressDef, browserTypeDef, browserScreenshotDef,
   browserSelectDef, browserHoverDef, browserDownloadDef, browserEvalDef, browserRunDef,
@@ -36,6 +37,9 @@ export const browserSnapshotRenderer = defineToolRenderer(browserSnapshotDef, {
 })
 export const browserReadRenderer = defineToolRenderer(browserReadDef, {
   icon: BookOpen,
+})
+export const browserFrameRenderer = defineToolRenderer(browserFrameDef, {
+  icon: Frame,
 })
 export const browserCaptureTrafficRenderer = defineToolRenderer(browserCaptureTrafficDef, {
   icon: Network,

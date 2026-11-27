@@ -93,9 +93,9 @@ describe('formatUnreadFrames', () => {
       { name: '', host: 'ads.example.net', cover: 0.04 },
       { name: 'Human verification challenge', host: 'captcha.px-cdn.net', cover: 1 },
       { name: 'hidden', host: 'x.com', cover: 0 },
-    ])).toBe('\n\nIframes on the page, not included above (browser_snapshot reads into them): "Human verification challenge" (captcha.px-cdn.net) · covers 100% of the viewport; unnamed (ads.example.net) · covers 4% of the viewport')
+    ])).toBe('\n\nIframes on the page, not included above (browser_snapshot reads into them; browser_frame selects one, and browser_read then reads it): "Human verification challenge" (captcha.px-cdn.net) · covers 100% of the viewport; unnamed (ads.example.net) · covers 4% of the viewport')
     expect(formatUnreadFrames([])).toBe('')
-    expect(formatUnreadFrames([{ name: 'tiny', host: '', cover: 0.001 }])).toBe('\n\nIframes on the page, not included above (browser_snapshot reads into them): "tiny" · covers <1% of the viewport')
+    expect(formatUnreadFrames([{ name: 'tiny', host: '', cover: 0.001 }])).toBe('\n\nIframes on the page, not included above (browser_snapshot reads into them; browser_frame selects one, and browser_read then reads it): "tiny" · covers <1% of the viewport')
   })
 })
 

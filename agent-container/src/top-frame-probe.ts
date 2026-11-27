@@ -55,20 +55,33 @@ type Run = (args: string[]) => Promise<{ stdout: string; exitCode: number }>
 
 /**
  * Run `script` on the top frame while the agent has a frame selected: step
- * out, read, and select the agent's frame again, holding the session's other
- * commands (`frameStep`, which execBrowser waits for) so none of them runs
- * on the top frame meanwhile. When the agent's frame cannot be selected
+ * out, read, and select the agent's frame again (atTopFrame).
+ */
+export function stepOutOfFrame(s: ProbeSession, script: string, run: Run): Promise<{ stdout: string; exitCode: number }> {
+  return atTopFrame(s, run, () => run(['eval', topFrameScript(script)]))
+}
+
+/**
+ * Do `work` on the top frame while the agent has a frame selected: step out
+ * (`frame main`), work, and select the agent's frame again, holding the
+ * session's other commands (`frameStep`, which execBrowser waits for) so
+ * none of them runs on the top frame meanwhile. When stepping out fails, its
+ * answer stands in for the work's. When the agent's frame cannot be selected
  * again (it went away), the session is left on the top frame and `frame` is
  * cleared — what the CLI does itself when a frame goes.
  */
-export async function stepOutOfFrame(s: ProbeSession, script: string, run: Run): Promise<{ stdout: string; exitCode: number }> {
+export async function atTopFrame<T extends { stdout: string; exitCode: number }>(
+  s: ProbeSession,
+  run: Run,
+  work: () => Promise<T>,
+): Promise<T | { stdout: string; exitCode: number }> {
   while (s.frameStep) await s.frameStep
   let release = () => {}
   s.frameStep = new Promise<void>((resolve) => { release = resolve })
   try {
     const out = await run(['frame', 'main'])
     if (out.exitCode !== 0) return out
-    const read = await run(['eval', topFrameScript(script)])
+    const read = await work()
     if (s.frame) {
       let back = await run(['frame', s.frame])
       // A snapshot taken inside the frame replaced the CLI's ref table with

@@ -525,6 +525,24 @@ describe('SUP-1265 tools', () => {
       .toBe('Saved 3 requests recorded over 5s to /workspace/captures/x.har.')
   })
 
+  it('browser_frame lists the frames, says what it selected, and says when it is back on the page', async () => {
+    const bodies: Array<Record<string, unknown>> = []
+    let answer: unknown = { success: true, frames: 'Frames on the page (1):\n- "Pay" (js.stripe.com, cross-origin) — browser_frame("@e12")' }
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body)))
+      return json(answer)
+    }))
+    expect((await toolNamed('browser_frame').handler({})).content[0].text).toBe('Frames on the page (1):\n- "Pay" (js.stripe.com, cross-origin) — browser_frame("@e12")')
+    expect(bodies[0]).not.toHaveProperty('target')
+    answer = { success: true, target: '@e12', url: 'https://js.stripe.com/v3/card.html', title: '' }
+    expect((await toolNamed('browser_frame').handler({ target: '@e12' })).content[0].text)
+      .toBe('Selected frame @e12 — https://js.stripe.com/v3/card.html. browser_snapshot, browser_read, browser_eval and browser_wait now act inside it; browser_frame("main") returns to the page.')
+    expect(bodies[1]).toMatchObject({ target: '@e12' })
+    answer = { success: true, main: true, url: 'https://shop.test/checkout', title: 'Checkout' }
+    expect((await toolNamed('browser_frame').handler({ target: 'main' })).content[0].text)
+      .toBe('Back on the page: https://shop.test/checkout. browser_snapshot, browser_read, browser_eval and browser_wait act on the page again.')
+  })
+
   it('browser_select says what a custom dropdown shows, since it has no value to read back', async () => {
     const bodies: Array<Record<string, unknown>> = []
     vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: RequestInit) => {
