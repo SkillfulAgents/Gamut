@@ -525,6 +525,26 @@ describe('SUP-1265 tools', () => {
       .toBe('Saved 3 requests recorded over 5s to /workspace/captures/x.har.')
   })
 
+  it('browser_select says what a custom dropdown shows, since it has no value to read back', async () => {
+    const bodies: Array<Record<string, unknown>> = []
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body)))
+      return json({ success: true, widget: true, shows: 'Pear', settleMs: 300 })
+    }))
+    expect((await toolNamed('browser_select').handler({ ref: '@e46', value: 'Pear', by: 'label' })).content[0].text)
+      .toBe('Selected "Pear" in @e46. It is not a native <select>, so it has no value to read back. It now shows "Pear".')
+    expect(bodies[0]).toMatchObject({ ref: '@e46', value: 'Pear', by: 'label' })
+    vi.stubGlobal('fetch', vi.fn(async () => json({ success: true, widget: true, selected: ['Cheese', 'Ham'], settleMs: 300 })))
+    expect((await toolNamed('browser_select').handler({ ref: '@e44', value: 'Cheese' })).content[0].text)
+      .toBe('Selected "Cheese" in @e44. It is not a native <select>, so it has no value to read back. Its selected options are now: "Cheese", "Ham".')
+  })
+
+  it('browser_select reports a select that loaded a new document without a read-back', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => json({ success: true, navigated: true, settleMs: 300, digest: { url: 'https://shop.test/?sort=old', navigated: true, firstObservation: false } })))
+    expect((await toolNamed('browser_select').handler({ ref: '@e14', value: 'Oldest' })).content[0].text)
+      .toBe('Selected "Oldest" in @e14; the page then loaded a new document, so the element\'s value was not read back.\nPage NAVIGATED — now at https://shop.test/?sort=old. Refs from previous snapshots are stale; take a fresh browser_snapshot before further ref actions.')
+  })
+
   it('browser_click says when it used the human-like path, and shows the tree changes', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => json({
       success: true, settleMs: 300, humanInput: true,
@@ -532,10 +552,10 @@ describe('SUP-1265 tools', () => {
       effect: { opened: [], closed: [], interactiveDelta: 2, stateChanged: true, announced: [], textChanged: false, textDelta: 0, focus: 'button "Menu"', focusChanged: true, focusValueChanged: false, focusValue: '', focusValueChars: 0 },
       treeDiff: {
         diff: {
-          added: [{ ref: 'e18', text: 'link "Menu A" [ref=e18]', name: 'Menu A', attrs: [], value: '', parent: null }],
+          added: [{ ref: 'e18', text: 'link "Menu A" [ref=e18]', shown: 'link "Menu A" [ref=e18]', hint: '', name: 'Menu A', attrs: [], value: '', parent: null }],
           returned: [],
           rerendered: [],
-          changed: [{ line: { ref: 'e7', text: 'button "Menu" [expanded=true, ref=e7]', name: 'Menu', attrs: ['expanded=true'], value: '', parent: null }, was: 'expanded: false → true' }],
+          changed: [{ line: { ref: 'e7', text: 'button "Menu" [expanded=true, ref=e7]', shown: 'button "Menu" [expanded=true, ref=e7]', hint: '', name: 'Menu', attrs: ['expanded=true'], value: '', parent: null }, was: 'expanded: false → true' }],
           removed: [],
         },
         baselineAgeMs: 3000,

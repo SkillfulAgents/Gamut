@@ -1,33 +1,60 @@
 /**
  * Commit verification for browser_select (browser-tools audit P0 #4).
  *
- * agent-browser's `select` returns "✓ Done" unconditionally: on custom
- * dropdown divs it silently no-ops, and on React-controlled native selects
- * the value can revert asynchronously after the success ack (probe P2:
- * 'Selected "US"' followed by value="" with 245 options). The fix is to read
- * the element's value back after a settle delay and judge whether anything
- * actually committed.
+ * Since agent-browser 0.44 `select` checks its target first: it refuses one
+ * that is not a <select> or a role=combobox/listbox element, a disabled one,
+ * and a value no option has or several have, each with a code (upstream
+ * #2687). On a combobox or listbox it opens the widget and clicks the
+ * matching role=option (#2592). On a native <select> it sets the option and
+ * dispatches `change`, and answers "✓ Done" whatever the page keeps: a
+ * React-controlled select can revert the value after the ack (probe P2:
+ * 'Selected "US"' followed by value="" with 245 options). So a native
+ * select's value is read back after a settle delay and judged. A combobox
+ * or listbox has no value of its own to read (a Radix trigger's `get value`
+ * is ""): there the CLI's answer and the action's effect are what is known.
  *
  * The read-back is `get value`, i.e. the option's VALUE, while the agent may
  * have asked by visible LABEL. When the requested label's option was already
  * selected, value-before equals value-after and neither equals the request —
  * which used to be reported as "did not commit" ("requested California,
- * element value is still CA"; mining theme 24). In that one case the route
+ * element value is still CA"; mining theme 24). In that case the route
  * reads the target's own option list with `get html @ref` — a second read
  * the CLI resolves against the same ref as the select and the value read —
  * and checks whether the option holding the read-back value carries the
- * requested label. No page script is involved: a page-wide search can be
- * satisfied by a sibling dropdown, focus can be redirected by an onfocus
- * handler, and elementFromPoint returns whichever control covers the
- * target — all three verified the wrong element in review.
+ * requested label. The same read tells a native select (it has <option>s)
+ * from a widget (it has none). No page script is involved: a page-wide
+ * search can be satisfied by a sibling dropdown, focus can be redirected by
+ * an onfocus handler, and elementFromPoint returns whichever control covers
+ * the target — all three verified the wrong element in review.
  */
 
 export const SELECT_COMMIT_SETTLE_MS = 300
 
+/**
+ * For a dropdown the CLI refuses as not a select, combobox or listbox (a
+ * div-built menu without those roles), or whose popup showed no options.
+ */
 export const CUSTOM_DROPDOWN_RECIPE =
-  'If this is a custom dropdown (not a native <select>), select-by-value cannot work. ' +
-  'Recipe: browser_click the trigger (its result lists the options that appeared, with refs), type into the popup\'s filter input if it has one, ' +
-  'click the option\'s ref, and check that click\'s result for the committed state.'
+  'For a dropdown without select/combobox/listbox roles: browser_click the trigger (its result lists the options that appeared, with refs), ' +
+  'type into the popup\'s filter input if it has one, click the option\'s ref, and check that click\'s result for the committed state.'
+
+/** The CLI's own advice for an ambiguous value, in browser_select's terms. */
+const CLI_BY_ADVICE = /Pass --by value to match option values or --by label to match visible labels\./
+const CLI_BY_VALUE_ADVICE = /pass --by value with the option value\./
+
+/**
+ * The agent's text for a select the CLI refused: its message, with the
+ * advice naming CLI flags put in the tool's terms, and the click recipe for
+ * a target that is no select, combobox or listbox.
+ */
+export function selectRefusalText(cliText: string): string {
+  const text = cliText
+    .replace(CLI_BY_ADVICE, 'Pass by: "value" to match option values or by: "label" to match visible labels.')
+    .replace(CLI_BY_VALUE_ADVICE, 'pass by: "value" with the option value.')
+  return /not_editable: select target is not a <select> or a role=combobox\/listbox element|no visible role=option elements were found/.test(text)
+    ? `${text}\n${CUSTOM_DROPDOWN_RECIPE}`
+    : text
+}
 
 export type SelectJudgement =
   | { ok: true; committed: string }
@@ -140,8 +167,8 @@ export function targetOptionMatches(options: SelectOption[], requested: string, 
 }
 
 /**
- * Judge whether a select committed, from the element's value read before and
- * after the select call (null = the read failed).
+ * Judge whether a native <select> committed, from the element's value read
+ * before and after the select call (null = the read failed).
  *
  * Selecting by visible label is supported by the CLI, so a successful commit
  * may land on a value different from the requested string — any post-select
@@ -163,7 +190,7 @@ export function judgeSelectCommit(
     return {
       ok: false,
       reason:
-        `select reported success but the element's value could not be read back afterwards, so the selection is unverified. ${CUSTOM_DROPDOWN_RECIPE}`,
+        `select reported success but the element's value could not be read back afterwards, so the selection is unverified.`,
     }
   }
   if (after === requested) {
@@ -180,6 +207,6 @@ export function judgeSelectCommit(
   return {
     ok: false,
     reason:
-      `select reported success but the element's value did not change (still "${after}"; requested "${requested}"). ${CUSTOM_DROPDOWN_RECIPE}`,
+      `select reported success but the element's value did not change (still "${after}"; requested "${requested}").`,
   }
 }

@@ -72,7 +72,7 @@ export interface ExecFailure {
  * cause the exec layer can actually vouch for.
  */
 export function describeExecFailure(err: ExecFailure, verb: string, elapsedMs: number): string {
-  const detail = [err.stdout?.trim(), err.stderr?.trim()].filter(Boolean).join('\n')
+  const detail = [err.stdout?.trim(), withoutInstanceNotices(err.stderr ?? '').trim()].filter(Boolean).join('\n')
   const tail = detail ? `\n${detail}` : ''
   const ms = Math.max(0, Math.round(elapsedMs))
   // Stopping the CLI client says nothing about the page: an eval it started
@@ -95,6 +95,45 @@ export function describeExecFailure(err: ExecFailure, verb: string, elapsedMs: n
   return `agent-browser ${verb} failed (exit ${code}) without output.`
 }
 
+// --- The CLI's stderr ------------------------------------------------------------
+
+/**
+ * Besides its errors, the CLI writes three kinds of line to stderr (0.44+):
+ * a notice per instance setting that differs from the running one, on an
+ * instance's first command (`⚠ pin-tab: false → true (--pin-tab), applied`),
+ * a lifecycle note (`[agent-browser] launched browser`), and the command's
+ * own warning about the page (`⚠ value_truncated: <input type="text">
+ * accepts at most 3 characters …`, `⚠ value snapped to the step: …`). The
+ * first two describe the instance the harness set up, not the page.
+ */
+const SETTING_NOTICE = /^⚠ [\w-]+: .* → .*, (?:applied|launched browser|relaunched browser|closed browser)$/
+const RELAUNCH_NOTICE = /^⚠ browser: relaunched \(--relaunch\)$/
+const LIFECYCLE_NOTE = /^\[agent-browser\] /
+
+function isInstanceNotice(line: string): boolean {
+  return SETTING_NOTICE.test(line) || RELAUNCH_NOTICE.test(line) || LIFECYCLE_NOTE.test(line)
+}
+
+/** stderr without the instance's setting notices and lifecycle notes. */
+export function withoutInstanceNotices(stderr: string): string {
+  return stripAnsi(stderr).split('\n').filter((line) => !isInstanceNotice(line.trim())).join('\n')
+}
+
+/**
+ * The CLI's warnings about a command that succeeded, without their `⚠`: each
+ * `⚠` line that is not an instance notice, with any lines that follow it.
+ */
+export function commandWarnings(stderr: string): string[] {
+  const warnings: string[] = []
+  for (const raw of withoutInstanceNotices(stderr).split('\n')) {
+    const line = raw.trimEnd()
+    if (!line.trim()) continue
+    if (line.startsWith('⚠')) warnings.push(line.replace(/^⚠\s*/, ''))
+    else if (warnings.length > 0) warnings[warnings.length - 1] += `\n${line}`
+  }
+  return warnings
+}
+
 /**
  * The Chrome net error of a navigation the CLI reported as failed
  * (`✗ Navigation failed: net::ERR_CONNECTION_REFUSED`), or null for any other
@@ -103,28 +142,6 @@ export function describeExecFailure(err: ExecFailure, verb: string, elapsedMs: n
 export function navigationNetError(stdout: string): string | null {
   const m = /Navigation failed: net::(ERR_[A-Z0-9_]+)/.exec(stdout)
   return m ? m[1] : null
-}
-
-// --- WebMCP notices ------------------------------------------------------------
-
-/**
- * agent-browser 0.36+ announces a page's WebMCP tools (site-registered tools,
- * `document.modelContext`) on whichever command runs after the tool list
- * changes — an `eval` included, which would break every observer read that
- * parses eval output as JSON. The container sets AGENT_BROWSER_NO_WEBMCP=1,
- * which turns the feature off; this strip is the backstop for a browser or
- * CLI that announces anyway. The block has fixed delimiters: a summary line,
- * the tools between nonce-tagged AGENT_BROWSER_PAGE_CONTENT markers, then a
- * usage hint and, for a long catalog, a "shortened" line (0.39.1 output.rs).
- */
-const WEBMCP_CHANGED_BLOCK =
-  /(^|\n)WebMCP tools changed: \d+\.[^\n]*\n--- AGENT_BROWSER_PAGE_CONTENT nonce=(\S+) [^\n]*---\n[\s\S]*?\n--- END_AGENT_BROWSER_PAGE_CONTENT nonce=\2 ---(?:\nFor a relevant tool, fetch its schema: [^\n]*)?(?:\nCatalog shortened; webmcp list --json retrieves all metadata\.)?(?=\n|$)/g
-const WEBMCP_STATUS_LINE =
-  /(^|\n)WebMCP (?:tools cleared; no page tools are currently available\.|state unavailable; do not reuse tools from an earlier response\.)(?=\n|$)/g
-
-export function stripWebMcpNotices(text: string): string {
-  if (!text.includes('WebMCP')) return text
-  return text.replace(WEBMCP_CHANGED_BLOCK, '$1').replace(WEBMCP_STATUS_LINE, '$1').replace(/\n{3,}/g, '\n\n').trim()
 }
 
 /**

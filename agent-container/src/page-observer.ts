@@ -237,10 +237,11 @@ export function observerScript(opts: ObserverOptions = {}): string {
     // document check alone is null for a sandboxed frame on the page's own
     // host, which used to be reported as cross-origin (mining theme 11).
     '.map(function(f){var host="";try{host=new URL(f.src).host}catch(e){}var same=false;try{same=!!f.contentDocument}catch(e){}' +
-    // title: the frame's accessible name as the tree prints it — aria-label, then aria-labelledby, then title.
+    // title: the frame's name as the tree prints it — aria-label, then aria-labelledby, then the title
+    // attribute, then (0.45+, upstream #2739) the name attribute.
     'if(!same){try{same=new URL(f.src||"",location.href).origin===new URL(location.href).origin}catch(e){}}' +
     'var nm=String(f.getAttribute("aria-label")||"");if(!nm){var lb=f.getAttribute("aria-labelledby");if(lb){nm=String(lb).split(/\\s+/).map(function(id){var le=document.getElementById(id);return le?String(le.innerText||le.textContent||""):""}).join(" ").replace(/\\s+/g," ").trim()}}' +
-    'if(!nm)nm=String(f.title||"");return{title:nm,host:host,sameOrigin:same}})}catch(e){}' +
+    'if(!nm)nm=String(f.title||"");if(!nm)nm=String(f.getAttribute("name")||"");return{title:nm,host:host,sameOrigin:same}})}catch(e){}' +
     // Interactive census, and the state of every visible control.
     // Focus inside a same-origin frame is the element in the frame.
     'var act=null;try{act=document.activeElement;for(var fg=0;act&&act.tagName==="IFRAME"&&fg<4;fg++){var ad=null;try{ad=act.contentDocument}catch(e){}if(!ad)break;act=ad.activeElement}}catch(e){}var actIx=-1;' +

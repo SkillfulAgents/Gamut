@@ -307,7 +307,9 @@ The result reports what the click changed: navigation, dialogs, announcements, a
 
 const browserFillTool = tool(
   'browser_fill',
-  `Fill an input field by its ref (e.g., @e2) with a value. Get refs from browser_snapshot.`,
+  `Fill an input field by its ref (e.g., @e2) with a value. Get refs from browser_snapshot.
+
+Date, time, color and range inputs are set directly from a value in the input's own format (2026-12-25, 14:30, #ff8800, 7); for a date or time input, the ref of any of its parts (the "Month" spinbutton) fills the whole input.`,
   {
     ref: z.string().describe('Input element ref from snapshot (e.g., "@e2")'),
     value: z.string().describe('The text to fill into the input'),
@@ -483,17 +485,40 @@ When no pixel has changed since the last screenshot of this tab (same full/viewp
 
 const browserSelectTool = tool(
   'browser_select',
-  `Select an option in a NATIVE <select> element by its ref, using the option's value or visible label. The committed value is verified by read-back and returned — if nothing committed, this errors instead of pretending.
+  `Select an option by the dropdown's ref, using the option's value or visible label. Works on a native <select> and on a custom dropdown with role=combobox or role=listbox (the trigger's ref): for a custom one the option is picked by opening it and clicking the matching role=option.
 
-Custom dropdowns (divs with role=combobox/listbox) will NOT work with this tool. For those: browser_click the trigger (its result lists the options that appeared, with refs), type into the popup's filter input if it has one, click the option's ref, and check the click's result for the committed state.`,
+A native <select>'s committed value is verified by read-back and returned — if nothing committed, this errors instead of pretending. A custom dropdown has no value to read: the result says what it shows afterwards. A dropdown without those roles is refused; for one, browser_click the trigger (its result lists the options that appeared, with refs), type into the popup's filter input if it has one, click the option's ref, and check the click's result for the committed state.`,
   {
-    ref: z.string().describe('Select element ref from snapshot (e.g., "@e3")'),
+    ref: z.string().describe('Ref of the <select>, or of the combobox/listbox, from the snapshot (e.g., "@e3")'),
     value: z.string().describe('The option value or visible label to select'),
+    by: z
+      .enum(['value', 'label'])
+      .optional()
+      .describe('Match only option values, or only visible labels. Needed when the text is one option\'s value and another\'s label (refused as ambiguous otherwise).'),
   },
   async (args) => {
-    const result = await browserFetch('select', { ref: args.ref, value: args.value })
+    const result = await browserFetch('select', { ref: args.ref, value: args.value, ...(args.by && { by: args.by }) })
     if (!result.success) return errorResult(result.error!)
     const data = result.data as Record<string, unknown> | undefined
+    if (data?.navigated === true) {
+      const digest = (data.digest as UrlDigest | undefined) ?? null
+      return {
+        content: [
+          { type: 'text' as const, text: `Selected "${args.value}" in ${args.ref}; the page then loaded a new document, so the element's value was not read back.${formatUrlDigest(digest)}` },
+        ],
+      }
+    }
+    if (data?.widget === true) {
+      const shows = typeof data.shows === 'string' ? ` It now shows "${data.shows}".` : ''
+      const selected = Array.isArray(data.selected) && data.selected.length > 0
+        ? ` Its selected options are now: ${data.selected.map(o => JSON.stringify(String(o))).join(', ')}.`
+        : ''
+      return {
+        content: [
+          { type: 'text' as const, text: `Selected "${args.value}" in ${args.ref}. It is not a native <select>, so it has no value to read back.${shows}${selected}${effectText(data, 'select', 300)}` },
+        ],
+      }
+    }
     const committed = data?.committedValue
     return {
       content: [
@@ -630,7 +655,7 @@ const browserEvalTool = tool(
 
 - A single expression returns its value (e.g. document.title). A multi-line/statement body runs in a fresh scope — use \`return\` to produce a value (top-level return and await are supported; const/let won't collide across calls). Bare function expressions are auto-invoked.
 - Return JSON-serializable data — for structured results, end with JSON.stringify(...).
-- TOP FRAME ONLY: elements inside cross-origin iframes (e.g. Stripe payment frames) are unreachable from JavaScript. Use their refs from browser_snapshot (browser_click / browser_fill / browser_type) instead.
+- Runs in the top frame, or in the frame last selected with browser_run({"args": ["frame", "<iframe selector or @ref>"]}) — {"args": ["frame", "main"]} returns to the top. Fields inside payment iframes (e.g. Stripe) normally have refs in browser_snapshot: use those (browser_click / browser_fill / browser_type).
 - Output is capped at ~8000 chars — query only the fields you need instead of dumping HTML.`,
   {
     script: z.string().describe('JavaScript to evaluate. An expression (document.title) returns its value; a statement body should use return, e.g. "const n = document.querySelectorAll(\'a\').length; return n;"'),
@@ -664,6 +689,8 @@ Provide EXACTLY ONE of (never include the "agent-browser" prefix):
 - args (PREFERRED whenever any argument contains spaces or quotes): pre-tokenized argv array. Each element reaches the CLI verbatim — no quoting or escaping rules to get wrong. Examples: {"args": ["type", "@e1", "chat isn't enough"]} · {"args": ["frame", "iframe[title=\\"Payment frame\\"]"]} · {"args": ["find", "role", "button", "click", "--name", "View demo"]}
 - command: a single command-line string, fine for simple commands like {"command": "get url"}. Shell-style quoting; when in doubt, use args.
 
+An argument that starts with "-" and is not an option of the command (a value such as "-5" or "--") goes after a "--" argument: {"args": ["fill", "@e1", "--", "-v"]}. Before it, the CLI reads it as an option.
+
 Available commands:
 - dblclick <ref> — Double-click element
 - focus <ref> — Focus element
@@ -678,7 +705,7 @@ Available commands:
 - find role/text/label/placeholder/alt/title/testid <query> <action> — Semantic locators
 - back / forward / reload — Navigation
 - tab / tab new [--label <name>] [url] / tab <id|label> / tab close [<id|label>] — Tab management. Tabs have STABLE string ids like t1, t2 (shown by "tab"); bare integers are rejected
-- frame <sel> / frame main — Switch frames
+- frame <selector|@ref> / frame main — Select an iframe (eval and selector commands then act inside it) / return to the top frame
 - dialog accept/dismiss — Handle dialogs
 - set viewport/device/geo/offline/headers/media — Browser settings
 - cookies / cookies set/clear — Cookie management

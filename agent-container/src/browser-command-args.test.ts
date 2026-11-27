@@ -25,6 +25,34 @@ describe('runCommandRefusal', () => {
     expect(runCommandRefusal(['batch', 'upload @e1 "/tmp/a b.png"'])).toMatch(/browser_upload/)
     expect(runCommandRefusal(['batch', 'open https://example.com', 'snapshot -i'])).toBeNull()
   })
+
+  it('refuses the CLI\'s download, which does not run over the sessions\' CDP connection (0.42+)', () => {
+    expect(runCommandRefusal(['download', '@e3', '/workspace/downloads/a.pdf'])).toMatch(/browser_download/)
+    expect(runCommandRefusal(['batch', 'download @e3 a.pdf'])).toMatch(/browser_download/)
+    expect(runCommandRefusal(['wait', '--download'])).toBeNull()
+  })
+
+  it('refuses options that choose another browser, instance or tab, anywhere before --', () => {
+    // The CLI reads global options anywhere and the last one wins: these would
+    // move the command off the session's own instance.
+    expect(runCommandRefusal(['--session', 'default', 'get', 'url'])).toMatch(/`--session` is an agent-browser option/)
+    expect(runCommandRefusal(['get', 'url', '--session', 's-other'])).toMatch(/--session/)
+    expect(runCommandRefusal(['open', 'https://x.test', '--cdp', 'ws://elsewhere'])).toMatch(/--cdp/)
+    expect(runCommandRefusal(['snapshot', '--no-pin-tab'])).toMatch(/--no-pin-tab/)
+    expect(runCommandRefusal(['--capture', 'flow', 'open', 'https://x.test'])).toMatch(/--capture/)
+    expect(runCommandRefusal(['--restore=checkout', 'open', 'https://x.test'])).toMatch(/--restore/)
+    expect(runCommandRefusal(['batch', '--session', 'x', 'snapshot -i'])).toMatch(/--session/)
+    expect(runCommandRefusal(['batch', 'open https://x.test --provider browserbase'])).toMatch(/--provider/)
+    expect(runCommandRefusal(['fill', '#q', '-p'])).toMatch(/put it after `--`/)
+  })
+
+  it('lets those words through as text after --, and leaves output options alone', () => {
+    expect(runCommandRefusal(['fill', '#q', '--', '--session'])).toBeNull()
+    expect(runCommandRefusal(['eval', 'document.title === "--session"'])).toBeNull()
+    expect(runCommandRefusal(['screenshot', '--full', '--annotate'])).toBeNull()
+    expect(runCommandRefusal(['cookies', '--json'])).toBeNull()
+    expect(runCommandRefusal(['snapshot', '-i', '-c', '-s', '#main'])).toBeNull()
+  })
 })
 
 describe('splitCommandArgs', () => {

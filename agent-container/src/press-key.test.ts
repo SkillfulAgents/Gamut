@@ -48,6 +48,17 @@ describe('validatePressKey', () => {
     expect(validatePressKey('Control+hello')).not.toBeNull()
   })
 
+  it('takes the modifier names the CLI reads, and names the right one for an alias it does not', () => {
+    // 0.45 interaction.rs key_modifier_bit: alt, ctrl/control, meta/cmd/command, shift (and Left/Right).
+    for (const combo of ['Alt+a', 'Ctrl+a', 'Meta+k', 'Cmd+Shift+z', 'Command+c', 'ShiftLeft+Tab', 'ControlRight+End']) {
+      expect(validatePressKey(combo), combo).toBeNull()
+    }
+    // "Option+a" would be pressed as one key named "Option+a", which types nothing.
+    expect(validatePressKey('Option+a')).toBe('"Option" is not a modifier name the browser reads; it is "Alt" there: press "Alt+a".')
+    expect(validatePressKey('Super+Shift+k')).toBe('"Super" is not a modifier name the browser reads; it is "Meta" there: press "Meta+Shift+k".')
+    expect(validatePressKey('Shift+Option+ArrowLeft')).toContain('press "Shift+Alt+ArrowLeft"')
+  })
+
   it('rejects empty input', () => {
     expect(validatePressKey('')).not.toBeNull()
     expect(validatePressKey('  ')).not.toBeNull()

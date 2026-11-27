@@ -147,18 +147,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/playwright-browsers
 # Playwright 1.64.1 preserves the existing Chromium 156.0.8078.4 (revision
 # 1248). Pin the installer so refreshing unrelated runtimes cannot move it.
-# The npm package ships the CLI for every platform (~100MB); its postinstall
-# links agent-browser straight to this machine's binary, so the others are
-# dead weight. Pruned only when the link is that direct one.
-RUN npm install -g agent-browser@0.41.2 && \
-    keep="$(readlink -f "$(command -v agent-browser)")" && \
-    case "$keep" in \
-      */agent-browser-linux-*) \
-        for f in "$(npm root -g)"/agent-browser/bin/agent-browser-*; do \
-          [ "$(readlink -f "$f")" = "$keep" ] || rm -f "$f"; \
-        done ;; \
-    esac && \
+# Since 0.43 npm installs only this platform's CLI (the optional dependency
+# @agent-browser/cli-linux-<arch>-gnu), and postinstall links the global
+# command straight to it as agent-browser/bin/agent-browser-linux-<arch>.
+# Fail the build if the command still points at the Node launcher: every CLI
+# call would then start Node before the binary.
+RUN npm install -g agent-browser@0.45.0 && \
     agent-browser --version && \
+    case "$(readlink -f "$(command -v agent-browser)")" in \
+      */agent-browser-linux-*) ;; \
+      *) echo "agent-browser is not linked to its native binary" >&2; exit 1 ;; \
+    esac && \
     npx --yes playwright@1.64.1 install chromium --only-shell && \
     chmod -R o+rx /opt/playwright-browsers && \
     rm -rf /root/.npm
@@ -332,11 +331,10 @@ ENV AGENT_BROWSER_DOWNLOAD_PATH=/workspace/downloads
 ENV AGENT_BROWSER_IDLE_TIMEOUT_MS=0
 # agent-browser 0.36+ enables WebMCP (site-registered tools) and announces
 # page tools in the output of whatever command runs next — an observer eval
-# included. Off until the harness supports it (SUP-1265 §9); execBrowser also
-# strips any announcement that gets through.
+# included. Off until the harness supports it (SUP-1265 §9).
 ENV AGENT_BROWSER_NO_WEBMCP=1
 # agent-browser 0.41.2+ checks the browser's version against Chrome's release
-# feed: a Browser.getVersion call after every command, plus a fetch of
+# feed: a Browser.getVersion call on each connection, plus a fetch of
 # chromereleases.googleblog.com on the first one. A browser behind stable gets
 # a warning ("run `agent-browser install`") on stderr, which reaches the agent
 # whenever that command fails. The Chromium here is pinned with the image
