@@ -87,7 +87,8 @@ Use the most specific tool:
 - `browser_type` for real keystrokes, append-only entry, payment iframes, OTP
   boxes, and controls that ignore `fill`;
 - `browser_press` for one key or key combination, not for typing prose;
-- `browser_select` for native `<select>` controls;
+- `browser_select` for `<select>` controls and custom dropdowns with
+  role=combobox or role=listbox;
 - `browser_hover` for hover menus and tooltips;
 - `browser_scroll` for page or container scrolling.
 
@@ -114,9 +115,11 @@ result reports navigation, when it says more changed than it shows, or when
 fresh refs are otherwise needed. Do not re-snapshot merely to confirm a
 successful action whose result already contains the confirmation.
 
-For custom comboboxes, click the trigger — its result lists the options that
-appeared, with refs — interact with the filter if present, and click the
-option's ref.
+`browser_select` also picks an option in a custom combobox or listbox (by its
+trigger's ref): it opens the widget and clicks the matching option, and the
+result says what the control shows afterwards. For a dropdown built without
+those roles, click the trigger — its result lists the options that appeared,
+with refs — interact with the filter if present, and click the option's ref.
 
 ## Tabs
 
@@ -226,9 +229,8 @@ Do not ask the user to paste credentials into chat. The browser profile retains
 successful sessions. Follow the system prompt's confirmation rules for
 submissions with financial, legal, destructive, or externally visible impact.
 
-Cross-origin iframe content is unavailable to `browser_eval`, but the snapshot
-normally merges frames — payment frames included — with working refs. Use those
-refs; for keystroke-driven fields, click the ref and use `browser_type`. A frame
+The snapshot normally merges frames — payment frames included — with working
+refs. Use those refs; for keystroke-driven fields, click the ref and use `browser_type`. A frame
 the tree could not read is listed under the snapshot.
 
 ## Uploads and Downloads
@@ -262,7 +264,9 @@ never copy secret values into source.
 
 ## JavaScript and Advanced Commands
 
-`browser_eval` runs in the top frame. Return `JSON.stringify(...)` for
+`browser_eval` runs in the top frame, or in the frame last selected with
+`browser_run(["frame", "<iframe selector or @ref>"])` (`frame main` returns to
+the top frame). Return `JSON.stringify(...)` for
 structured output when needed. Prefer normal browser tools for interaction;
 evaluation is useful for page-owned data or state that is difficult to access
 semantically.

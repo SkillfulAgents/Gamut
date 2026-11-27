@@ -61,6 +61,32 @@ describe('parseTreeRefs', () => {
     const withUrl = parseTreeRefs('- link "Top link" [ref=e6, url=https://a.com/x?y=1]')
     expect(withUrl.lines.get('e6')?.text).toBe('link "Top link" [ref=e6]')
   })
+
+  // Lines agent-browser 0.45.0 printed for a cart page (snapshot -i -c).
+  const HINTED = [
+    '- button [ref=e5] hint="data-testid:rm-mug; in:Price: $5 Blue mug Remove"',
+    '- button "Remove" [ref=e6] hint="in:Price: $5 Blue mug"',
+    '- textbox "Email " [ref=e4]: a@b.co',
+    '- textbox [ref=e2] hint="id:nolabel": x',
+    '- generic [ref=e9] hint="in:Row \\"one\\"" clickable [cursor:pointer]: Open',
+  ].join('\n')
+
+  it('reads a hint apart from the value, even when its row text holds a colon', () => {
+    const t = parseTreeRefs(HINTED)
+    expect(t.lines.get('e5')).toMatchObject({ value: '', hint: 'data-testid:rm-mug; in:Price: $5 Blue mug Remove', text: 'button [ref=e5]' })
+    expect(t.lines.get('e2')).toMatchObject({ value: 'x', hint: 'id:nolabel', text: 'textbox [ref=e2]: x', shown: 'textbox [ref=e2] hint="id:nolabel": x' })
+    expect(t.lines.get('e9')).toMatchObject({ value: 'Open', hint: 'in:Row "one"', text: 'generic [ref=e9] clickable [cursor:pointer]: Open' })
+    expect(t.lines.get('e4')).toMatchObject({ value: 'a@b.co', hint: '', shown: 'textbox "Email " [ref=e4]: a@b.co' })
+  })
+
+  it('does not count a hint that changed with its row as a change, and shows hints on the lines it lists', () => {
+    const renamed = HINTED.replace(/Price: \$5 Blue mug/g, 'Price: $6 Blue mug')
+    expect(treeDiffIsEmpty(diffTrees(parseTreeRefs(HINTED), parseTreeRefs(renamed)))).toBe(true)
+    const added = diffTrees(parseTreeRefs('- textbox "Email " [ref=e4]'), parseTreeRefs(HINTED))
+    const text = formatTreeDiff(added, { baselineAgeMs: 0, baselineSource: 'snapshot' })
+    expect(text).toContain('+ button [ref=e5] hint="data-testid:rm-mug; in:Price: $5 Blue mug Remove"')
+    expect(text).toContain('~ textbox "Email " [ref=e4]: a@b.co (value empty → "a@b.co")')
+  })
 })
 
 describe('diffTrees', () => {
@@ -337,6 +363,8 @@ describe('goneRefOf', () => {
   it('reads the ref the CLI names', () => {
     expect(goneRefOf('✗ Unknown ref: e42')).toBe('e42')
     expect(goneRefOf('✗ Element ref e7 is stale', '@e9')).toBe('e7')
+    // 0.44+: a ref from a document the page has since replaced (seen on 0.45.0).
+    expect(goneRefOf('✗ Ref @e14 is from a document that is no longer loaded (the page navigated or the frame was removed). Take a new snapshot and use a fresh ref.', '@e14')).toBe('e14')
   })
 
   it('takes the action\'s ref when the CLI names the role and name it looked for (0.41.1 texts)', () => {
@@ -373,8 +401,17 @@ describe('previous document', () => {
   it('keeps the last document\'s lines to explain its refs after a load', () => {
     trees.set('https://a.com/', '- button "Decline" [ref=e532]', 'snapshot', 1000, 111)
     trees.set('https://a.com/', '- button "Search" [ref=e600]', 'action', 2000, 222)
-    expect(trees.fromPreviousDocument('@e532')).toEqual({ text: 'button "Decline" [ref=e532]', url: 'https://a.com/' })
-    expect(trees.fromPreviousDocument('e600')).toBeNull()
+    expect(trees.fromPreviousDocument('@e532', 'https://a.com/', 222)).toEqual({ text: 'button "Decline" [ref=e532]', url: 'https://a.com/' })
+    expect(trees.fromPreviousDocument('e600', 'https://a.com/', 222)).toBeNull()
+  })
+
+  it('reads the baseline itself when nothing was read on the document the page shows now', () => {
+    // A select that submitted its form: the page loaded a new document, no tree was read on it.
+    const fresh = new TreeBaselines()
+    fresh.set('https://shop.test/', '- combobox "Native" [ref=e10]: Alpha', 'snapshot', 1000, 111)
+    expect(fresh.fromPreviousDocument('@e10', 'https://shop.test/?sort=old', 333)).toEqual({ text: 'combobox "Native" [ref=e10]: Alpha', url: 'https://shop.test/' })
+    // Still the same document: not a previous one.
+    expect(fresh.fromPreviousDocument('@e10', 'https://shop.test/', 111)).toBeNull()
   })
 })
 

@@ -117,7 +117,7 @@ export function capSnapshot(text: string, scopeUsed: boolean, openDialog?: { kin
   // An open dialog is what the agent is most likely after, and the one region
   // whose selector is known: name it first.
   const dialogHint = openDialog
-    ? `A ${openDialog.kind}${openDialog.name ? ` ${JSON.stringify(openDialog.name.slice(0, 60))}` : ''} is open: scope="[role=${openDialog.kind === 'alertdialog' ? 'alertdialog' : 'dialog'}]" or "dialog[open]" targets it (the first match in the page). `
+    ? `A ${openDialog.kind}${openDialog.name ? ` ${JSON.stringify(openDialog.name.slice(0, 60))}` : ''} is open: scope="[role=${openDialog.kind === 'alertdialog' ? 'alertdialog' : 'dialog'}]" or "dialog[open]" targets it (every match in the page). `
     : ''
   const scopeHint = scopeUsed
     ? 'Even scoped, this region is large — pass a tighter scope selector.'

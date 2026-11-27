@@ -24,8 +24,16 @@
 /** One ref-bearing line of a tree, parsed. */
 export interface RefLine {
   ref: string
-  /** The line without indentation, the `- ` prefix or a `url=` attribute — what is shown and compared. */
+  /** The line without indentation, the `- ` prefix, a `url=` attribute or its hint — what is compared. */
   text: string
+  /** The line as the agent is shown it: `text` with its hint, where the CLI printed one. */
+  shown: string
+  /**
+   * What the CLI adds to a control whose name is empty or shared with
+   * another ref (0.43+, upstream #2578): its icon, image, test id, name or id
+   * attribute, and the text of the row it is in — `icon:trash; in:Price: $5`.
+   */
+  hint: string
   name: string
   /** Bracket attributes other than ref/url, e.g. `checked=false`, `selected`. */
   attrs: string[]
@@ -58,24 +66,41 @@ export function parseTreeRefs(tree: string): TreeRefs {
   return { lines }
 }
 
+/**
+ * A hint as the CLI prints it, right after the bracket attributes and before
+ * the cursor kind and the `: value` (snapshot.rs: ` hint={:?}`, a Rust
+ * Debug-quoted string). Its row text can hold `: ` itself (`in:Price: $5`).
+ */
+const HINT_RE = /^ hint="((?:[^"\\]|\\.)*)"/
+
+function parseHint(quoted: string): string {
+  try { return JSON.parse(`"${quoted}"`) as string } catch { return quoted }
+}
+
 function parseRefLine(ref: string, body: string, parent: string | null): RefLine {
   // url= is always the last bracket attribute (the CLI pushes it after ref=);
   // includeUrls is a display choice, not a change.
-  const text = body.replace(/, url=[^\]]*\]/, ']').replace(/\[url=[^\]]*\]\s?/, '')
-  const nameMatch = /^\S+ ("(?:[^"\\]|\\.)*")/.exec(text)
+  const shown = body.replace(/, url=[^\]]*\]/, ']').replace(/\[url=[^\]]*\]\s?/, '')
+  const nameMatch = /^\S+ ("(?:[^"\\]|\\.)*")/.exec(shown)
   let name = ''
   if (nameMatch) {
     try { name = JSON.parse(nameMatch[1]) as string } catch { name = nameMatch[1] }
   }
-  const bracket = /\[([^\]]*\bref=e\d+[^\]]*)\]/.exec(text)
+  const bracket = /\[([^\]]*\bref=e\d+[^\]]*)\]/.exec(shown)
   const attrs = bracket
     ? bracket[1].split(',').map(a => a.trim()).filter(a => a && !a.startsWith('ref='))
     : []
+  // A hint describes the control's surroundings (the row's text, a sibling
+  // sharing its name), not the control: it is shown, never compared.
+  const end = bracket ? bracket.index + bracket[0].length : -1
+  const hintMatch = bracket ? HINT_RE.exec(shown.slice(end)) : null
+  const hint = hintMatch ? parseHint(hintMatch[1]) : ''
+  const text = hintMatch ? shown.slice(0, end) + shown.slice(end + hintMatch[0].length) : shown
   // The value follows the attributes (and any cursor hints) as `: value`.
-  const after = bracket ? text.slice(bracket.index + bracket[0].length) : ''
+  const after = bracket ? text.slice(end) : ''
   const colon = after.indexOf(': ')
   const value = colon >= 0 ? after.slice(colon + 2) : ''
-  return { ref, text, name, attrs, value, parent }
+  return { ref, text, shown, hint, name, attrs, value, parent }
 }
 
 /** True when `ref` is one of `roots` or nested under one of them in `tree`. */
@@ -415,7 +440,7 @@ export function formatTreeDiff(d: TreeDiff, opts: TreeDiffFormatOptions): string
   ].filter(Boolean).join(', ')
   // Changed lines first: they are mostly the controls the agent just acted
   // on, and a results list arriving with them must not push them out of the cap.
-  const changedLines = d.changed.map(c => `~ ${clip(c.line.text, LINE_CHARS)}${c.was ? ` (${c.was})` : ''}`)
+  const changedLines = d.changed.map(c => `~ ${clip(c.line.shown, LINE_CHARS)}${c.was ? ` (${c.was})` : ''}`)
   // Inside a dialog that arrived: listed before anything else that arrived
   // (Airbnb: late result prices pushed the new filter dialog's radios out).
   const addedByRef = new Map(d.added.map(l => [l.ref, l]))
@@ -446,7 +471,7 @@ export function formatTreeDiff(d: TreeDiff, opts: TreeDiffFormatOptions): string
   const ordered = [...shownAdded.filter(inNewDialog), ...shownAdded.filter(l => !inNewDialog(l))]
   const main: string[] = [
     ...changedLines.slice(0, TREE_DIFF_LEADING_CHANGED_LINES),
-    ...ordered.map(l => `+ ${clip(l.text, LINE_CHARS)}`),
+    ...ordered.map(l => `+ ${clip(l.shown, LINE_CHARS)}`),
     ...churnLines,
     ...changedLines.slice(TREE_DIFF_LEADING_CHANGED_LINES),
   ]
@@ -463,7 +488,7 @@ export function formatTreeDiff(d: TreeDiff, opts: TreeDiffFormatOptions): string
     const one = d.rerendered.length === 1
     lines.push(`⟳ ${d.rerendered.length} line${one ? ' was' : 's were'} replaced by ${one ? 'an identical line' : 'identical lines'} in the same place, under ${one ? 'a new ref' : 'new refs'}; the old ref${one ? '' : 's'} no longer work${one ? 's' : ''}:`)
     const shown = d.rerendered.slice(0, TREE_DIFF_MAX_RERENDER_LINES)
-    lines.push(...shown.map(r => `  ${clip(lineWithoutRef(r.to.text), 120)}: ${r.from.ref} → ${r.to.ref}`))
+    lines.push(...shown.map(r => `  ${clip(lineWithoutRef(r.to.shown), 120)}: ${r.from.ref} → ${r.to.ref}`))
     if (d.rerendered.length > shown.length) lines.push(`  … ${d.rerendered.length - shown.length} more re-rendered`)
   }
   const mainShown = main.slice(0, Math.max(0, max - removedShown - lines.length))
@@ -472,11 +497,11 @@ export function formatTreeDiff(d: TreeDiff, opts: TreeDiffFormatOptions): string
   if (d.returned.length > 0 && d.returned.length <= TREE_DIFF_MAX_BACK_LINES) {
     // A few: listed, their refs may be the ones to use (Google Hotels: the
     // search dialog's combobox came back and was only counted).
-    lines.push(...d.returned.map(l => `+ ${clip(l.text, LINE_CHARS)} (back, same ref)`))
+    lines.push(...d.returned.map(l => `+ ${clip(l.shown, LINE_CHARS)} (back, same ref)`))
   } else if (d.returned.length > 0) {
     lines.push(`+ ${d.returned.length} elements back in the tree exactly as you last saw them, same refs`)
   }
-  lines.push(...removedList.slice(0, removedShown).map(l => `− ${clip(l.text, LINE_CHARS)}`))
+  lines.push(...removedList.slice(0, removedShown).map(l => `− ${clip(l.shown, LINE_CHARS)}`))
   const removedHidden = removedList.length - removedShown
   if (removedHidden > 0) {
     lines.push(opts.dialogOpened
@@ -495,10 +520,14 @@ export function formatTreeDiff(d: TreeDiff, opts: TreeDiffFormatOptions): string
  * with the ref's role and name and names those instead: `Could not locate
  * element with role=…` (none has them now) or, since 0.41.1, `Stale ref for
  * role=… cannot be recovered` (several had or have them) — then it is the ref
- * the action was given.
+ * the action was given. Since 0.44 a ref from a document the page has since
+ * replaced is refused as such (`Ref @eN is from a document that is no longer
+ * loaded`, upstream #2685) instead of rebinding to a look-alike on the new one.
  */
 export function goneRefOf(cliText: string, actionRef?: string): string | null {
-  const named = /Unknown ref: @?(e\d+)/.exec(cliText) ?? /Element ref @?(e\d+) is stale/.exec(cliText)
+  const named = /Unknown ref: @?(e\d+)/.exec(cliText)
+    ?? /Element ref @?(e\d+) is stale/.exec(cliText)
+    ?? /Ref @?(e\d+) is from a document that is no longer loaded/.exec(cliText)
   if (named) return named[1]
   if (!actionRef || !/Could not locate element with role=|Stale ref for role=/.test(cliText)) return null
   return /^@?(e\d+)$/.exec(actionRef.trim())?.[1] ?? null
@@ -514,11 +543,11 @@ export function goneRefOf(cliText: string, actionRef?: string): string | null {
 export function formatUnknownRef(ref: string, wasText: string, current: TreeRefs): string {
   const id = ref.replace(/^@/, '')
   const was = lineWithoutRef(wasText)
-  // The CLI drops its whole ref table when a snapshot fails part-way (a scope
-  // selector that matched nothing); a fresh read restores it.
+  // The CLI drops its whole ref table on a tab command (new, switch, close,
+  // a click that opens a tab, a new window); a fresh read restores it.
   const again = current.lines.get(id)
   if (again) {
-    return `\n${id} is in the current tree again (${clip(lineWithoutRef(again.text), 160)}) after a fresh read — the CLI's ref table had been reset. This action was not performed.`
+    return `\n${id} is in the current tree again (${clip(lineWithoutRef(again.shown), 160)}) after a fresh read — the CLI's ref table had been reset. This action was not performed.`
   }
   const same = [...current.lines.values()].filter(l => lineWithoutRef(l.text) === was)
   const head = `\n${id} was ${clip(was, 160)} when last read; no element in the current tree has that ref.`
@@ -534,7 +563,7 @@ export function formatUnknownRef(ref: string, wasText: string, current: TreeRefs
   const wantRn = roleName(wasText)
   const similar = /"/.test(wantRn) ? [...current.lines.values()].filter(l => roleName(l.text) === wantRn) : []
   if (similar.length > 0) {
-    const listed = similar.slice(0, 5).map(l => `@${l.ref} (${clip(lineWithoutRef(l.text), 100)})`).join(', ')
+    const listed = similar.slice(0, 5).map(l => `@${l.ref} (${clip(lineWithoutRef(l.shown), 100)})`).join(', ')
     return `${head} No element has that role, name and state; with that role and name: ${listed}${similar.length > 5 ? ', …' : ''}.`
   }
   return `${head} No element in the current tree has that role, name and state.`
@@ -606,9 +635,19 @@ export class TreeBaselines {
     this.previousDocument = null
   }
 
-  /** What `ref` was on the document before the current one, or null. */
-  fromPreviousDocument(ref: string): { text: string; url: string } | null {
-    const text = this.previousDocument?.seen.get(ref.replace(/^@/, ''))
-    return text && this.previousDocument ? { text, url: this.previousDocument.url } : null
+  /**
+   * What `ref` was on a document before the one the page shows now (`url`,
+   * `docStart`), or null: the baseline itself when nothing was read on the
+   * new document yet (a select that submitted its form), else the one
+   * before it.
+   */
+  fromPreviousDocument(ref: string, url: string, docStart = 0): { text: string; url: string } | null {
+    const id = ref.replace(/^@/, '')
+    const older = this.baseline && !sameDocumentAs(this.baseline, url, docStart) ? this.baseline : null
+    for (const b of [older, this.previousDocument]) {
+      const text = b?.seen.get(id)
+      if (b && text) return { text, url: b.url }
+    }
+    return null
   }
 }

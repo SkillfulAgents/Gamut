@@ -30,6 +30,14 @@ export class BrowserSession {
   tabCount = 1
   /** The ids the session had before (renameBrowserSession): what was keyed to it then is still its own. */
   readonly formerIds = new Set<string>()
+  /**
+   * The frame the agent selected with `frame <target>` (browser_run), as it
+   * named it; null for the top frame. Cleared when a probe finds the instance
+   * back on the top frame (a navigation or a tab change resets it).
+   */
+  frame: string | null = null
+  /** Held while the harness steps out of the agent's frame to read the top page (top-frame-probe.ts). */
+  frameStep: Promise<void> | null = null
 
   /** Every id the session has had, the current one first. */
   ids(): string[] {

@@ -19,7 +19,20 @@ const NAMED_KEYS = new Set(
   ]
 )
 
-const MODIFIERS = new Set(['control', 'ctrl', 'shift', 'alt', 'option', 'meta', 'cmd', 'command', 'super'])
+/**
+ * The modifier names agent-browser reads in a chord (interaction.rs
+ * key_modifier_bit). Any other name before a "+" is not a modifier to it:
+ * "Option+a" is pressed as one key named "Option+a", which types nothing.
+ */
+const MODIFIERS = new Set([
+  'alt', 'altleft', 'altright',
+  'control', 'ctrl', 'controlleft', 'controlright',
+  'meta', 'cmd', 'command', 'metaleft', 'metaright',
+  'shift', 'shiftleft', 'shiftright',
+])
+
+/** Names agents use for a modifier the CLI knows by another. */
+const MODIFIER_ALIASES: Record<string, string> = { option: 'Alt', opt: 'Alt', super: 'Meta', win: 'Meta', windows: 'Meta' }
 
 function isSingleKey(token: string): boolean {
   if (token.length === 1) return true // any printable character
@@ -46,6 +59,13 @@ export function validatePressKey(key: string): string | null {
 
   const finalKey = tokens[tokens.length - 1]
   const mods = tokens.slice(0, -1)
+
+  const alias = mods.find(m => MODIFIER_ALIASES[m.toLowerCase()])
+  if (alias) {
+    const name = MODIFIER_ALIASES[alias.toLowerCase()]
+    const fixed = [...mods.map(m => MODIFIER_ALIASES[m.toLowerCase()] ?? m), finalKey].join('+')
+    return `"${alias}" is not a modifier name the browser reads; it is "${name}" there: press "${fixed}".`
+  }
 
   if (isSingleKey(finalKey) && mods.every(m => MODIFIERS.has(m.toLowerCase()))) {
     return null

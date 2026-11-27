@@ -136,9 +136,44 @@ export function buildRunCommandArgs(command: string): string[] {
   return commandArgs;
 }
 
+// Options that decide which browser, instance or tab the CLI drives, or how
+// it launches or records one. browser_run runs in the session's own
+// instance, attached to the agent's browser and pinned to its tab (server.ts
+// execBrowser); the CLI reads these anywhere before `--`, and the last one
+// given wins, so `--session <other>` would drive another session's instance
+// and `--cdp <url>` another browser.
+const INSTANCE_FLAGS = new Set([
+  '--session', '--session-name', '--namespace', '--cdp', '--cdp-headers', '--auto-connect', '--no-auto-connect',
+  '--pin-tab', '--no-pin-tab', '-p', '--provider', '--engine', '--profile', '--state', '--restore', '--restore-save',
+  '--restore-check-url', '--restore-check-text', '--restore-check-fn', '--relaunch', '--capture', '--config',
+  '--executable-path', '--extension', '--init-script', '--download-path', '--idle-timeout', '--allowed-domains',
+  '--action-policy', '--confirm-actions',
+]);
+
+/** The first instance option in `argv` before a `--`, or null. */
+function instanceFlagOf(argv: string[]): string | null {
+  for (const arg of argv) {
+    if (arg === '--') return null;
+    const flag = arg.startsWith('--') ? arg.split('=')[0] : arg;
+    if (INSTANCE_FLAGS.has(flag)) return flag;
+  }
+  return null;
+}
+
+function instanceFlagRefusal(flag: string): string {
+  return `\`${flag}\` is an agent-browser option that chooses the browser, instance or tab a command runs in, or how it launches; browser_run always runs in this session's own, so it is not available. To pass "${flag}" as text (a value to fill, a selector), put it after \`--\`.`;
+}
+
 // Why browser_run refuses one CLI command, or null.
 function refuseCommand(command: string[]): string | null {
   const verb = command[0]?.toLowerCase();
+  const flag = instanceFlagOf(command);
+  if (flag) return instanceFlagRefusal(flag);
+  // Every session's instance attaches over CDP, and the CLI refuses
+  // `download` on such a connection (0.42+): it cannot name a file there.
+  if (verb === 'download') {
+    return 'Use the `browser_download(url)` tool to save a file through the browser, or click its link: files the page downloads land in /workspace/downloads/. The CLI\'s `download` does not run on the browser connection sessions use.';
+  }
   // The agent-browser CLI `upload` command does not work reliably in this
   // environment — refuse it and steer the model to `browser_upload`, which
   // routes through the buffer-based path with size verification.
@@ -174,6 +209,9 @@ export function runCommands(commandArgs: string[]): string[][] {
 // Why browser_run refuses a command, or null. Each command of a `batch` gets
 // the same checks.
 export function runCommandRefusal(commandArgs: string[]): string | null {
+  // The whole argv too: `batch --session x "…"` names the instance outside its commands.
+  const flag = instanceFlagOf(commandArgs);
+  if (flag) return instanceFlagRefusal(flag);
   for (const command of runCommands(commandArgs)) {
     const refusal = refuseCommand(command);
     if (refusal) return refusal;

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { judgeSelectCommit, parseSelectOptions, targetOptionMatches } from './select-verify'
+import { judgeSelectCommit, parseSelectOptions, targetOptionMatches, selectRefusalText, CUSTOM_DROPDOWN_RECIPE } from './select-verify'
 
 describe('judgeSelectCommit', () => {
   it('passes when the value committed exactly (select by value)', () => {
@@ -27,7 +27,6 @@ describe('judgeSelectCommit', () => {
     if (!r.ok) {
       expect(r.reason).toContain('did not change')
       expect(r.reason).toContain('requested "US"')
-      expect(r.reason).toContain('Recipe:')
       expect(r.reason).not.toContain('reverted')
     }
   })
@@ -40,7 +39,6 @@ describe('judgeSelectCommit', () => {
       expect(r.reason).toContain('unverified')
       expect(r.reason).not.toContain('so it is not a native')
       expect(r.reason).not.toContain('probably')
-      expect(r.reason).toContain('Recipe:')
     }
   })
 
@@ -48,6 +46,27 @@ describe('judgeSelectCommit', () => {
     const r = judgeSelectCommit('b', 'a', 'a', false)
     expect(r.ok).toBe(false)
     if (!r.ok) expect(r.reason).toContain('still "a"')
+  })
+})
+
+describe('selectRefusalText', () => {
+  // Refusals agent-browser 0.45.0 printed (forms.rs select_failure).
+  it('adds the click recipe for a target that is no select, combobox or listbox', () => {
+    const text = selectRefusalText('✗ not_editable: select target is not a <select> or a role=combobox/listbox element')
+    expect(text).toContain(CUSTOM_DROPDOWN_RECIPE)
+    expect(selectRefusalText('✗ combobox opened but no visible role=option elements were found')).toContain(CUSTOM_DROPDOWN_RECIPE)
+  })
+
+  it('puts the CLI\'s --by advice in the tool\'s terms', () => {
+    expect(selectRefusalText('✗ ambiguous: Multiple options matched "CA" (2 options with different values). Pass --by value to match option values or --by label to match visible labels.'))
+      .toBe('✗ ambiguous: Multiple options matched "CA" (2 options with different values). Pass by: "value" to match option values or by: "label" to match visible labels.')
+    expect(selectRefusalText('✗ ambiguous: Multiple options matched "CA" (2 options with different values). Several options share that label; pass --by value with the option value.'))
+      .toContain('pass by: "value" with the option value.')
+  })
+
+  it('passes other refusals through unchanged', () => {
+    const notFound = '✗ option_not_found: No option matched ["Gamma"]. The select has 2 options\nAvailable options:\n{"label":"Alpha","value":"a"}'
+    expect(selectRefusalText(notFound)).toBe(notFound)
   })
 })
 

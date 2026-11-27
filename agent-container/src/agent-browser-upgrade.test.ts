@@ -1,5 +1,5 @@
 /**
- * Regression guards for the agent-browser upgrades (0.12.0 → … → 0.41.2).
+ * Regression guards for the agent-browser upgrades (0.12.0 → … → 0.41.2 → 0.45.0).
  *
  * These tests prevent re-introducing issues discovered during the upgrades:
  * - --remote-debugging-port in AGENT_BROWSER_ARGS hangs the daemon on ARM64
@@ -17,17 +17,21 @@ const DOCKERFILE_PATH = path.resolve(__dirname, '../Dockerfile')
 const dockerfile = fs.readFileSync(DOCKERFILE_PATH, 'utf-8')
 
 describe('Dockerfile agent-browser config', () => {
-  it('installs agent-browser 0.41.2 or later', () => {
+  it('installs agent-browser 0.45.0 or later', () => {
     const match = dockerfile.match(/agent-browser@(\d+\.\d+\.\d+)/)
     expect(match).not.toBeNull()
     const [major, minor, patch] = match![1].split('.').map(Number)
-    // Must be >= 0.41.2: persistent refs, which the after-action tree read
+    // Must be >= 0.45.0: persistent refs, which the after-action tree read
     // relies on (0.38.0, #1443), screenshot --if-changed (0.38.0), tab
     // targetId (0.34.0), no retry of a mutating command after a lost reply
     // (0.39.1), refs and reads inside role="none"/"presentation" frames
-    // (0.41.1, #2262 — the harness no longer drops that role itself), the
-    // AGENT_BROWSER_NO_VERSION_CHECK switch (0.41.2, #2309)
-    expect(major * 1_000_000 + minor * 1_000 + patch).toBeGreaterThanOrEqual(41_002)
+    // (0.41.1, #2262), the AGENT_BROWSER_NO_VERSION_CHECK switch (0.41.2,
+    // #2309), refs kept when a snapshot fails (0.44, #2666 — the scoped
+    // snapshot no longer restores them), `select` on role=combobox/listbox
+    // and its refusal codes (0.44, #2592/#2687 — select-verify.ts trusts it
+    // there), and `eval` in the selected frame (0.45, #2738 — the harness
+    // probes step out of it, top-frame-probe.ts)
+    expect(major * 1_000_000 + minor * 1_000 + patch).toBeGreaterThanOrEqual(45_000)
   })
 
   it('turns off the idle shutdown, WebMCP and the browser version check', () => {
@@ -36,14 +40,19 @@ describe('Dockerfile agent-browser config', () => {
     // 0.36+: WebMCP announcements land in observer eval output.
     expect(dockerfile).toMatch(/^ENV AGENT_BROWSER_NO_WEBMCP=1$/m)
     // 0.41.2+: an outdated-Chrome warning that tells the agent to update a
-    // browser pinned with the image, and a version round trip per command.
+    // browser pinned with the image, and a version round trip per connection.
     expect(dockerfile).toMatch(/^ENV AGENT_BROWSER_NO_VERSION_CHECK=1$/m)
   })
 
-  it('prunes other platforms\' binaries only when agent-browser links straight to this one', () => {
+  it('fails the build unless the global command links straight to the native binary', () => {
+    // 0.43+ installs only this platform's binary (a per-platform optional
+    // dependency), so there is nothing to prune; the check runs after
+    // --version, which relinks a launcher left in place.
     const install = dockerfile.slice(dockerfile.indexOf('npm install -g agent-browser@'))
-    expect(install).toMatch(/case "\$keep" in\s*\\\s*\*\/agent-browser-linux-\*\)/)
-    expect(install.indexOf('agent-browser --version')).toBeGreaterThan(install.indexOf('rm -f "$f"'))
+    expect(install).toMatch(/case "\$\(readlink -f "\$\(command -v agent-browser\)"\)" in\s*\\\s*\*\/agent-browser-linux-\*\) ;;/)
+    expect(install).toMatch(/\*\) echo "agent-browser is not linked to its native binary" >&2; exit 1 ;;/)
+    expect(install.indexOf('readlink -f')).toBeGreaterThan(install.indexOf('agent-browser --version'))
+    expect(install.slice(0, install.indexOf('npx --yes playwright'))).not.toContain('rm -f')
   })
 
   it('AGENT_BROWSER_ARGS must NOT contain --remote-debugging-port', () => {

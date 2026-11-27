@@ -124,7 +124,7 @@ export function finalizeEvalOutput(output: string): string {
 /** Append a hint to known-confusing eval error shapes. */
 export function evalErrorHint(error: string): string {
   if (/Cannot read propert(y|ies) of (null|undefined)/i.test(error)) {
-    return `${error}\nHint: something in the script was null — commonly a querySelector that matched nothing. eval runs in the TOP frame only — elements inside cross-origin iframes (e.g. payment frames) are unreachable from JavaScript; use their refs from browser_snapshot for those.`
+    return `${error}\nHint: something in the script was null — commonly a querySelector that matched nothing. eval runs in the top frame unless a frame was selected with browser_run frame — an element inside an iframe is found from that frame (browser_run(["frame", "<iframe selector>"])), and payment-frame fields normally have refs from browser_snapshot.`
   }
   if (/is not a valid selector/i.test(error)) {
     return `${error}\nHint: attribute values containing spaces must be quoted inside the selector string, e.g. querySelector('iframe[title="Payment frame"]').`

@@ -818,13 +818,14 @@ const execFileAsync = promisify(execFile);
 import { resolveRunCommandArgs, runCommandRefusal, runCommands } from './browser-command-args';
 import { validatePressKey } from './press-key';
 import { prepareEvalScript, finalizeEvalOutput, evalErrorHint } from './eval-script';
-import { judgeSelectCommit, parseSelectOptions, targetOptionMatches, SELECT_COMMIT_SETTLE_MS } from './select-verify';
+import { judgeSelectCommit, parseSelectOptions, targetOptionMatches, selectRefusalText, SELECT_COMMIT_SETTLE_MS } from './select-verify';
 import { classifyWaitTarget, WAIT_PAGE_PROBE_SCRIPT, parseWaitPageProbe } from './wait-target';
 
 /** Budget for the page probe around a wait — independent of the exec ceiling. */
 const WAIT_PAGE_PROBE_TIMEOUT_MS = 3000;
 import { resolveCommittedValue } from './field-value-readback';
-import { capBrowserOutput, redactCdpUrls, describeExecFailure, stripWebMcpNotices, cliJsonError, extractScreenshotPath, navigationNetError, BROWSER_EXEC_TIMEOUT_MS, MAX_BROWSER_OUTPUT_CHARS, MAX_SNAPSHOT_RAW_CHARS, MAX_BROWSER_ERROR_CHARS } from './browser-output';
+import { topFrameScript, ranInFrame, stepOutOfFrame, frameSelectionOf } from './top-frame-probe';
+import { capBrowserOutput, redactCdpUrls, describeExecFailure, commandWarnings, cliJsonError, extractScreenshotPath, navigationNetError, BROWSER_EXEC_TIMEOUT_MS, MAX_BROWSER_OUTPUT_CHARS, MAX_SNAPSHOT_RAW_CHARS, MAX_BROWSER_ERROR_CHARS } from './browser-output';
 import { capSnapshot, capReadText, compactWithText, countRefs, formatIframePlaceholders, formatTextFooter, THIN_TREE_REFS } from './snapshot-format';
 import { observerScript, parseObservation, EMPTY_OBSERVATION, PREVIEW_CHARS, THIN_TREE_PREVIEW_CHARS, type PageObservation } from './page-observer';
 import { formatStatusLine, waitForLoaded } from './page-status';
@@ -891,14 +892,38 @@ function cleanupAgentBrowserDaemon(): void {
   try { fs.unlinkSync(path.join(profile, 'SingletonLock')); } catch { /* ignore */ }
 }
 
-type BrowserExecOptions = { timeoutMs?: number; outputCap?: number };
+type BrowserExecOptions = {
+  timeoutMs?: number;
+  outputCap?: number;
+  /** A command of the step out of the agent's frame itself, which every other command of the session waits for (stepOutOfFrame). */
+  withinFrameStep?: boolean;
+};
 
 // Execute an agent-browser CLI command in a session's own instance: attached
 // to the agent's Chrome and pinned to the session's tab. Never while a
-// saved-session operation of that session runs (browser-gate.ts).
-function execBrowser(args: string[], s: BrowserSession, opts: BrowserExecOptions = {}): ReturnType<typeof runBrowserCommand> {
+// saved-session operation of that session runs (browser-gate.ts), nor while
+// the harness has stepped out of the agent's frame to read the top page.
+async function execBrowser(args: string[], s: BrowserSession, opts: BrowserExecOptions = {}): ReturnType<typeof runBrowserCommand> {
+  if (!opts.withinFrameStep) while (s.frameStep) await s.frameStep;
   const instance = ['--session', s.key, '--cdp', browserState.cdpUrl ?? '', '--pin-tab'];
   return browserCommand(s.sessionId, () => runBrowserCommand(instance, args, opts));
+}
+
+/**
+ * Run a harness probe script on the session's top frame, whatever frame the
+ * agent selected (top-frame-probe.ts): one `eval` when the instance is on the
+ * top frame, as it is unless the agent ran `frame <target>`.
+ */
+async function probeTopFrame(s: BrowserSession, script: string, opts: BrowserExecOptions = {}): Promise<{ stdout: string; exitCode: number }> {
+  const r = await execBrowser(['eval', topFrameScript(script)], s, opts);
+  if (r.exitCode !== 0) return r;
+  if (!ranInFrame(r.stdout)) {
+    // On the top frame: any frame the agent selected has been left (a
+    // navigation, a tab change or a removed frame resets it in the CLI).
+    s.frame = null;
+    return r;
+  }
+  return stepOutOfFrame(s, script, (args) => execBrowser(args, s, { ...opts, withinFrameStep: true }));
 }
 
 /** A command for the instance that launches (and closes) the container's Chrome: no session's tab. */
@@ -911,12 +936,12 @@ async function runBrowserCommand(
   instance: string[],
   args: string[],
   opts: BrowserExecOptions = {},
-): Promise<{ stdout: string; exitCode: number }> {
+): Promise<{ stdout: string; exitCode: number; warnings?: string[] }> {
   const started = Date.now();
   const outputCap = opts.outputCap ?? MAX_BROWSER_OUTPUT_CHARS;
   const fullArgs = [...instance, ...args];
   try {
-    const { stdout } = await execFileAsync('agent-browser', fullArgs, {
+    const { stdout, stderr } = await execFileAsync('agent-browser', fullArgs, {
       timeout: opts.timeoutMs ?? BROWSER_EXEC_TIMEOUT_MS,
       // Large-but-legitimate outputs must not THROW (the throw path used to
       // stuff up to 1 MiB of partial output into an error string);
@@ -929,8 +954,11 @@ async function runBrowserCommand(
       },
     });
     // Raw on purpose: the server parses this output itself. Text bound for the
-    // agent is redacted where it leaves (the browser tools' results).
-    return { stdout: capBrowserOutput(stripWebMcpNotices(stdout.trim()), outputCap), exitCode: 0 };
+    // agent is redacted where it leaves (the browser tools' results). The
+    // CLI's warnings about the page (a value it truncated, a range it
+    // snapped to its step) come on stderr: the action routes pass them on.
+    const warnings = commandWarnings(String(stderr ?? ''));
+    return { stdout: capBrowserOutput(stdout.trim(), outputCap), exitCode: 0, ...(warnings.length > 0 && { warnings: warnings.map(w => capBrowserOutput(w, MAX_BROWSER_ERROR_CHARS)) }) };
   } catch (error: any) {
     // Full, unsanitized detail (incl. the command line with the CDP URL) goes
     // to container logs for connectivity debugging — never to the model.
@@ -975,9 +1003,9 @@ async function observeUrlDigest(s: BrowserSession): Promise<UrlDigest | null> {
   return s.urls.observe(await addressBarUrl(s, r.stdout.trim()));
 }
 
-/** Run a page-observer script in the session's page; null when the page cannot be read. */
+/** Run a page-observer script in the session's page (its top frame); null when the page cannot be read. */
 async function observePage(s: BrowserSession, script: string): Promise<string | null> {
-  const r = await execBrowser(['eval', script], s);
+  const r = await probeTopFrame(s, script);
   return r.exitCode === 0 ? r.stdout : null;
 }
 
@@ -1018,6 +1046,21 @@ const actionNetwork = (s: BrowserSession) => ({
 const TREE_READ_TIMEOUT_MS = 10_000;
 
 /**
+ * Since 0.44 a snapshot whose page loaded a new document while it was being
+ * captured fails ("The document changed while the snapshot was being
+ * captured … Take the snapshot again", upstream #2685) instead of mixing two
+ * documents' nodes. The new document is there to read: take it once more.
+ */
+const SNAPSHOT_DOCUMENT_CHANGED = /The document changed while the snapshot was being captured/;
+
+/** A snapshot of the session's page, taken again once when the document changed under it. */
+async function readSnapshot(s: BrowserSession, args: string[], opts: BrowserExecOptions = {}): ReturnType<typeof runBrowserCommand> {
+  const first = await execBrowser(args, s, opts);
+  if (first.exitCode === 0 || !SNAPSHOT_DOCUMENT_CHANGED.test(first.stdout)) return first;
+  return execBrowser(args, s, opts);
+}
+
+/**
  * Read the interactive tree after an action and diff it, by ref, against the
  * last tree the agent was shown on this page (tree-diff.ts). The read becomes
  * the new baseline either way. Null when it could not run or there was no
@@ -1025,7 +1068,7 @@ const TREE_READ_TIMEOUT_MS = 10_000;
  */
 async function readTreeDiff(s: BrowserSession, url: string, exclude: { refs?: string[]; subtrees?: string[]; overlayOpened?: boolean }, docStart = 0): Promise<EffectTreeDiff | null> {
   const prior = s.trees.get(url, docStart);
-  const r = await execBrowser(['snapshot', '-i', '-c'], s, { timeoutMs: TREE_READ_TIMEOUT_MS, outputCap: MAX_SNAPSHOT_RAW_CHARS });
+  const r = await readSnapshot(s, ['snapshot', '-i', '-c'], { timeoutMs: TREE_READ_TIMEOUT_MS, outputCap: MAX_SNAPSHOT_RAW_CHARS });
   if (r.exitCode !== 0) return null;
   const now = Date.now();
   // Diff before the read becomes the baseline: the baseline's `seen` lines
@@ -1108,12 +1151,12 @@ async function explainUnknownRef(s: BrowserSession, stdout: string, actionRef?: 
   if (!was) {
     // A ref from before the page loaded a new document (the observer's load
     // start moved on): every ref of that document is gone.
-    const old = s.trees.fromPreviousDocument(ref);
+    const old = s.trees.fromPreviousDocument(ref, page.url, page.docStart);
     return old
       ? `${stdout}\n${ref} was ${lineWithoutRef(old.text).slice(0, 160)} on the previous page load (${old.url}); the page has loaded a new document since, and refs from before the load do not carry over.`
       : stdout;
   }
-  const fresh = await execBrowser(['snapshot', '-i', '-c'], s, { timeoutMs: TREE_READ_TIMEOUT_MS, outputCap: MAX_SNAPSHOT_RAW_CHARS });
+  const fresh = await readSnapshot(s, ['snapshot', '-i', '-c'], { timeoutMs: TREE_READ_TIMEOUT_MS, outputCap: MAX_SNAPSHOT_RAW_CHARS });
   if (fresh.exitCode !== 0) return stdout;
   s.trees.set(page.url, fresh.stdout, 'action', Date.now(), page.docStart);
   return stdout + formatUnknownRef(ref, was, parseTreeRefs(fresh.stdout));
@@ -1122,15 +1165,17 @@ async function explainUnknownRef(s: BrowserSession, stdout: string, actionRef?: 
 /**
  * Run a ref action; when the CLI answers `Unknown ref` for it, read the tree
  * once and, if the ref is in it, run the action again. The CLI drops its whole
- * ref table when a snapshot fails part-way or a tab command runs, and a read
- * brings every ref back unchanged — so the agent's ref was right all along.
+ * ref table when a tab command runs (new, switch, close, a click that opens a
+ * tab, a new window), and a read brings every ref back unchanged — so the
+ * agent's ref was right all along. A ref of a document the page has since
+ * replaced is refused as such (0.44+) and is not retried: it is not coming back.
  * When the ref is not back, the first answer stands (explainUnknownRef).
  */
 async function withRefRestore(s: BrowserSession, ref: string | undefined, run: () => Promise<{ exitCode: number; stdout: string }>): Promise<{ exitCode: number; stdout: string }> {
   const r = await run();
   const id = r.exitCode !== 0 && ref ? /Unknown ref: @?(e\d+)/.exec(r.stdout)?.[1] : undefined;
   if (!id || id !== ref?.replace(/^@/, '')) return r;
-  const fresh = await execBrowser(['snapshot', '-i', '-c'], s, { timeoutMs: TREE_READ_TIMEOUT_MS, outputCap: MAX_SNAPSHOT_RAW_CHARS });
+  const fresh = await readSnapshot(s, ['snapshot', '-i', '-c'], { timeoutMs: TREE_READ_TIMEOUT_MS, outputCap: MAX_SNAPSHOT_RAW_CHARS });
   if (fresh.exitCode !== 0 || !parseTreeRefs(fresh.stdout).lines.has(id)) return r;
   console.log(`[Browser] ${id} was unknown to the CLI but is in a fresh read — running the action again`);
   return run();
@@ -2047,17 +2092,11 @@ app.post('/browser/snapshot', async (c) => {
 
     // The snapshot has its own cap (capSnapshot) that reports the true size;
     // the exec-level cap must not truncate first.
-    const result = await execBrowser(snapshotArgs, s, { outputCap: MAX_SNAPSHOT_RAW_CHARS });
+    const result = await readSnapshot(s, snapshotArgs, { outputCap: MAX_SNAPSHOT_RAW_CHARS });
 
     if (result.exitCode !== 0) {
-      // agent-browser clears its ref table before it resolves the scope, so a
-      // selector that matched nothing left every ref "Unknown" (bench, Toyota:
-      // two clicks on refs still on the page failed). One unscoped read
-      // restores the table — refs persist, so they come back unchanged.
-      if (body.scope) {
-        const restore = await execBrowser(['snapshot', '-i', '-c'], s, { timeoutMs: TREE_READ_TIMEOUT_MS, outputCap: MAX_SNAPSHOT_RAW_CHARS });
-        if (restore.exitCode === 0 && probe.url) s.trees.set(probe.url, restore.stdout, 'snapshot', Date.now(), probe.docStart);
-      }
+      // A failed snapshot leaves the CLI's refs as they were (0.44+,
+      // upstream #2666): a scope that matched nothing no longer resets them.
       return c.json({ error: result.stdout, success: false }, 500);
     }
 
@@ -2170,7 +2209,9 @@ app.post('/browser/fill', async (c) => {
     // below reports it.
     const { result, digest, effect, settleMs, treeDiff, docStart } = await runWithEffect(
       s,
-      () => withRefRestore(s, body.ref, () => execBrowser(['fill', body.ref, body.value], s)),
+      // The value after `--`: "-v", "--json" or "--" are text to fill, not
+      // flags (the CLI reads a flag-shaped argument before `--` as its own).
+      () => withRefRestore(s, body.ref, () => execBrowser(['fill', body.ref, '--', body.value], s)),
       ACTION_POLICIES.fill,
       { excludeRefs: [body.ref] },
     );
@@ -2222,10 +2263,7 @@ app.post('/browser/scroll', async (c) => {
     }
 
     const readScroll = async (): Promise<ScrollInfo | null> => {
-      const probe = await execBrowser(
-        ['eval', 'JSON.stringify({y:window.scrollY,vh:window.innerHeight,h:document.documentElement.scrollHeight})'],
-        s
-      );
+      const probe = await probeTopFrame(s, 'JSON.stringify({y:window.scrollY,vh:window.innerHeight,h:document.documentElement.scrollHeight})');
       return probe.exitCode === 0 ? parseScrollInfo(probe.stdout) : null;
     };
     let scrollInfo = await readScroll();
@@ -2279,7 +2317,7 @@ app.post('/browser/wait', async (c) => {
     // it again (review: one hang could cost ~60 s). A browser that does not
     // answer in time simply yields no page line.
     const probePage = async (): Promise<{ url: string; readyState: string } | null> => {
-      const probe = await execBrowser(['eval', WAIT_PAGE_PROBE_SCRIPT], s, { timeoutMs: WAIT_PAGE_PROBE_TIMEOUT_MS });
+      const probe = await probeTopFrame(s, WAIT_PAGE_PROBE_SCRIPT, { timeoutMs: WAIT_PAGE_PROBE_TIMEOUT_MS });
       const page = probe.exitCode === 0 ? parseWaitPageProbe(probe.stdout) : null;
       return page ? { ...page, url: await addressBarUrl(s, page.url) } : null;
     };
@@ -2448,7 +2486,7 @@ app.post('/browser/read', async (c) => {
 
     // The page's whole text comes back as one JSON string: past the default
     // exec cap it would be cut mid-string and unparseable.
-    const raw = await execBrowser(['eval', readerScript()], s, { outputCap: MAX_SNAPSHOT_RAW_CHARS });
+    const raw = await probeTopFrame(s, readerScript(), { outputCap: MAX_SNAPSHOT_RAW_CHARS });
     const read = raw.exitCode === 0 ? parseReadResult(raw.stdout) : null;
     if (!read) {
       // No page to answer: the session's tab was closed under it.
@@ -2528,7 +2566,14 @@ app.post('/browser/capture-traffic', async (c) => {
     s.capture = null;
     try {
       if (stopped.exitCode !== 0) {
-        return c.json({ error: stopped.stdout, success: false }, 500);
+        // The session's instance holds no recording (0.44+ #2689; it drops
+        // one when it restarts). The CLI's advice names a command
+        // browser_run refuses.
+        const lost = /no_har_recording:/.test(stopped.stdout);
+        const error = lost
+          ? 'The browser instance had no recording to stop (agent-browser drops one when its instance restarts), so nothing was saved. browser_capture_traffic with action="start" begins a new one.'
+          : stopped.stdout;
+        return c.json({ error, success: false }, 500);
       }
       const har = harSchema.parse(JSON.parse(await fs.promises.readFile(rawPath, 'utf-8')));
       // By name (tokens, cookies, auth headers), then by value: a password or
@@ -2598,10 +2643,13 @@ app.post('/browser/capture-traffic', async (c) => {
 // POST /browser/select - Select dropdown option by ref
 app.post('/browser/select', async (c) => {
   try {
-    const body = await c.req.json<{ sessionId: string; ref: string; value: string }>();
+    const body = await c.req.json<{ sessionId: string; ref: string; value: string; by?: 'value' | 'label' }>();
 
     if (!body.sessionId || !body.ref || body.value === undefined) {
       return c.json({ error: 'sessionId, ref, and value are required' }, 400);
+    }
+    if (body.by !== undefined && body.by !== 'value' && body.by !== 'label') {
+      return c.json({ error: 'by must be "value" or "label"' }, 400);
     }
 
     const s = browserSessionOf(body.sessionId);
@@ -2609,9 +2657,9 @@ app.post('/browser/select', async (c) => {
       return c.json({ error: noBrowserOpen() }, 400);
     }
 
-    // Read the element's value before and after: the CLI reports "✓ Done"
-    // even when nothing commits (custom dropdown divs, React-reverted
-    // selects) — the read-back is what makes the result honest.
+    // Read a native <select>'s value before and after: the CLI reports
+    // "✓ Done" even when the page reverts it (React-controlled selects) —
+    // the read-back is what makes the result honest (select-verify.ts).
     const readValue = async (): Promise<string | null> => {
       const r = await execBrowser(['get', 'value', body.ref], s);
       return r.exitCode === 0 ? r.stdout.trim() : null;
@@ -2619,33 +2667,65 @@ app.post('/browser/select', async (c) => {
 
     const before = await readValue();
 
+    // The value after `--`: an option text such as "-- Select --" or "-v" is
+    // a value, not a flag.
+    const selectArgs = ['select', body.ref, ...(body.by ? ['--by', body.by] : []), '--', body.value];
     const { result, digest, effect, settleMs, treeDiff, docStart } = await runWithEffect(
       s,
-      () => withRefRestore(s, body.ref, () => execBrowser(['select', body.ref, body.value], s)),
+      () => withRefRestore(s, body.ref, () => execBrowser(selectArgs, s)),
       { ...ACTION_POLICIES.select, settleMs: SELECT_COMMIT_SETTLE_MS },
       { excludeSubtrees: [body.ref] },
     );
 
     if (result.exitCode !== 0) {
-      return c.json({ error: await explainUnknownRef(s, result.stdout, body.ref), success: false }, 500);
+      return c.json({ error: selectRefusalText(await explainUnknownRef(s, result.stdout, body.ref)), success: false }, 500);
+    }
+
+    // The select loaded a new document (a sort or language picker that
+    // submits its form): the ref is the old document's, and its value
+    // cannot be read on the new one.
+    if (digest?.navigated && !digest.sameDocument) {
+      notifyBrowserAction();
+      return c.json({ success: true, navigated: true, digest, settleMs });
     }
 
     const after = await readValue();
 
     // Unchanged value that is not the requested string: the agent may have
-    // asked by label for the option that was already selected. Focus the
-    // target and read ITS selected option — a probe over every <select> on
-    // the page could be satisfied by a different dropdown.
-    let labelMatches = false;
-    if (after !== null && after === before && after !== body.value) {
-      // Read the target's own option list through the same ref the select
-      // and the value read used. No page script: a page-wide search, a
-      // focused element or the element at the target's rectangle can all be
-      // a different dropdown (each verified the wrong one in review).
+    // asked by label for the option that was already selected, or the target
+    // is a combobox or listbox the CLI operated by clicking its option, which
+    // has no value. Read ITS option list: a probe over every <select> on the
+    // page could be satisfied by a different dropdown.
+    let options: ReturnType<typeof parseSelectOptions> | null = null;
+    if (after === null || (after === before && after !== body.value)) {
+      // Through the same ref the select and the value read used. No page
+      // script: a page-wide search, a focused element or the element at the
+      // target's rectangle can all be a different dropdown (each verified the
+      // wrong one in review).
       const html = await execBrowser(['get', 'html', body.ref], s);
-      labelMatches = html.exitCode === 0 && targetOptionMatches(parseSelectOptions(html.stdout), body.value, after);
+      options = html.exitCode === 0 ? parseSelectOptions(html.stdout) : null;
     }
 
+    if (options !== null && options.length === 0) {
+      // No <option>s: a combobox or listbox the CLI opened and picked the
+      // matching role=option in. There is no value to read back; its own
+      // tree line is (what a combobox shows, a listbox's selected options),
+      // and it becomes the baseline.
+      const tree = await readSnapshot(s, ['snapshot', '-i', '-c'], { timeoutMs: TREE_READ_TIMEOUT_MS, outputCap: MAX_SNAPSHOT_RAW_CHARS });
+      const id = body.ref.replace(/^@/, '');
+      const lines = tree.exitCode === 0 ? parseTreeRefs(tree.stdout).lines : null;
+      const line = lines?.get(id);
+      const shows = line?.value || undefined;
+      const selected = lines && line
+        ? [...lines.values()].filter(l => l.parent === id && l.attrs.includes('selected')).map(l => l.name)
+        : [];
+      if (tree.exitCode === 0 && digest) s.trees.set(digest.url, tree.stdout, 'action', Date.now(), docStart);
+      notifyBrowserAction();
+      return c.json({ success: true, widget: true, settleMs, ...(shows !== undefined && { shows }), ...(selected.length > 0 && { selected }), ...(effect && { effect }), ...(treeDiff && { treeDiff }) });
+    }
+
+    const labelMatches = after !== null && after === before && after !== body.value
+      && options !== null && targetOptionMatches(options, body.value, after);
     const judgement = judgeSelectCommit(body.value, before, after, labelMatches);
     if (!judgement.ok) {
       return c.json({ error: judgement.reason, success: false }, 500);
@@ -2779,7 +2859,7 @@ app.post('/browser/type', async (c) => {
           const focusResult = await withRefRestore(s, body.ref, () => execBrowser(['focus', body.ref as string], s));
           if (focusResult.exitCode !== 0) return focusResult;
         }
-        return execBrowser(['keyboard', 'type', body.text], s);
+        return execBrowser(['keyboard', 'type', '--', body.text], s);
       },
       ACTION_POLICIES.type,
       { excludeRefs: body.ref ? [body.ref] : [] },
@@ -2871,9 +2951,19 @@ app.post('/browser/run', async (c) => {
     if (result.exitCode === 0 && closes?.closesOwnTabAt != null) await moveOffClosedTab(s, closes.closesOwnTabAt);
     const verb = commandArgs[0].toLowerCase();
     const joined = commandArgs.join(' ').toLowerCase();
-    // A bare `tab` / `tab list` only lists: the page in front is the same.
-    const listsTabs = verb.startsWith('tab') && (commandArgs.length === 1 || commandArgs[1]?.toLowerCase() === 'list');
-    const navigates = (verb.startsWith('tab') && !listsTabs) || ['back', 'forward', 'reload', 'open', 'goto', 'navigate'].includes(verb);
+    // A bare `tab` / `tab list` only lists, and `tab keep live|throttled|frozen`
+    // only changes how a tab runs in the background: the page in front is the same.
+    const tabVerb = verb.startsWith('tab') ? commandArgs[1]?.toLowerCase() : undefined;
+    const listsTabs = verb.startsWith('tab') && (commandArgs.length === 1 || tabVerb === 'list');
+    const keepsTab = tabVerb === 'keep';
+    const navigates = (verb.startsWith('tab') && !listsTabs && !keepsTab) || ['back', 'forward', 'reload', 'open', 'goto', 'navigate'].includes(verb);
+    if (result.exitCode === 0) {
+      // A navigation or a tab change leaves the CLI on the top frame; a
+      // `frame` command (alone or in a batch) selects the agent's frame.
+      const selection = frameSelectionOf(commands);
+      if (selection !== undefined) s.frame = selection;
+      else if (navigates) s.frame = null;
+    }
     // A navigation Chrome answered with its own error page still happened:
     // `tab new <dead url>` leaves a new tab in front. The error stands, and
     // the bookkeeping below runs as for a success, so the tab is reported now
@@ -2884,9 +2974,11 @@ app.post('/browser/run', async (c) => {
       // The CLI's tab_locked names this instance's peer and says to close it:
       // what it means here is that another session is on the tab.
       const locked = /tab_locked: tab (\S+) is pinned/.exec(result.stdout);
-      const error = locked
-        ? `Not switched: another session is on tab ${commandArgs[1] ?? locked[1]} now. This session is still on its own tab.`
-        : result.stdout;
+      const error = !locked
+        ? result.stdout
+        : keepsTab
+          ? `Not changed: tab ${locked[1]} is another session's tab now. This session's tabs are as they were.`
+          : `Not switched: another session is on tab ${commandArgs[1] ?? locked[1]} now. This session is still on its own tab.`;
       return c.json({ error, success: false }, 500);
     }
 
@@ -2902,8 +2994,8 @@ app.post('/browser/run', async (c) => {
       // close), so the refs the agent holds for the tab now in front all read
       // "Unknown ref" until a snapshot. Refs persist per document, so one read
       // brings them back unchanged.
-      if (verb.startsWith('tab') && commandArgs[1]?.toLowerCase() !== 'list' && commandArgs.length > 1) {
-        const restore = await execBrowser(['snapshot', '-i', '-c'], s, { timeoutMs: TREE_READ_TIMEOUT_MS, outputCap: MAX_SNAPSHOT_RAW_CHARS });
+      if (verb.startsWith('tab') && !listsTabs && !keepsTab) {
+        const restore = await readSnapshot(s, ['snapshot', '-i', '-c'], { timeoutMs: TREE_READ_TIMEOUT_MS, outputCap: MAX_SNAPSHOT_RAW_CHARS });
         if (restore.exitCode === 0 && front.url) s.trees.set(front.url, restore.stdout, 'action', Date.now(), front.docStart);
       }
     }
@@ -2918,11 +3010,16 @@ app.post('/browser/run', async (c) => {
 
     // `get url` on Chrome's error page reads chrome-error://; report the
     // address that failed instead, as every other URL the agent sees does.
-    const output = verb === 'get' && commandArgs[1]?.toLowerCase() === 'url' && commandArgs.length === 2
+    const answer = verb === 'get' && commandArgs[1]?.toLowerCase() === 'url' && commandArgs.length === 2
       ? await addressBarUrl(s, result.stdout)
       : listsTabs && !commandArgs.includes('--json')
         ? labelTabList(result.stdout, await tabsAsSeen(s))
         : result.stdout;
+    // The CLI's own warnings about what it did (a value truncated or snapped,
+    // a page that navigated before the state could be checked). The action
+    // tools read the outcome back themselves; a raw command has only these.
+    const warnings = result.warnings?.length ? result.warnings.map(w => `⚠ ${w}`).join('\n') : '';
+    const output = warnings ? `${answer}\n${warnings}` : answer;
 
     notifyBrowserAction();
     return c.json({ success: true, output, ...(tabInfo && { tabInfo }) });
@@ -3713,8 +3810,9 @@ function loginFillDeps(sessionId: string): LoginFillDeps {
  * with no submit ref, press Enter — only while focus is still in the last
  * field written, so Enter cannot land in another document or field.
  * Right before each try, the page is checked once more: one that moved on by
- * itself gets nothing (the CLI resolves a stale ref by role and name, on
- * whatever page is there by then).
+ * itself gets nothing. (Since 0.44 the CLI refuses a ref of a document the
+ * page has replaced rather than resolving it by role and name on whatever
+ * page is there, but Enter has no ref, and the in-page click is our own.)
  */
 async function submitLoginForm(plan: SubmitPlan, sessionId: string): Promise<SubmitOutcome> {
   const s = browserSessionOf(sessionId);
