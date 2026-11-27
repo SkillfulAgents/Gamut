@@ -565,7 +565,8 @@ describe('requests that need the live chat connections', () => {
       '/api/agents/support-desk/sessions/session-1/login-via',
       '/api/platform-auth/complete',
       '/api/platform-auth/revoke',
-    ]) expect(needsLiveConnections(path), path).toBe(true)
+      '/api/settings/factory-reset',
+    ]) expect(needsLiveConnections(path, 'POST'), path).toBe(true)
     for (const path of [
       '/api/agents',
       '/api/agents/support-desk/sessions',
@@ -577,7 +578,19 @@ describe('requests that need the live chat connections', () => {
       '/api/x-agent/chatter',
       '/api/x-agent/integrations',
       '/api/x-agent/sessions',
-    ]) expect(needsLiveConnections(path), path).toBe(false)
+      '/api/settings',
+      '/api/settings/factory-reset/extra',
+    ]) expect(needsLiveConnections(path, 'POST'), path).toBe(false)
+  })
+
+  it('names the delete of an agent, which stops its connections, and none of its other requests', () => {
+    expect(needsLiveConnections('/api/agents/support-desk', 'DELETE')).toBe(true)
+    for (const method of ['GET', 'PUT', 'PATCH']) expect(needsLiveConnections('/api/agents/support-desk', method), method).toBe(false)
+    for (const path of [
+      '/api/agents',
+      '/api/agents/support-desk/sessions/session-1',
+      '/api/agents/support-desk/scheduled-tasks/task-1',
+    ]) expect(needsLiveConnections(path, 'DELETE'), path).toBe(false)
   })
 
   it('serves the request in the task manager object, with its services started first', async () => {

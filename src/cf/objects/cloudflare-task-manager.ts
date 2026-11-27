@@ -113,10 +113,18 @@ const LIVE_CONNECTION_ROUTES = [
   // An agent's proxy rule request waits in memory for its review card, so the calls that make it,
   // wait for it and cancel it must reach one copy.
   /^\/api\/x-agent\/rules(\/|$)/,
+  // A factory reset stops every integration before it clears their rows.
+  /^\/api\/settings\/factory-reset$/,
 ]
 
-export function needsLiveConnections(pathname: string): boolean {
-  return LIVE_CONNECTION_ROUTES.some((route) => route.test(pathname))
+/**
+ * Deleting an agent pauses its integrations and cancels its webhook triggers before it removes
+ * their rows. Only the delete: the agent's other requests stay where they arrive.
+ */
+const AGENT_ROUTE = /^\/api\/agents\/[^/]+$/
+
+export function needsLiveConnections(pathname: string, method: string): boolean {
+  return LIVE_CONNECTION_ROUTES.some((route) => route.test(pathname)) || (method === 'DELETE' && AGENT_ROUTE.test(pathname))
 }
 
 /** One API request served in the org's task manager object (needsLiveConnections). */

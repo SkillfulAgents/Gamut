@@ -124,7 +124,7 @@ export async function serveWorkspaceRequest(request: Request, env: Env, objectId
 
 /** The container's calls to the host (proxy, host tools, bootstrap): the API, in the Worker. */
 async function serveHostRequest(request: Request, env: Env): Promise<Response> {
-  if (needsLiveConnections(new URL(request.url).pathname)) return serveInTaskManager(request, env)
+  if (needsLiveConnections(new URL(request.url).pathname, request.method)) return serveInTaskManager(request, env)
   const app = await import('../boot')
   await app.boot(env)
   return app.serveContainerRequest(request, env)
