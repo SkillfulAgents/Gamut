@@ -85,13 +85,21 @@ export function resetAuth() {
  * read on the instance it had: an instance built from older settings still
  * writes with them (a session due for refresh gets its expiry from that
  * instance's lifetime), even when the answer is thrown away.
+ *
+ * The instance comes back ready: its context (`$context`, which Better Auth
+ * starts building with the instance) has settled. A caller that only reads
+ * `options` would otherwise leave that work to finish after its request, and
+ * on Cloudflare Workers a promise left pending by a request that has ended
+ * never settles, so every later caller of the instance in that isolate fails.
  */
 export async function getAuth() {
   const inputs = await loadAuthInputs()
   const key = inputsKey(inputs)
   // Building is synchronous, so concurrent callers with the same inputs share one instance.
   if (current?.key !== key) current = { key, auth: createAuthInstance(inputs) }
-  return current.auth
+  const { auth } = current
+  await auth.$context
+  return auth
 }
 
 function createAuthInstance({ authSettings, trustedOrigins, baseURL, oauthProviders, secret }: AuthInputs) {
