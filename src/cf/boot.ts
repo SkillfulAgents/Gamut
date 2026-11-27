@@ -39,7 +39,7 @@ import { createCloudflareRuleRunner } from './lib/cloudflare-rule-runner'
 import { withoutDefaultCache } from './lib/request-cache'
 import { createCloudflareErrorReporter } from './lib/cloudflare-error-reporting'
 import { CloudflareKeyManager } from './cloudflare-key-manager'
-import { CloudflareTaskManager, announceSessionStart, runHostToolInTaskManager } from './objects/cloudflare-task-manager'
+import { CloudflareTaskManager, announceSessionStart, decideLoginRequestInTaskManager, runHostToolInTaskManager } from './objects/cloudflare-task-manager'
 import { agentContainers, withAgentObject } from './cloudflare-container-control'
 import { installCloudflareContainers } from '@shared/lib/container/cloudflare-container-runtime'
 import { CloudflareAgentActor, servingAgentObject } from './objects/cloudflare-agent-actor'
@@ -230,11 +230,16 @@ function wireAgents(env: Env): void {
 
 /**
  * The host as an agent's actor reaches it here: a session runs in its agent's object, while the
- * chat connections, the webhook relay and the trigger manager are in the task manager object.
+ * chat connections, the webhook relay, the trigger manager and the sign-in watches are in the task
+ * manager object.
  */
 function cloudflareHostPort(env: Env): HostPort {
   return createLocalHostPort({
-    calls: { ...localHostCalls, hostTool: (request) => runHostToolInTaskManager(env, request) },
+    calls: {
+      ...localHostCalls,
+      hostTool: (request) => runHostToolInTaskManager(env, request),
+      loginRequest: (request) => decideLoginRequestInTaskManager(env, request),
+    },
     events: {
       ...localHostEvents,
       global: (event) => {

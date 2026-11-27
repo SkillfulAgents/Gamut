@@ -32,7 +32,7 @@ import { nearStorage } from '../lib/object-location'
 import { reachCurrentCode, restartIfOlder, type VersionMetadata } from '../lib/object-version'
 import { Task, TaskManager, type PeriodicOptions, type RetryPolicy, type TaskContext, type TaskSpec } from '@shared/lib/background-work'
 import { captureException } from '@shared/lib/error-reporting'
-import type { HostToolRequest, HostToolResult } from '@shared/lib/agent-actor/host-port'
+import type { HostToolRequest, HostToolResult, LoginDecision, LoginRequestCall } from '@shared/lib/agent-actor/host-port'
 
 /** The name of the org's one task manager object. */
 const OBJECT_NAME = 'org'
@@ -105,8 +105,10 @@ const LIVE_CONNECTION_ROUTES = [
   /^\/api\/webhook-relay(\/|$)/,
   /^\/api\/x-agent\/(chat|meetings)(\/|$)/,
   // A sign-in the user makes from a login card: its session is then watched for minutes, on
-  // timers that a request's isolate does not keep after the answer.
-  /^\/api\/agents\/[^/]+\/sessions\/[^/]+\/(fill-login|login-via)$/,
+  // timers that a request's isolate does not keep after the answer. And what ends a watch: a
+  // sign-in or hand-over the user finished or declined, and an admin's fill. The check that
+  // nothing is saved to another person's account reads the watches, so it runs where they are.
+  /^\/api\/agents\/[^/]+\/sessions\/[^/]+\/(fill-login|login-via|complete-login|complete-browser-input|autofill-browser-credential|fill-login-credential)$/,
   // A platform sign-in or sign-out: it tells the relay, the notifications and the triggers that
   // the account changed, and only the copies in this object are running.
   /^\/api\/platform-auth\/(complete|revoke)$/,
@@ -117,14 +119,16 @@ const LIVE_CONNECTION_ROUTES = [
   /^\/api\/settings\/factory-reset$/,
 ]
 
-/**
- * Deleting an agent pauses its integrations and cancels its webhook triggers before it removes
- * their rows. Only the delete: the agent's other requests stay where they arrive.
- */
-const AGENT_ROUTE = /^\/api\/agents\/[^/]+$/
+/** Paths of which only the delete changes what lives here: their other requests stay where they arrive. */
+const LIVE_CONNECTION_DELETES = [
+  // Deleting an agent pauses its integrations and cancels its webhook triggers before it removes their rows.
+  /^\/api\/agents\/[^/]+$/,
+  // Deleting a saved account, forgetting its sessions or revoking it from an agent ends the watches that save to it.
+  /^\/api\/browser-accounts\/[^/]+(\/sessions|\/agents\/[^/]+)?$/,
+]
 
 export function needsLiveConnections(pathname: string, method: string): boolean {
-  return LIVE_CONNECTION_ROUTES.some((route) => route.test(pathname)) || (method === 'DELETE' && AGENT_ROUTE.test(pathname))
+  return LIVE_CONNECTION_ROUTES.some((route) => route.test(pathname)) || (method === 'DELETE' && LIVE_CONNECTION_DELETES.some((route) => route.test(pathname)))
 }
 
 /** One API request served in the org's task manager object (needsLiveConnections). */
@@ -164,6 +168,20 @@ export async function runHostToolInTaskManager(env: Pick<Env, 'TASK_MANAGER' | '
   if (own) return own.runHostTool(request)
   await reachCurrentCode(env.TASK_MANAGER, OBJECT_NAME, env.VERSION?.timestamp)
   return env.TASK_MANAGER.getByName(OBJECT_NAME).runHostTool(request)
+}
+
+/**
+ * Decides an agent's request_login call in the task manager object. A sign-in the vault fills is
+ * then watched for minutes, and the watches are kept in the memory of the place that started them.
+ * The user's own sign-ins start theirs there (needsLiveConnections), and so do the requests that
+ * end one: started in the agent's object, a watch would be one that none of them could see. A
+ * failure rejects; the session then leaves the sign-in to the user.
+ */
+export async function decideLoginRequestInTaskManager(env: Pick<Env, 'TASK_MANAGER' | 'VERSION'>, request: LoginRequestCall): Promise<LoginDecision> {
+  const own = servingTaskManager()
+  if (own) return own.decideLoginRequest(request)
+  await reachCurrentCode(env.TASK_MANAGER, OBJECT_NAME, env.VERSION?.timestamp)
+  return env.TASK_MANAGER.getByName(OBJECT_NAME).decideLoginRequest(request)
 }
 
 /**
@@ -319,6 +337,12 @@ export class TaskManagerDurableObject extends DurableObject<Env> {
   async runHostTool(request: HostToolRequest): Promise<HostToolResult> {
     await this.start()
     return serving.run(this, async () => (await import('@shared/lib/host/tools')).runHostTool(request))
+  }
+
+  /** An agent's request_login call (decideLoginRequestInTaskManager): the sign-in it fills is watched from here. */
+  async decideLoginRequest(request: LoginRequestCall): Promise<LoginDecision> {
+    await this.start()
+    return serving.run(this, async () => (await import('@shared/lib/browser-vault/login-host')).decideLoginRequest(request))
   }
 
   /** An API request that needs the services running here (serveInTaskManager). */

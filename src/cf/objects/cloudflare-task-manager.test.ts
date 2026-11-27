@@ -25,10 +25,12 @@ const integrations = vi.hoisted(() => ({ sessionStarted: vi.fn(async (_agentSlug
 vi.mock('@shared/lib/agent-integrations/agent-integration-manager', () => ({ agentIntegrationManager: integrations }))
 const hostTools = vi.hoisted(() => ({ runHostTool: vi.fn() }))
 vi.mock('@shared/lib/host/tools', () => ({ runHostTool: hostTools.runHostTool }))
+const loginHost = vi.hoisted(() => ({ decideLoginRequest: vi.fn() }))
+vi.mock('@shared/lib/browser-vault/login-host', () => ({ decideLoginRequest: loginHost.decideLoginRequest }))
 const relay = vi.hoisted(() => ({ available: false }))
 vi.mock('@shared/lib/webhook-relay', () => ({ getWebhookRelay: () => ({ snapshot: () => ({ available: relay.available }) }) }))
 
-import { CloudflareTaskManager, DeployStepNotReady, TaskManagerDurableObject, announceSessionStart, runHostToolInTaskManager, servingTaskManager, ensureMigrated, ensureOrgPrepared, needsLiveConnections, prepareDeploy, serveInTaskManager } from './cloudflare-task-manager'
+import { CloudflareTaskManager, DeployStepNotReady, TaskManagerDurableObject, announceSessionStart, decideLoginRequestInTaskManager, runHostToolInTaskManager, servingTaskManager, ensureMigrated, ensureOrgPrepared, needsLiveConnections, prepareDeploy, serveInTaskManager } from './cloudflare-task-manager'
 import type { Env } from '../index'
 import { captureException } from '@shared/lib/error-reporting'
 
@@ -550,6 +552,36 @@ describe("an agent session's host tools", () => {
   })
 })
 
+describe("an agent session's sign-in request", () => {
+  const request = { agentSlug: 'sales', sessionId: 'session-1', toolUseId: 'tool-1', input: '{"username":"ada@example.com"}' }
+
+  it('is decided in the task manager object, where the sign-in is then watched', async () => {
+    app.startBackgroundServices.mockClear()
+    loginHost.decideLoginRequest.mockReset()
+    const { object } = testObject()
+    managerFor(object)
+    const objects = { getByName: () => object } as unknown as DurableObjectNamespace<TaskManagerDurableObject>
+    let servedBy: unknown
+    loginHost.decideLoginRequest.mockImplementationOnce(async () => {
+      servedBy = servingTaskManager()
+      return { action: 'settled' }
+    })
+
+    expect(await decideLoginRequestInTaskManager({ TASK_MANAGER: objects }, request)).toEqual({ action: 'settled' })
+
+    expect(loginHost.decideLoginRequest).toHaveBeenCalledExactlyOnceWith(request)
+    expect(servedBy).toBe(object)
+    expect(app.startBackgroundServices.mock.invocationCallOrder[0]).toBeLessThan(loginHost.decideLoginRequest.mock.invocationCallOrder[0])
+    object.stopDispatch()
+  })
+
+  it('rejects when the task manager object cannot be reached, so the session leaves the sign-in to the user', async () => {
+    const unreachable = { getByName: () => ({ decideLoginRequest: async () => { throw new Error('Network connection lost.') } }) } as unknown as DurableObjectNamespace<TaskManagerDurableObject>
+
+    await expect(decideLoginRequestInTaskManager({ TASK_MANAGER: unreachable }, request)).rejects.toThrow('Network connection lost.')
+  })
+})
+
 describe('requests that need the live chat connections', () => {
   it('names the routes that read or change a connection, and no other', () => {
     for (const path of [
@@ -563,6 +595,10 @@ describe('requests that need the live chat connections', () => {
       '/api/x-agent/meetings/join',
       '/api/agents/support-desk/sessions/session-1/fill-login',
       '/api/agents/support-desk/sessions/session-1/login-via',
+      '/api/agents/support-desk/sessions/session-1/complete-login',
+      '/api/agents/support-desk/sessions/session-1/complete-browser-input',
+      '/api/agents/support-desk/sessions/session-1/autofill-browser-credential',
+      '/api/agents/support-desk/sessions/session-1/fill-login-credential',
       '/api/platform-auth/complete',
       '/api/platform-auth/revoke',
       '/api/settings/factory-reset',
@@ -572,6 +608,9 @@ describe('requests that need the live chat connections', () => {
       '/api/agents/support-desk/sessions',
       '/api/agents/support-desk/sessions/session-1/login-request',
       '/api/agents/support-desk/sessions/session-1/fill-login/extra',
+      '/api/agents/support-desk/sessions/session-1/login-way',
+      '/api/browser-accounts',
+      '/api/browser-accounts/account-1',
       '/api/platform-auth',
       '/api/platform-auth/download-nonce/redeem',
       '/api/agent-integrations-export',
@@ -591,6 +630,22 @@ describe('requests that need the live chat connections', () => {
       '/api/agents/support-desk/sessions/session-1',
       '/api/agents/support-desk/scheduled-tasks/task-1',
     ]) expect(needsLiveConnections(path, 'DELETE'), path).toBe(false)
+  })
+
+  it('names the deletes that end the watches saving to an account, and none of its other requests', () => {
+    for (const path of [
+      '/api/browser-accounts/account-1',
+      '/api/browser-accounts/account-1/sessions',
+      '/api/browser-accounts/account-1/agents/support-desk',
+    ]) expect(needsLiveConnections(path, 'DELETE'), path).toBe(true)
+    for (const path of [
+      '/api/browser-accounts',
+      '/api/browser-accounts/account-1/authenticator',
+      '/api/browser-accounts/account-1/passkeys',
+      '/api/browser-accounts/account-1/agents',
+    ]) expect(needsLiveConnections(path, 'DELETE'), path).toBe(false)
+    for (const method of ['GET', 'PATCH']) expect(needsLiveConnections('/api/browser-accounts/account-1', method), method).toBe(false)
+    expect(needsLiveConnections('/api/browser-accounts/account-1/agents', 'GET')).toBe(false)
   })
 
   it('serves the request in the task manager object, with its services started first', async () => {
