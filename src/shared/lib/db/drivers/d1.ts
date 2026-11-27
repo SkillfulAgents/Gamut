@@ -37,6 +37,10 @@ export function d1(binding: D1Binding): DatabaseDriver {
  * migration cannot take the others past it. A failed one stops the run with the earlier ones kept,
  * and the next run starts at it. Same journal table and rule as drizzle's migrator, so a database
  * it migrated continues here: a migration is pending when it is newer than the newest journal row.
+ *
+ * A new database is the exception: all of its migrations go in one batch. Its tables are empty, so
+ * the batch is far from the 30 seconds, and each batch is a request the caller waits for. A failed
+ * batch leaves the database new, and the next run starts over.
  */
 export async function migrateD1(binding: D1Binding, migrations: readonly MigrationMeta[]): Promise<void> {
   const table = `"${MIGRATIONS_TABLE.replaceAll('"', '""')}"`
@@ -50,10 +54,14 @@ export async function migrateD1(binding: D1Binding, migrations: readonly Migrati
       throw new Error(`Malformed migration journal entry ${migration.hash}`)
     }
   }
-  for (const migration of pending) {
-    const statements = migration.sql.filter((statement) => statement.trim())
-    // Inlined, not bound: the batch runs plain statements.
-    statements.push(`INSERT INTO ${table} ("hash", "created_at") VALUES ('${migration.hash}', ${migration.folderMillis})`)
+  const isNewDatabase = last === undefined
+  const batches = isNewDatabase && pending.length > 0 ? [pending] : pending.map((migration) => [migration])
+  for (const batch of batches) {
+    const statements = batch.flatMap((migration) => [
+      ...migration.sql.filter((statement) => statement.trim()),
+      // Inlined, not bound: the batch runs plain statements.
+      `INSERT INTO ${table} ("hash", "created_at") VALUES ('${migration.hash}', ${migration.folderMillis})`,
+    ])
     await binding.batch(statements.map((statement) => binding.prepare(statement)))
   }
 }
