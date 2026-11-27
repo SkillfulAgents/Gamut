@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, MenuItem, nativeImage, nativeTheme, powerMonitor, session, shell, Notification } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, Menu, MenuItem, nativeImage, nativeTheme, powerMonitor, session, shell, Notification, systemPreferences } from 'electron'
 import { execFile, execFileSync, exec } from 'child_process'
 import path from 'path'
 import fs from 'fs'
@@ -166,16 +166,20 @@ import { registerComputerUseScreenshotDecoder } from './computer-use-screenshots
 import { isAllowedRendererPermission } from './renderer-permissions'
 import { agentIntegrationManager } from '@shared/lib/agent-integrations/agent-integration-manager'
 import { getUserSettings } from '@shared/lib/services/user-settings-service'
+import { forceOverlayScrollbars, relaunchForOverlayScrollbars } from './overlay-scrollbars'
 
 // Set the app name (shows in macOS menu bar instead of "Electron" during dev)
 app.name = 'SuperAgent'
 
-// Force overlay scrollbars so macOS "always show scrollbars" setting doesn't
-// cause ugly permanent scrollbars in the app
-if (process.platform === 'darwin') {
-  const { systemPreferences } = require('electron')
-  systemPreferences.setUserDefault('AppleShowScrollBars', 'string', 'WhenScrolling')
-}
+// Overlay scroll bars (shown while scrolling) whatever the macOS setting. The
+// override counts from the next launch, so a first launch relaunches once for it
+// before it starts anything (overlay-scrollbars.ts, startApp below).
+const relaunchForScrollbars =
+  process.platform === 'darwin' &&
+  forceOverlayScrollbars(systemPreferences, {
+    argv: process.argv,
+    canRelaunch: app.isPackaged && !runsInAppSandbox(desktopClientFacts()),
+  })
 
 // Use a more exotic default port to avoid conflicts
 const DEFAULT_API_PORT = 47891
@@ -2036,7 +2040,8 @@ if (!gotTheLock) {
   })
 
   // Only the instance that holds the lock boots the app.
-  startApp()
+  if (relaunchForScrollbars) void relaunchForOverlayScrollbars(app, process.argv, startApp)
+  else startApp()
 }
 
 // Graceful shutdown handling
