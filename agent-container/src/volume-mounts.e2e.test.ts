@@ -331,6 +331,24 @@ describe.skipIf(!ENABLED)('volume mounts in the agent image', () => {
     fs.rmSync(source, { recursive: true });
   }, 60_000);
 
+  it('finds a written file over the sync limit in its local cache after the upload, and a read does not change what it reports', async () => {
+    const container = startAgent(
+      'mkdir -p /tmp/src/v_cache && chmod -R a+rwX /tmp/src && rclone serve webdav /tmp/src --addr 127.0.0.1:8080 --baseurl /api/volumes --dir-cache-time 0s',
+      [{ volumeId: 'v_cache', name: 'docs' }],
+    );
+    await healthUntilOk(container);
+    sh(container, 'mkdir -p /mounts/docs/a && head -c 800000 /dev/urandom > /mounts/docs/a/big.bin');
+    await waitForUploadQueueToDrain(container, 'v_cache');
+    expect(sh(container, 'test -f /tmp/src/v_cache/a/big.bin && echo uploaded')).toBe('uploaded');
+    expect(sh(container, 'find /workspace/.volume-cache/v_cache-*/vfs -mindepth 1 -maxdepth 1 | wc -l')).toBe('1');
+    const scan = `node -e "import('/app/dist/volume-mounts.js').then(async (m) => { const cache = require('fs').readdirSync('/workspace/.volume-cache').find((d) => d.startsWith('v_cache-')); const files = await m.oversizedFiles([{ name: 'docs', cache: '/workspace/.volume-cache/' + cache, syncLimit: { bytes: 700000, note: 'n' } }]); console.log(JSON.stringify([...files])) })"`;
+    const written = JSON.parse(sh(container, scan));
+    expect(written.map(([file]: [string]) => file)).toEqual(['/mounts/docs/a/big.bin']);
+    // A read touches the cached copy's times, never its size, so it must not look like a write.
+    sh(container, 'sleep 1.1 && cat /mounts/docs/a/big.bin > /dev/null && sleep 1');
+    expect(JSON.parse(sh(container, scan))).toEqual(written);
+  }, 60_000);
+
   it('uploads a file still waiting in the queue when the host stops the container', async () => {
     const source = fs.mkdtempSync(path.join(os.tmpdir(), 'volume-src-'));
     fs.chmodSync(source, 0o777);

@@ -5,7 +5,7 @@ import * as path from 'path'
 import * as http from 'http'
 import { spawn } from 'child_process'
 import { EventEmitter } from 'events'
-import { fitIndex, mountVolumes, mountedVolumeIds, parseVolumes, readIndex, rcloneMountArgs, untilMountAnswers, volumeAnswers, waitForUploads } from './volume-mounts'
+import { fitIndex, mountVolumes, mountedVolumeIds, oversizedFiles, parseVolumes, readIndex, rcloneMountArgs, untilMountAnswers, volumeAnswers, waitForUploads } from './volume-mounts'
 
 vi.mock('child_process', async (importOriginal) => ({
   ...(await importOriginal<typeof import('child_process')>()),
@@ -263,5 +263,24 @@ describe('a mount that fails', () => {
 
     expect(rmdir).toHaveBeenCalledWith('/mounts/notes')
     expect(mountedVolumeIds()).toEqual([])
+  })
+})
+
+describe('oversizedFiles', () => {
+  it("lists files over a drive's sync limit from rclone's local copies, with their size", async () => {
+    const cache = fs.mkdtempSync(path.join(os.tmpdir(), 'volume-cache-'))
+    const root = path.join(cache, 'vfs', ':webdav{x}')
+    fs.mkdirSync(path.join(root, 'a/b'), { recursive: true })
+    fs.writeFileSync(path.join(root, 'a/b/big.csv'), Buffer.alloc(900))
+    fs.writeFileSync(path.join(root, 'small.txt'), Buffer.alloc(10))
+    const syncLimit = { bytes: 500, note: 'stays local.' }
+    const files = await oversizedFiles([{ name: 'repo', cache, syncLimit }, { name: 'drive', cache }])
+    expect([...files!.keys()]).toEqual(['/mounts/repo/a/b/big.csv'])
+    expect(files!.get('/mounts/repo/a/b/big.csv')).toEqual({ size: 900, note: 'stays local.' })
+    expect(await oversizedFiles([{ name: 'fresh', cache: path.join(cache, 'none'), syncLimit }])).toEqual(new Map())
+    const broken = fs.mkdtempSync(path.join(os.tmpdir(), 'volume-cache-'))
+    fs.writeFileSync(path.join(broken, 'vfs'), '')
+    expect(await oversizedFiles([{ name: 'repo', cache: broken, syncLimit }])).toBeNull()
+    fs.rmSync(cache, { recursive: true }); fs.rmSync(broken, { recursive: true })
   })
 })

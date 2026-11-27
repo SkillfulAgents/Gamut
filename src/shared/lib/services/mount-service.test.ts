@@ -116,14 +116,16 @@ describe('SQLite mount attachments', () => {
     expect(await setMountReadOnly('test-agent', mount.id, false, viewer)).toBe(true)
     expect((await listVolumes('test-agent')).volumes[0]).not.toHaveProperty('readOnly')
   })
-  it("sends a drive's source and agent note only while the agent can write to it", async () => {
+  it("sends a drive's source, agent note and sync limit only while the agent can write to it", async () => {
     vi.spyOn(BaseMountableVolume.prototype, 'agentNote', 'get').mockReturnValue('Writes are commits.')
     const mount = await add(folder('team'))
     expect((await listVolumes('test-agent')).volumes[0]).not.toHaveProperty('agentNote')
     vi.spyOn(BaseMountableVolume.prototype, 'sourceLabel', 'get').mockReturnValue('Repo · team')
-    expect((await listVolumes('test-agent')).volumes[0]).toMatchObject({ sourceLabel: 'Repo · team', agentNote: 'Writes are commits.' })
+    vi.spyOn(BaseMountableVolume.prototype, 'syncLimit', 'get').mockReturnValue({ bytes: 700_000, note: 'stays local.' })
+    expect((await listVolumes('test-agent')).volumes[0]).toMatchObject({ sourceLabel: 'Repo · team', agentNote: 'Writes are commits.', syncLimit: { bytes: 700_000, note: 'stays local.' } })
     await setMountReadOnly('test-agent', mount.id, true, viewer)
     expect((await listVolumes('test-agent')).volumes[0]).not.toHaveProperty('agentNote')
+    expect((await listVolumes('test-agent')).volumes[0]).not.toHaveProperty('syncLimit')
   })
   it('attaches read-only when asked, an attachment the agent already had included', async () => {
     const mount = await add(folder('brain'))

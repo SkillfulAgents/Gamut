@@ -224,7 +224,10 @@ export async function listVolumes(slug: string, beforeRead?: () => void): Promis
         ...(driver?.caseInsensitive ? { caseInsensitive: true } : {}),
         ...(driver?.ignoreSize ? { ignoreSize: true } : {}),
         ...(driver?.dirCacheSeconds ? { dirCacheSeconds: driver.dirCacheSeconds } : {}),
-        ...(row.readOnly || driver?.readOnly ? { readOnly: true } : driver?.agentNote && driver.sourceLabel ? { sourceLabel: driver.sourceLabel, agentNote: driver.agentNote } : {}) }]
+        ...(row.readOnly || driver?.readOnly ? { readOnly: true } : {
+          ...(driver?.agentNote && driver.sourceLabel ? { sourceLabel: driver.sourceLabel, agentNote: driver.agentNote } : {}),
+          ...(driver?.syncLimit ? { syncLimit: driver.syncLimit } : {}),
+        }) }]
     }),
     notMounted: judged.flatMap(({ row, reason }) => reason === null ? [] : [{ name: row.name, reason }]),
   }

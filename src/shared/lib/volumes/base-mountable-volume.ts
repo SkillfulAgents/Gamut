@@ -1,5 +1,5 @@
 import type { ByteRange, FileKind } from '@shared/lib/agent-actor/types'
-import type { VolumeAttention, VolumeCacheMode, VolumeType } from '@shared/lib/types/mount'
+import type { VolumeAttention, VolumeCacheMode, VolumeSyncLimit, VolumeType } from '@shared/lib/types/mount'
 
 /** One entry of a volume, with what a WebDAV listing reports. `name` is '' for the volume root. */
 export interface VolumeEntry {
@@ -68,6 +68,13 @@ export abstract class BaseMountableVolume<C> {
 
   /** What an agent must know before writing to a drive of this type, said once in its prompt, or null. The same for every drive of the type. */
   get agentNote(): string | null {
+    return null
+  }
+
+  /** Files over `bytes` stay local instead of reaching the source. `note` tells the agent that wrote one, after its path.
+   * Only for a `cacheMode: 'local'` source: the container finds written files among rclone's local copies, which a
+   * remote-mode cache fills with reads too. */
+  get syncLimit(): VolumeSyncLimit | null {
     return null
   }
 

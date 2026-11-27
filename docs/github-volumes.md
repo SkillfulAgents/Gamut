@@ -78,6 +78,7 @@ Deleting a conflicted file keeps GitHub's version, as of the moment it is restor
 
 Paths a `.gitignore` matches (including those above a subfolder drive) and `.git` folders stay local and are never recorded as changes.
 Changes under `.github/workflows/`, files over 700 KB, and paths GitHub tracks as links or submodules stay local and show as not synced.
+An agent that writes a file over 700 KB is told on the result of its next tool call that can write (the writing call itself, or a later one for a background or subagent write).
 GitHub keeps an edited file's mode, so an executable stays executable; a new file lands as 100644, since the mount carries no modes.
 An unpushed file over 700 KB is never merged: a change GitHub makes to it waits as a conflict.
 A path GitHub has that the pull cannot place waits instead of pausing the drive: a local file GitHub has just added too (a conflict), or a folder where GitHub now has a file, or the reverse.
