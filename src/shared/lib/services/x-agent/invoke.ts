@@ -17,7 +17,7 @@ import { getAgentRecord } from '@shared/lib/services/agent-service'
 import { agentCatalog, agentRegistry } from '@shared/lib/agent-actor'
 import { deliveryFailure, startFailure } from '@shared/lib/agent-actor/delivery-errors'
 import type { FileOps } from '@shared/lib/agent-actor/types'
-import type { ContainerSession, EffortLevel, SpeedLevel } from '@shared/lib/container/types'
+import type { ContainerSession, EffortLevel, MessageSender, SpeedLevel } from '@shared/lib/container/types'
 import type { SessionMetadata } from '@shared/lib/types/agent'
 import { clampEffortForDisplay, clampSpeedForDisplay } from '@shared/lib/container/runtime-options'
 import { bindAgentModelChoice } from '@shared/lib/llm-provider/connection-runtime'
@@ -214,6 +214,7 @@ export async function invokeAgent(caller: XAgentCaller, input: InvokeInput): Pro
   const deliveryCutoff = Date.now() + DELIVERY_CUTOFF_MS
   const callerSlug = caller.kind === 'agent' ? caller.agentSlug : undefined
   const callerSessionId = caller.kind === 'agent' ? caller.sessionId : undefined
+  const sender: MessageSender = caller.kind === 'agent' ? { type: 'agent', id: caller.agentSlug } : { type: 'human', id: caller.userId }
   const callerLog = callerLogFields(caller)
   const {
     slug: rawTargetSlug,
@@ -444,6 +445,7 @@ export async function invokeAgent(caller: XAgentCaller, input: InvokeInput): Pro
             // Automated for a user caller too, on purpose (SUP-1569): an
             // MCP-started session is hidden and promoted like an agent-invoked one.
             options: { isAutomated: true },
+            context: { sender },
           })
         } catch (sendError) {
           if (deliveryFailure(sendError)?.accepted === false) await discardUndelivered()
@@ -570,6 +572,7 @@ export async function invokeAgent(caller: XAgentCaller, input: InvokeInput): Pro
           metadata: { isAutomated: true },
         },
           name: sessionName,
+          context: { sender },
           metadata: { ...callerMetadata, ...(createdByUserId ? { createdByUserId } : {}) },
           notAfter: deliveryCutoff,
           attachTimeoutMs: SUBSCRIBE_TIMEOUT_MS,

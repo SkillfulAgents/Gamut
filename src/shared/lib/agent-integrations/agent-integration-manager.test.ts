@@ -5,7 +5,7 @@ import { taskManager } from '@shared/lib/background-work'
 import { registerTasks } from '@shared/lib/background-work/testing/register-tasks'
 import type { StopSessionOptions, StopSessionResult } from '../agent-actor/types'
 import { AgentIntegration } from './agent-integration'
-import { AgentIntegrationManager } from './agent-integration-manager'
+import { AgentIntegrationManager, integrationContext } from './agent-integration-manager'
 import { AgentIntegrationRegistry } from './registry'
 import { captureException } from '../error-reporting'
 import { updateAgentIntegrationStatus } from '../services/agent-integration-service'
@@ -283,7 +283,7 @@ describe('AgentIntegration host contract', () => {
       expect(adapter.prepareInput.mock.calls.at(-1)?.[1]?.deliveryId).toBe(uuid)
       expect(state.recordMessage).toHaveBeenLastCalledWith({ id: uuid, sessionId: 'session-1', agentSlug: 'installation-a', display: stored })
       // The card is the delivery's to show, once its checks pass and with its queued flag: the manager shows none of its own.
-      expect(state.deliveries.at(-1)).toEqual({ sessionId: 'session-1', content: text, uuid, echo: { content: text, integration: stored } })
+      expect(state.deliveries.at(-1)).toEqual({ sessionId: 'session-1', content: text, uuid, echo: { content: text, integration: stored }, context: { sender: { type: 'human' } } })
       expect(state.broadcast).toHaveBeenCalledExactlyOnceWith('session-1', { type: 'user_message', uuid, content: text, queued: true, integration: stored })
     })
 
@@ -1391,4 +1391,11 @@ it('tears down revoked authorization even if an unrelated config write followed 
   state.rows[0] = { ...state.rows[0], status: 'disconnected', config: '{"revoked":true,"transportHealth":"offline"}', version: 2 }
   await loseAuthorization(1)
   await vi.waitFor(() => expect(adapter.connected).toBe(false))
+})
+
+describe('integrationContext', () => {
+  it('names a registered provider as the channel and leaves any other out', () => {
+    expect(integrationContext({ ...record('a'), provider: 'slack' }, { text: 'hi' })).toEqual({ sender: { type: 'human' }, channel: 'slack' })
+    expect(integrationContext(record('a'), { text: 'hi' })).toEqual({ sender: { type: 'human' } })
+  })
 })

@@ -4,6 +4,7 @@ import type { SessionMetadata } from '@shared/lib/types/agent'
 import type { ObserveUnexpectedDeathInput, RuntimeFatalKind, UnexpectedDeathPlan } from './runtime-death'
 import type { RuntimeContext } from './context-breakdown-schema'
 import type { AppSettings } from '@shared/lib/config/settings'
+import type { MessageSender, SessionContext as MessageContext } from '../../../../agent-container/src/session-context'
 
 /** The container has the route but the session is gone (HTTP 404 + JSON). */
 export class ContainerNotFoundError extends Error {
@@ -13,6 +14,17 @@ export class ContainerNotFoundError extends Error {
   }
 }
 
+// Type-only bridge: the container's boundary schema owns the values.
+export type { MessageSender, MessageContext }
+
+/** What a caller knows about its message: who sent it, always, and where. The delivery adds what started the session. */
+export type MessageOrigin = { sender: MessageSender; channel?: MessageContext['channel'] }
+
+/** A run with no person behind it: a task, trigger or widget, by its id. */
+export function automatedSender(id: string, name?: string | null): MessageSender {
+  return { type: 'automated', id, ...(name ? { name } : {}) }
+}
+
 export interface SendMessageOptions extends RuntimeOptions {
   /** false appends the message to the transcript without starting a turn. */
   shouldQuery?: boolean
@@ -20,6 +32,7 @@ export interface SendMessageOptions extends RuntimeOptions {
   preserveRuntime?: boolean
   /** Keep an automated session in its automated runtime class for agent-originated follow-ups. */
   isAutomated?: boolean
+  messageContext?: MessageContext
   /**
    * The session's metadata entry as the caller just read it (null: it has
    * none). The send binds its provider from it instead of reading it again.
@@ -141,6 +154,7 @@ export interface CreateSessionOptions extends RuntimeOptions {
   availableEnvVars?: string[]
   initialMessage: string // Required: first message to send (triggers session ID generation)
   initialMessageUuid?: string // Optional UUID for message author attribution
+  messageContext?: MessageContext // The first message's context
   browserModel?: string // Model for browser subagent
   dashboardBuilderModel?: string // Model for the dashboard-builder subagent
   maxOutputTokens?: number // Max tokens per response (CLAUDE_CODE_MAX_OUTPUT_TOKENS)

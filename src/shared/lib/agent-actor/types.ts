@@ -32,6 +32,7 @@ import type {
   ContainerInfo,
   ContainerSession,
   CreateSessionOptions,
+  MessageOrigin,
   HealthCheckResult,
   HostPortProbeResult,
   InterruptSessionResult,
@@ -719,6 +720,8 @@ export interface DeliverRequest {
   coalesce?: boolean
   /** The `user_message` the session's viewers see, sent once it is known whether the message is queued. */
   echo?: UserMessageEcho
+  /** Who sent it and where; the delivery adds what started the session. */
+  context: MessageOrigin
 }
 
 export type DeliverResult = (
@@ -755,6 +758,8 @@ export interface StartSessionRequest {
    * turn's calls already find it.
    */
   grantComputerUse?: boolean
+  /** Who sent the first message and where; the start adds what started the session. */
+  context: MessageOrigin
 }
 
 export interface StopSessionOptions {
