@@ -277,6 +277,18 @@ With `LocalAppState` the manifests live in memory, so a restart forgets uploads 
 
 The New Agent page saves a request ID before submitting the confirmed name and avatar. The strong `flow:agent-creation` namespace scopes that ID to the current user for 24 hours. An atomic claim lets only one request create the agent and grant ownership. A concurrent request receives HTTP 202 while creation is in progress. Once the agent is ready, a replay checks the user's current access and returns the same agent.
 
+## Cloud browser sessions
+
+Which Browserbase session an agent's browser is (`src/main/host-browser/live-session.ts`), for the Browserbase and Platform browser providers. An agent's container asks the host to open its browser and later to close it, and the two calls can reach different processes; a process that starts over has also forgotten the browsers it opened. The strong namespaces `browser:browserbase:live-session` and `browser:platform:live-session`, key part the agent's slug, hold `{ sessionId }`: one record per agent and provider.
+
+- A launch reads the record and uses its session while Browserbase says it runs. Otherwise it creates a session and records it with a compare-and-set against what it read. Of launches racing in several processes one write lands; the others release the session they created and use the recorded one, so the agent has one browser and none runs unrecorded.
+- A stop `consume`s the record and releases its session, so of several stops one releases it. A release that did not get through (no answer, a 5xx or a 429) puts the record back with `insertIfAbsent`: the next launch uses the session, and the next stop releases it.
+- A stop that has no account to release with (no API key, signed out) leaves the record for one that has.
+- A record has no expiry. A session that ended by itself is found out at the next launch and replaced; a replaced session that may still run is released.
+- Each provider's own map is only a hint: it answers `isRunning`, and names what `stopAll` lets go of. `stopAll` takes a record only while it still names the session that process holds.
+
+With `LocalAppState` the records live in memory, so a process that restarts while a container runs on has forgotten its browser, as it had before this record existed.
+
 ## Team directory listings
 
 Each connected team directory's people (`src/shared/lib/team-directory/cache.ts`; [docs/team-directory.md](team-directory.md#the-cache) has the rules). The eventual namespace `cache:team-directory` is keyed by directory id and credentials revision, so reconnecting starts afresh. It is a plain, non-atomic cache: an entry is `{ listedAt, attemptedAt, users }`, fresh for 10 minutes and kept 6 hours after its last write. A stale entry is answered at once while a new listing runs in the background, and a failed listing keeps the previous people and only moves `attemptedAt`, at the entry's own expiry. Two processes may list the same stale directory at once; the later write wins. The listing in progress is a Promise in a process-local map, so concurrent searches in one process share it.

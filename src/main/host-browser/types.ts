@@ -41,7 +41,11 @@ export interface HostBrowserProvider {
   /** Stop all instances */
   stopAll(): Promise<void>
 
-  /** Check if a browser instance is running */
+  /**
+   * Check if a browser instance is running, as far as this process knows. A
+   * cloud provider's browser can run without it: opened by another process, or
+   * by this one before it started over. Its `stop` finds that browser anyway.
+   */
   isRunning(instanceId?: string): boolean
 
   /** Callback when a browser instance closes externally (e.g. user closed Chrome) */

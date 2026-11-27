@@ -1,10 +1,14 @@
-import { describe, it, expect, vi } from 'vitest'
+import { beforeEach, describe, it, expect, vi } from 'vitest'
 
 // stopInstanceOnAllProviders must stop an instance's browser on EVERY
 // provider, independent of which provider is currently selected in settings —
 // the user can switch providers while a browser from the previous one is
 // still running, and agent deletion must not leave that browser alive while
 // its profile directory is removed.
+//
+// A cloud provider is asked whatever it reports as running: its browser can be
+// one another process opened, or this one before it started over, and only its
+// `stop` can find that. Chrome is asked only where this process runs it.
 
 const h = vi.hoisted(() => {
   const created: Array<{ id: string; isRunning: ReturnType<typeof vi.fn>; stop: ReturnType<typeof vi.fn> }> = []
@@ -49,27 +53,50 @@ vi.mock('@shared/lib/config/settings', () => ({
 
 import { stopInstanceOnAllProviders } from './index'
 
+const provider = (id: string) => h.created.find((p) => p.id === id)!
+const CLOUD = ['browserbase', 'platform', 'steel', 'tabtender']
+
 describe('stopInstanceOnAllProviders', () => {
-  it('stops a running instance on a non-active provider and skips idle providers', async () => {
-    await stopInstanceOnAllProviders('agent1')
-
-    const chrome = h.created.find((p) => p.id === 'chrome')!
-    const browserbase = h.created.find((p) => p.id === 'browserbase')!
-    const platform = h.created.find((p) => p.id === 'platform')!
-    const steel = h.created.find((p) => p.id === 'steel')!
-    const tabtender = h.created.find((p) => p.id === 'tabtender')!
-
-    expect(chrome.stop).toHaveBeenCalledWith('agent1')
-    expect(browserbase.stop).not.toHaveBeenCalled()
-    expect(platform.stop).not.toHaveBeenCalled()
-    expect(steel.stop).not.toHaveBeenCalled()
-    expect(tabtender.stop).not.toHaveBeenCalled()
+  beforeEach(() => {
+    for (const p of h.created) {
+      p.stop.mockReset()
+      p.stop.mockResolvedValue(undefined)
+    }
   })
 
-  it('is a no-op for an instance no provider is running', async () => {
+  it('stops a running instance on a non-active provider', async () => {
+    await stopInstanceOnAllProviders('agent1')
+
+    expect(provider('chrome').stop).toHaveBeenCalledWith('agent1')
+  })
+
+  it('does not stop a Chrome this process is not running', async () => {
     await stopInstanceOnAllProviders('agent-unknown')
-    for (const provider of h.created) {
-      expect(provider.stop).not.toHaveBeenCalledWith('agent-unknown')
-    }
+
+    expect(provider('chrome').stop).not.toHaveBeenCalled()
+  })
+
+  it('asks every cloud provider to stop, whatever it reports as running', async () => {
+    await stopInstanceOnAllProviders('agent-unknown')
+
+    // None of them reports it as running (the mocks above).
+    for (const id of CLOUD) expect(provider(id).stop, id).toHaveBeenCalledExactlyOnceWith('agent-unknown')
+  })
+
+  it('still stops the others when one cloud provider fails', async () => {
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+    provider('steel').stop.mockRejectedValue(new Error('steel is down'))
+
+    await expect(stopInstanceOnAllProviders('agent1')).resolves.toBeUndefined()
+
+    for (const id of ['chrome', ...CLOUD]) expect(provider(id).stop, id).toHaveBeenCalledWith('agent1')
+    expect(logged).toHaveBeenCalledWith(expect.stringContaining('steel'), expect.any(Error))
+    logged.mockRestore()
+  })
+
+  it('fails when Chrome cannot be stopped, so its profile is not removed under it', async () => {
+    provider('chrome').stop.mockRejectedValue(new Error('chrome would not exit'))
+
+    await expect(stopInstanceOnAllProviders('agent1')).rejects.toThrow('chrome would not exit')
   })
 })

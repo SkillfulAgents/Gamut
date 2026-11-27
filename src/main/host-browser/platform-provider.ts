@@ -1,9 +1,11 @@
-import { getSettings } from '@shared/lib/config/settings'
+import { getSettings, type AppSettings } from '@shared/lib/config/settings'
 import { getPlatformAccessToken, platformAccessTokenFrom } from '@shared/lib/services/platform-auth-service'
 import { getPlatformProxyBaseUrl } from '@shared/lib/platform-auth/config'
 import { getOrCreateMapping } from './context-map-store'
 import { GooglePasskeyRecovery } from './google-passkey-recovery'
 import { pageWsUrlFromDebuggerUrl } from './browserbase-live-view'
+import { browserbaseSessionState } from './browserbase-session-status'
+import { defineLiveSessions, openLiveSession, type RecordedSessionState } from './live-session'
 import type { HostBrowserProvider, HostBrowserProviderStatus, BrowserConnectionInfo, BrowserDebugInfo } from './types'
 
 
@@ -24,11 +26,25 @@ interface BrowserbaseDebugResponse {
   }>
 }
 
+/** Each agent's live session, for every process that serves the tenant (live-session.ts). */
+const liveSessions = defineLiveSessions('platform')
+
+/** How the container reaches a session. `watchable`: the debug endpoint, which takes more than one connection. */
+interface SessionConnection {
+  cdpUrl: string
+  watchable: boolean
+}
+
 export class PlatformBrowserProvider implements HostBrowserProvider {
   readonly id = 'platform' as const
   readonly name = 'Platform'
 
-  /** Maps instanceId → Browserbase session ID (proxied through platform) */
+  /**
+   * Maps instanceId → the Browserbase session (proxied through platform) this
+   * process launched or was handed. A hint: the session an instance has is the
+   * recorded one (`liveSessions`), which a launch or a stop in another process
+   * changes without this map hearing of it.
+   */
   private sessions: Map<string, string> = new Map()
   private passkeyRecovery = new GooglePasskeyRecovery()
 
@@ -62,27 +78,42 @@ export class PlatformBrowserProvider implements HostBrowserProvider {
       throw new Error('Not signed in to Platform — cannot use platform-managed Browserbase')
     }
 
-    // Reuse a still-running session if we have one
-    const existingSessionId = this.sessions.get(instanceId)
-    if (existingSessionId) {
-      try {
-        const session = await this.fetchSession(existingSessionId, token)
-        if (session.status === 'RUNNING') {
-          const debugUrl = await this.getDebugBrowserUrl(existingSessionId, token)
-          if (debugUrl) {
-            console.log(`[PlatformBrowserProvider] Reusing session ${existingSessionId} for instance ${instanceId}`)
-            this.passkeyRecovery.watch(instanceId, debugUrl)
-            return { cdpUrl: debugUrl }
-          }
-        }
-      } catch {
-        // Session no longer valid
-      }
-      this.passkeyRecovery.stop(instanceId)
-      this.sessions.delete(instanceId)
-    }
+    // The session the agent has, whichever process opened it; a new one only when it has none that runs.
+    const { sessionId, connection, reused } = await openLiveSession<SessionConnection>(liveSessions, instanceId, {
+      connect: (recorded) => this.connectTo(recorded, token),
+      create: () => this.createSession(instanceId, agentId || instanceId, settings, token),
+      release: (unused) => this.release(unused, token),
+    })
+    this.sessions.set(instanceId, sessionId)
+    if (reused) console.log(`[PlatformBrowserProvider] Reusing session ${sessionId} for instance ${instanceId}`)
 
-    const contextKey = agentId || instanceId
+    // The observer of an earlier session goes before its replacement's is started.
+    if (!reused) this.passkeyRecovery.stop(instanceId)
+    if (connection.watchable) this.passkeyRecovery.watch(instanceId, connection.cdpUrl)
+    return { cdpUrl: connection.cdpUrl }
+  }
+
+  /** A recorded session while it runs: a fresh debug browser URL for the CDP connection. */
+  private async connectTo(sessionId: string, token: string): Promise<RecordedSessionState<SessionConnection>> {
+    let status: string
+    try {
+      status = (await this.fetchSession(sessionId, token)).status
+    } catch {
+      return { state: 'unknown' }
+    }
+    const state = browserbaseSessionState(status)
+    if (state !== 'running') return { state }
+    const debugUrl = await this.getDebugBrowserUrl(sessionId, token)
+    return debugUrl ? { state: 'running', connection: { cdpUrl: debugUrl, watchable: true } } : { state: 'unknown' }
+  }
+
+  /** A new session on the agent's context, with keepAlive so it survives agent-browser disconnecting. */
+  private async createSession(
+    instanceId: string,
+    contextKey: string,
+    settings: Pick<AppSettings, 'app'>,
+    token: string,
+  ): Promise<{ sessionId: string; connection: SessionConnection }> {
     const contextId = await this.getOrCreateContext(contextKey, token)
 
     const browserSettings: Record<string, unknown> = {
@@ -123,20 +154,15 @@ export class PlatformBrowserProvider implements HostBrowserProvider {
     }
 
     const session = await response.json() as BrowserbaseSession
-    this.sessions.set(instanceId, session.id)
     console.log(`[PlatformBrowserProvider] Created session ${session.id} for instance ${instanceId} (keepAlive: ${session.keepAlive})`)
 
+    // The debug browser URL takes more than one connection; the connectUrl is single-use.
     const debugUrl = await this.getDebugBrowserUrl(session.id, token)
-    if (debugUrl) {
-      this.passkeyRecovery.watch(instanceId, debugUrl)
-      return { cdpUrl: debugUrl }
-    }
-
-    return { cdpUrl: session.connectUrl }
+    return { sessionId: session.id, connection: debugUrl ? { cdpUrl: debugUrl, watchable: true } : { cdpUrl: session.connectUrl, watchable: false } }
   }
 
   async getDebugInfo(instanceId: string): Promise<BrowserDebugInfo | null> {
-    const sessionId = this.sessions.get(instanceId)
+    const sessionId = await this.sessionOf(instanceId)
     if (!sessionId) return null
 
     const token = await getPlatformAccessToken()
@@ -162,41 +188,93 @@ export class PlatformBrowserProvider implements HostBrowserProvider {
     return { pages }
   }
 
+  /** The instance's session: the recorded one, or this process's own when the record cannot be read. */
+  private async sessionOf(instanceId: string): Promise<string | null> {
+    try {
+      return (await liveSessions.read(instanceId))?.sessionId ?? null
+    } catch (error) {
+      console.error(`[PlatformBrowserProvider] Could not read the recorded session of ${instanceId}:`, error)
+      return this.sessions.get(instanceId) ?? null
+    }
+  }
+
+  /**
+   * Stop the instance's browser, whichever process opened it: the recorded
+   * session is taken and released, so of several stops one releases it.
+   */
   async stop(instanceId: string): Promise<void> {
     return this.stopWith(instanceId)
   }
 
-  /** Stop one session, with the token `stopAll` read for every session, else one read now. */
-  private async stopWith(instanceId: string, token?: string | null): Promise<void> {
+  /** Stop one session, with the token `stopAll` read for every session, else one read now. `ownOnly`: only the session this process holds. */
+  private async stopWith(instanceId: string, token?: string | null, ownOnly = false): Promise<void> {
     this.passkeyRecovery.stop(instanceId)
-    const sessionId = this.sessions.get(instanceId)
-    if (!sessionId) return
-
+    const own = this.sessions.get(instanceId)
     this.sessions.delete(instanceId)
 
     if (token === undefined) token = await getPlatformAccessToken()
+    // Signed out, nothing can be released, so the record stays: the next
+    // launch uses the session, or a stop that is signed in releases it.
     if (!token) return
 
+    let sessionId: string | null
     try {
-      await fetch(`${this.proxyBase()}/sessions/${sessionId}`, {
+      sessionId = ownOnly ? (own ? await liveSessions.take(instanceId, own) : null) : await liveSessions.take(instanceId)
+    } catch (error) {
+      // What this process opened can still be released.
+      console.error(`[PlatformBrowserProvider] Could not take the recorded session of ${instanceId}:`, error)
+      sessionId = own ?? null
+    }
+    if (!sessionId) return
+
+    if ((await this.release(sessionId, token)) === 'failed') {
+      // Still running: recorded again, so the next launch uses it and the next stop releases it.
+      await liveSessions.restore(instanceId, sessionId).catch(() => {})
+    }
+  }
+
+  /**
+   * Asks the platform to end a session, and never throws. `failed`: the
+   * request did not get through (no answer, a 5xx, a 429), so the session may
+   * run on and another try may work; `refused`: any other answer, which
+   * another try would get again.
+   */
+  private async release(sessionId: string, token: string): Promise<'released' | 'refused' | 'failed'> {
+    try {
+      const response = await fetch(`${this.proxyBase()}/sessions/${sessionId}`, {
         method: 'POST',
         headers: this.authHeaders(token, true),
         body: JSON.stringify({ status: 'REQUEST_RELEASE' }),
       })
-      console.log(`[PlatformBrowserProvider] Released session ${sessionId}`)
+      if (response.ok) {
+        console.log(`[PlatformBrowserProvider] Released session ${sessionId}`)
+        return 'released'
+      }
+      console.error(`[PlatformBrowserProvider] Releasing session ${sessionId} was answered ${response.status}`)
+      return response.status >= 500 || response.status === 429 ? 'failed' : 'refused'
     } catch (error) {
       console.error(`[PlatformBrowserProvider] Error releasing session ${sessionId}:`, error)
+      return 'failed'
     }
   }
 
+  /**
+   * Stops the sessions this process holds, the browsers it opened or was
+   * handed, while each is still its agent's: one another process replaced
+   * since is that process's to stop.
+   */
   async stopAll(): Promise<void> {
     const instanceIds = Array.from(this.sessions.keys())
     if (instanceIds.length === 0) return
     // One read for the whole batch.
     const token = await getPlatformAccessToken()
-    await Promise.all(instanceIds.map((id) => this.stopWith(id, token)))
+    await Promise.all(instanceIds.map((id) => this.stopWith(id, token, true)))
   }
 
+  /**
+   * Whether this process holds a session for the instance (or any). A browser
+   * another process opened is not seen here; `stop` finds it all the same.
+   */
   isRunning(instanceId?: string): boolean {
     if (instanceId) {
       return this.sessions.has(instanceId)
